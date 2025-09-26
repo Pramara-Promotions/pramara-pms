@@ -7,6 +7,7 @@ export default function App() {
   const [alerts, setAlerts] = useState([])
   const [needs, setNeeds] = useState([])
   const [planOut, setPlanOut] = useState(null)
+  const [rules, setRules] = useState([])
 
   useEffect(() => {
     fetch('/api/projects').then(r=>r.json()).then(setProjects)
@@ -14,15 +15,37 @@ export default function App() {
 
   async function selectProject(p){
     setActive(p)
-    const [qcRes, alRes, invRes] = await Promise.all([
+    const [qcRes, alRes, invRes, rlRes] = await Promise.all([
       fetch(`/api/projects/${p.id}/qc`),
       fetch(`/api/projects/${p.id}/alerts`),
-      fetch(`/api/projects/${p.id}/inventory/needs`)
+      fetch(`/api/projects/${p.id}/inventory/needs`),
+      fetch(`/api/projects/${p.id}/alert-rules`),
     ])
     setQc(await qcRes.json())
     setAlerts(await alRes.json())
     setNeeds(await invRes.json())
+    setRules(await rlRes.json())
     setPlanOut(null)
+  }
+
+  async function saveRules(e){
+    e.preventDefault()
+    if(!active) return
+    const rows = Array.from(document.querySelectorAll('[data-row]')).map(tr => {
+      const key = tr.querySelector('[name=key]').value
+      const level = tr.querySelector('[name=level]').value
+      const threshold = Number(tr.querySelector('[name=threshold]').value || 0)
+      const recipients = tr.querySelector('[name=recipients]').value.split(',').map(s=>s.trim()).filter(Boolean)
+      const enabled = tr.querySelector('[name=enabled]').checked
+      return { key, level, threshold, recipients, enabled }
+    })
+    const res = await fetch(`/api/projects/${active.id}/alert-rules`, {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rows)
+    })
+    const out = await res.json()
+    if(!res.ok){ alert(out.error || 'Save rules failed'); return }
+    setRules(out)
+    alert('Rules saved')
   }
 
   async function postQC(e){
@@ -42,7 +65,8 @@ export default function App() {
     const res = await fetch(`/api/projects/${active.id}/qc`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
     })
-    if(!res.ok){ const err = await res.json().catch(()=>({error:'Unknown'})); alert(`QC save failed: ${err.error}`); return }
+    const body = await res.json()
+    if(!res.ok){ alert(body.error || 'QC save failed'); return }
     const [qcRes, alRes] = await Promise.all([
       fetch(`/api/projects/${active.id}/qc`),
       fetch(`/api/projects/${active.id}/alerts`)
@@ -72,7 +96,8 @@ export default function App() {
     const res = await fetch(`/api/projects/${active.id}/inventory/recompute`, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ needs: items })
     })
-    if(!res.ok){ const err = await res.json().catch(()=>({error:'Unknown'})); alert(`Recompute failed: ${err.error}`); return }
+    const body = await res.json()
+    if(!res.ok){ alert(body.error || 'Recompute failed'); return }
     const [nRes, aRes] = await Promise.all([
       fetch(`/api/projects/${active.id}/inventory/needs`),
       fetch(`/api/projects/${active.id}/alerts`)
@@ -265,6 +290,41 @@ export default function App() {
                   <button type="submit" style={{ marginTop:12, padding:'6px 10px' }}>Recompute</button>
                 </form>
               </details>
+            </section>
+
+            {/* Rules editor */}
+            <section style={{ border:'1px solid #ddd', borderRadius:8, padding:12, marginTop:16 }}>
+              <h3 style={{ marginTop:0 }}>Alert Rules</h3>
+              <form onSubmit={saveRules}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th align="left">Key</th>
+                      <th align="left">Level</th>
+                      <th align="right">Threshold</th>
+                      <th align="left">Recipients (comma-separated)</th>
+                      <th align="left">Enabled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rules.map(r=>(
+                      <tr key={r.id} data-row style={{ borderTop:'1px solid #eee' }}>
+                        <td><input name="key" defaultValue={r.key} /></td>
+                        <td>
+                          <select name="level" defaultValue={r.level}>
+                            <option>AMBER</option>
+                            <option>RED</option>
+                          </select>
+                        </td>
+                        <td align="right"><input name="threshold" type="number" defaultValue={r.threshold} style={{ textAlign:'right' }}/></td>
+                        <td><input name="recipients" defaultValue={(() => { try { return JSON.parse(r.recipients||"[]").join(', ')} catch { return '' } })()} /></td>
+                        <td><input name="enabled" type="checkbox" defaultChecked={r.enabled} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button type="submit" style={{ marginTop:12, padding:'6px 10px' }}>Save Rules</button>
+              </form>
             </section>
 
             {/* QC table */}

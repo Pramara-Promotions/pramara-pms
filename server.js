@@ -8,36 +8,79 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
-// --------- severity defaults (simple for now) ----------
-const THRESHOLDS = {
-  qc: { redRejected: 1000 },
-  inventory: { redShortfall: 3000 },
-};
-const levelForQC = (rej) => (rej >= THRESHOLDS.qc.redRejected ? "RED" : rej > 0 ? "AMBER" : null);
-const levelForPantoneMismatch = () => "AMBER";
-const levelForInventoryShortfall = (t) => (t >= THRESHOLDS.inventory.redShortfall ? "RED" : t > 0 ? "AMBER" : null);
+// ------------ Helpers: get rules & evaluate ----------------
+const DEFAULT_RULES = (project) => [
+  { key: "QC.rejected",       level: "AMBER", threshold: 1,    recipients: ["lead@local"], enabled: true },
+  { key: "QC.rejected",       level: "RED",   threshold: 1000, recipients: ["ops@local","admin@local"], enabled: true },
+  { key: "Inventory.shortfall", level: "AMBER", threshold: 1,    recipients: ["lead@local"], enabled: true },
+  { key: "Inventory.shortfall", level: "RED",   threshold: 3000, recipients: ["ops@local","admin@local"], enabled: true },
+  // Pantone mismatch is always AMBER unless you change it
+  { key: "Pantone.mismatch", level: "AMBER", threshold: 0, recipients: ["lead@local"], enabled: true },
+];
+
+async function ensureRules(projectId) {
+  const count = await prisma.alertRule.count({ where: { projectId }});
+  if (count > 0) return;
+  const p = await prisma.project.findUnique({ where: { id: projectId }});
+  const rows = DEFAULT_RULES(p).map(r => ({
+    projectId,
+    key: r.key,
+    level: r.level,
+    threshold: r.threshold,
+    recipients: JSON.stringify(r.recipients),
+    enabled: r.enabled
+  }));
+  await prisma.alertRule.createMany({ data: rows });
+}
+
+async function getRules(projectId, key) {
+  await ensureRules(projectId);
+  return prisma.alertRule.findMany({
+    where: { projectId, key, enabled: true },
+    orderBy: { threshold: "asc" }, // low → high
+  });
+}
+
+/** Return "RED" | "AMBER" | null based on rules for a numeric value */
+async function levelFromRules(projectId, key, value) {
+  const rules = await getRules(projectId, key); // sorted asc
+  let picked = null;
+  for (const r of rules) {
+    if (value >= r.threshold) picked = r.level;
+  }
+  return picked; // last that matches
+}
+
+function recipientsFor(level, rules) {
+  // collect recipients for the chosen level only
+  const r = rules.filter(x => x.level === level);
+  if (r.length === 0) return [];
+  try { return JSON.parse(r[0].recipients || "[]"); } catch { return []; }
+}
 
 // ---------------- health/demo ----------------
 app.get("/api/hello", (_req, res) => res.json({ message: "Pramara PMS API is alive 🚀" }));
 
-// ---------------- dev seed (creates 1 sample project if none) ----------------
+// ---------------- dev seed ----------------
 app.post("/api/dev/seed", async (_req, res) => {
   const count = await prisma.project.count();
-  if (count > 0) {
-    const first = await prisma.project.findFirst({ orderBy: { id: "asc" } });
-    return res.json({ ok: true, message: "Already seeded", project: first });
+  let project;
+  if (count === 0) {
+    project = await prisma.project.create({
+      data: {
+        code: "PRJ-0001",
+        name: "Figurine – Wave A",
+        sku: "FG-A-75MM",
+        quantity: 50000,
+        cutoffDate: new Date("2025-10-28T00:00:00.000Z"),
+        pantoneCode: "186C",
+      },
+    });
+  } else {
+    project = await prisma.project.findFirst({ orderBy: { id: "asc" } });
   }
-  const project = await prisma.project.create({
-    data: {
-      code: "PRJ-0001",
-      name: "Figurine – Wave A",
-      sku: "FG-A-75MM",
-      quantity: 50000,
-      cutoffDate: new Date("2025-10-28T00:00:00.000Z"),
-      pantoneCode: "186C",
-    },
-  });
-  res.json({ ok: true, message: "Seeded", project });
+  await ensureRules(project.id);
+  res.json({ ok: true, project });
 });
 
 // ---------------- projects ----------------
@@ -57,6 +100,7 @@ app.post("/api/projects", async (req, res) => {
         pantoneCode: pantoneCode || null,
       },
     });
+    await ensureRules(project.id);
     res.status(201).json(project);
   } catch (e) {
     res.status(400).json({ error: String(e) });
@@ -75,7 +119,33 @@ app.get("/api/projects/:id", async (req, res) => {
   res.json(p);
 });
 
-// ---------------- QC (strict validation + alerts) ----------------
+// ---------------- alert rules CRUD ----------------
+app.get("/api/projects/:id/alert-rules", async (req, res) => {
+  const projectId = Number(req.params.id);
+  await ensureRules(projectId);
+  const rules = await prisma.alertRule.findMany({ where: { projectId }, orderBy: [{ key: "asc" }, { level: "asc" }, { threshold: "asc" }]});
+  res.json(rules);
+});
+
+app.put("/api/projects/:id/alert-rules", async (req, res) => {
+  const projectId = Number(req.params.id);
+  const incoming = Array.isArray(req.body) ? req.body : [];
+  // naive replace-all for simplicity
+  await prisma.alertRule.deleteMany({ where: { projectId } });
+  const rows = incoming.map(r => ({
+    projectId,
+    key: String(r.key),
+    level: String(r.level),
+    threshold: Number(r.threshold || 0),
+    recipients: JSON.stringify(r.recipients || []),
+    enabled: r.enabled !== false,
+  }));
+  await prisma.alertRule.createMany({ data: rows });
+  const saved = await prisma.alertRule.findMany({ where: { projectId }, orderBy: [{ key: "asc" }, { level: "asc" }, { threshold: "asc" }]});
+  res.json(saved);
+});
+
+// ---------------- QC with rule-based alerts ----------------
 app.post("/api/projects/:id/qc", async (req, res) => {
   const projectId = Number(req.params.id);
   const project = await prisma.project.findUnique({ where: { id: projectId } });
@@ -103,24 +173,30 @@ app.post("/api/projects/:id/qc", async (req, res) => {
     },
   });
 
-  const qcLevel = levelForQC(qc.rejected);
+  // QC rejected level via rules
+  const qcLevel = await levelFromRules(projectId, "QC.rejected", qc.rejected);
   if (qcLevel) {
+    const rules = await getRules(projectId, "QC.rejected");
+    const to = recipientsFor(qcLevel, rules);
     await prisma.alert.create({
       data: {
         projectId,
         type: "QC",
         level: qcLevel,
-        message: `QC rejected ${qc.rejected} unit(s) in ${qc.batchCode || "batch"} (reason: ${qc.reason}). Check materials/packaging.`,
+        message: `QC rejected ${qc.rejected} unit(s) in ${qc.batchCode || "batch"} (reason: ${qc.reason}). Notify: ${to.join(", ") || "—"}`,
       },
     });
   }
+  // Pantone mismatch rule (always AMBER by default)
   if (qc.pantoneMatch === "Mismatch") {
+    const rules = await getRules(projectId, "Pantone.mismatch");
+    const to = recipientsFor("AMBER", rules);
     await prisma.alert.create({
       data: {
         projectId,
         type: "Pantone",
-        level: levelForPantoneMismatch(),
-        message: `Pantone mismatch in ${qc.batchCode || "batch"} — expected ${project.pantoneCode || "N/A"}.`,
+        level: "AMBER",
+        message: `Pantone mismatch in ${qc.batchCode || "batch"} — expected ${project.pantoneCode || "N/A"}. Notify: ${to.join(", ") || "—"}`,
       },
     });
   }
@@ -144,7 +220,7 @@ app.get("/api/projects/:id/alerts", async (req, res) => {
   res.json(list);
 });
 
-// ---------------- inventory needs (with alert) ----------------
+// ---------------- inventory with rule-based alert ----------------
 app.post("/api/projects/:id/inventory/recompute", async (req, res) => {
   const projectId = Number(req.params.id);
   const project = await prisma.project.findUnique({ where: { id: projectId } });
@@ -174,14 +250,16 @@ app.post("/api/projects/:id/inventory/recompute", async (req, res) => {
   }
 
   const totalShort = created.reduce((s, x) => s + x.shortfall, 0);
-  const invLevel = levelForInventoryShortfall(totalShort);
+  const invLevel = await levelFromRules(projectId, "Inventory.shortfall", totalShort);
   if (invLevel) {
+    const rules = await getRules(projectId, "Inventory.shortfall");
+    const to = recipientsFor(invLevel, rules);
     await prisma.alert.create({
       data: {
         projectId,
         type: "Inventory",
         level: invLevel,
-        message: `Inventory shortfall detected: total shortage ${totalShort} unit(s) across materials.`,
+        message: `Inventory shortfall detected: total shortage ${totalShort} unit(s). Notify: ${to.join(", ") || "—"}`,
       },
     });
   }
@@ -189,13 +267,7 @@ app.post("/api/projects/:id/inventory/recompute", async (req, res) => {
   res.json({ ok: true, updated: created });
 });
 
-app.get("/api/projects/:id/inventory/needs", async (req, res) => {
-  const projectId = Number(req.params.id);
-  const needs = await prisma.inventoryNeed.findMany({ where: { projectId }, orderBy: { id: "asc" } });
-  res.json(needs);
-});
-
-// ---------------- simple planner (backward from cutoff) ----------------
+// ---------------- planner (unchanged) ----------------
 app.post("/api/projects/:id/plan/simulate", async (req, res) => {
   const projectId = Number(req.params.id);
   const project = await prisma.project.findUnique({ where: { id: projectId } });
@@ -248,6 +320,5 @@ app.post("/api/projects/:id/plan/simulate", async (req, res) => {
   res.json({ quantity, cutoffDate: cutoffDate.toISOString(), scenarios });
 });
 
-// ---------------- start ----------------
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API running on http://localhost:${port}`));

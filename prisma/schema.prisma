@@ -20,6 +20,7 @@ model Project {
   qcRecords   QCRecord[]
   alerts      Alert[]
   needs       InventoryNeed[]
+  rules       AlertRule[]
 }
 
 model QCRecord {
@@ -47,13 +48,28 @@ model Alert {
 }
 
 model InventoryNeed {
+  id           Int      @id @default(autoincrement())
+  projectId    Int
+  material     String
+  requiredQty  Int
+  availableQty Int
+  shortfall    Int
+  updatedAt    DateTime @default(now())
+
+  project      Project  @relation(fields: [projectId], references: [id])
+}
+
+model AlertRule {
   id          Int      @id @default(autoincrement())
   projectId   Int
-  material    String
-  requiredQty Int
-  availableQty Int
-  shortfall   Int
-  updatedAt   DateTime @default(now())
+  key         String   // e.g., "QC.rejected", "Inventory.shortfall", "Pantone.mismatch"
+  level       String   // "AMBER" | "RED"
+  threshold   Int      // numeric threshold for this level
+  recipients  String   // JSON string: ["ops@x.com","lead@x.com"]
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
 
   project     Project  @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, key, level])
 }

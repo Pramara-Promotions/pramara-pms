@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          Int       @id @default(autoincrement())
+  code        String
+  name        String
+  sku         String
+  quantity    Int
+  cutoffDate  DateTime
+  pantoneCode String?
+  createdAt   DateTime  @default(now())
+
+  qcRecords   QCRecord[]
+  alerts      Alert[]
+  needs       InventoryNeed[]
+}
+
+model QCRecord {
+  id           Int      @id @default(autoincrement())
+  projectId    Int
+  batchCode    String?
+  passed       Int      @default(0)
+  rejected     Int      @default(0)
+  reason       String
+  pantoneMatch String   // "Match" | "Mismatch" | "NA"
+  createdAt    DateTime @default(now())
+
+  project      Project  @relation(fields: [projectId], references: [id])
+}
+
+model Alert {
+  id         Int      @id @default(autoincrement())
+  projectId  Int
+  type       String?  // "QC" | "Pantone" | "Inventory" | "Schedule"
+  level      String   // "RED" | "AMBER" | "GREEN"
+  message    String
+  createdAt  DateTime @default(now())
+
+  project    Project  @relation(fields: [projectId], references: [id])
+}
+
+model InventoryNeed {
+  id          Int      @id @default(autoincrement())
+  projectId   Int
+  material    String
+  requiredQty Int
+  availableQty Int
+  shortfall   Int
+  updatedAt   DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id])
+}

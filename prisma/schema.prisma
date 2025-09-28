@@ -1,5 +1,7 @@
+// prisma/schema.prisma
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "binary"
 }
 
 datasource db {
@@ -11,65 +13,91 @@ model Project {
   id          Int       @id @default(autoincrement())
   code        String
   name        String
-  sku         String
+  sku         String?
   quantity    Int
-  cutoffDate  DateTime
+  cutoffDate  DateTime?
   pantoneCode String?
   createdAt   DateTime  @default(now())
 
-  qcRecords   QCRecord[]
-  alerts      Alert[]
-  needs       InventoryNeed[]
-  rules       AlertRule[]
+  qcRecords      QCRecord[]
+  alerts         Alert[]
+  alertRules     AlertRule[]
+  inventoryNeeds InventoryNeed[] // <— back-relation added
 }
 
 model QCRecord {
   id           Int      @id @default(autoincrement())
   projectId    Int
-  batchCode    String?
-  passed       Int      @default(0)
-  rejected     Int      @default(0)
-  reason       String
-  pantoneMatch String   // "Match" | "Mismatch" | "NA"
-  createdAt    DateTime @default(now())
-
   project      Project  @relation(fields: [projectId], references: [id])
-}
-
-model Alert {
-  id         Int      @id @default(autoincrement())
-  projectId  Int
-  type       String?  // "QC" | "Pantone" | "Inventory" | "Schedule"
-  level      String   // "RED" | "AMBER" | "GREEN"
-  message    String
-  createdAt  DateTime @default(now())
-
-  project    Project  @relation(fields: [projectId], references: [id])
+  batchCode    String
+  passed       Int
+  rejected     Int
+  reason       String
+  pantoneMatch String // "Match" | "Mismatch"
+  createdAt    DateTime @default(now())
 }
 
 model InventoryNeed {
   id           Int      @id @default(autoincrement())
   projectId    Int
   material     String
-  requiredQty  Int
-  availableQty Int
-  shortfall    Int
+  requiredQty  Int      @default(0)
+  availableQty Int      @default(0)
+  shortfall    Int      @default(0)
   updatedAt    DateTime @default(now())
 
-  project      Project  @relation(fields: [projectId], references: [id])
+  Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model AlertRule {
-  id          Int      @id @default(autoincrement())
-  projectId   Int
-  key         String   // e.g., "QC.rejected", "Inventory.shortfall", "Pantone.mismatch"
-  level       String   // "AMBER" | "RED"
-  threshold   Int      // numeric threshold for this level
-  recipients  String   // JSON string: ["ops@x.com","lead@x.com"]
-  enabled     Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  projectId  Int
+  project    Project  @relation(fields: [projectId], references: [id])
+  key        String // e.g., "QC.rejected", "Inventory.shortfall", "Pantone.mismatch"
+  level      String // "AMBER" | "RED"
+  threshold  Int
+  recipients String // comma-separated emails
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
 
-  project     Project  @relation(fields: [projectId], references: [id])
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  CLOSED
+}
 
-  @@index([projectId, key, level])
+enum AlertActionType {
+  ACK
+  RESOLVE
+  COMMENT
+  REOPEN
+}
+
+model Alert {
+  id        Int           @id @default(autoincrement())
+  projectId Int
+  project   Project       @relation(fields: [projectId], references: [id])
+  level     String // AMBER | RED
+  message   String
+  status    AlertStatus   @default(OPEN)
+  createdAt DateTime      @default(now())
+  actions   AlertAction[]
+}
+
+model AlertAction {
+  id                Int             @id @default(autoincrement())
+  alertId           Int
+  alert             Alert           @relation(fields: [alertId], references: [id])
+  action            AlertActionType // ACK | RESOLVE | COMMENT | REOPEN
+  by                String // who did it (name/email)
+  note              String?
+  correctiveActions String? // free text; keep simple for now
+  preventRecurrence String?
+  costImpactCents   Int? // optional, positive or negative
+  costNote          String?
+  createdAt         DateTime        @default(now())
 }

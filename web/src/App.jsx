@@ -1,4 +1,17 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
+function usePrefersDark(){
+  const [dark, setDark] = useState(
+    typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
+  useEffect(() => {
+    if(!window.matchMedia) return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = e => setDark(e.matches)
+    mq.addEventListener ? mq.addEventListener('change', onChange) : mq.addListener(onChange)
+    return () => mq.removeEventListener ? mq.removeEventListener('change', onChange) : mq.removeListener(onChange)
+  }, [])
+  return dark
+}
 
 export default function App() {
   const [projects, setProjects] = useState([])
@@ -8,6 +21,7 @@ export default function App() {
   const [needs, setNeeds] = useState([])
   const [planOut, setPlanOut] = useState(null)
   const [rules, setRules] = useState([])
+  const isDark = usePrefersDark()
 
   useEffect(() => {
     fetch('/api/projects').then(r=>r.json()).then(setProjects)
@@ -138,13 +152,110 @@ export default function App() {
     <div style={{ display:'grid', gridTemplateColumns:'360px 1fr', gap:'16px', padding:'16px', fontFamily:'system-ui, Arial' }}>
       <div>
         <h2>Projects</h2>
+        <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+  <button
+    onClick={async ()=>{
+      const code = prompt('Project Code (e.g., PRJ-0002)')
+      if(!code) return
+      const name = prompt('Project Name')
+      if(!name) return
+      const sku = prompt('SKU')
+      const qty = Number(prompt('Quantity') || 0)
+      const cutoff = prompt('Cutoff (YYYY-MM-DD)') || new Date().toISOString().slice(0,10)
+      const pantone = prompt('Pantone code (optional)') || ''
+      const res = await fetch('/api/projects', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ code, name, sku, quantity: qty, cutoffDate: cutoff, pantoneCode: pantone || null })
+      })
+      const proj = await res.json()
+      if(!res.ok){ alert(proj.error || 'Create failed'); return }
+      setProjects(prev => [...prev, proj])
+    }}
+    style={{ padding:'6px 10px' }}
+  >+ New</button>
+
+  <button
+    disabled={!active}
+    onClick={async ()=>{
+      if(!active) return
+      const name = prompt('New name', active.name)
+      if(name===null) return
+      const res = await fetch(`/api/projects/${active.id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name })
+      })
+      const out = await res.json()
+      if(!res.ok){ alert(out.error || 'Update failed'); return }
+      setProjects(prev => prev.map(p => p.id===active.id ? out : p))
+      setActive(out)
+    }}
+    style={{ padding:'6px 10px' }}
+  >Edit</button>
+
+  <button
+    disabled={!active}
+    onClick={async ()=>{
+      if(!active) return
+      if(!confirm(`Delete ${active.code} — ${active.name}? This cannot be undone.`)) return
+      const res = await fetch(`/api/projects/${active.id}`, { method:'DELETE' })
+      const out = await res.json()
+      if(!res.ok){ alert(out.error || 'Delete failed'); return }
+      setProjects(prev => prev.filter(p => p.id!==active.id))
+      setActive(null)
+      setQc([]); setAlerts([]); setNeeds([]); setRules([]); setPlanOut(null)
+    }}
+    style={{ padding:'6px 10px', color:'#b91c1c' }}
+  >Delete</button>
+
+  {/* Optional status quick-set if column exists */}
+  <button
+    disabled={!active}
+    onClick={async ()=>{
+      if(!active) return
+      const status = prompt('Status (PLANNED / IN_PROGRESS / HOLD / DONE)', active.status || 'PLANNED')
+      if(status===null) return
+      const res = await fetch(`/api/projects/${active.id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ status })
+      })
+      const out = await res.json()
+      if(!res.ok){ alert(out.error || 'Status update failed'); return }
+      setProjects(prev => prev.map(p => p.id===active.id ? out : p))
+      setActive(out)
+    }}
+    style={{ padding:'6px 10px' }}
+  >Set Status</button>
+</div>
         <ul style={{ listStyle:'none', padding:0 }}>
           {projects.map(p=>(
-            <li key={p.id} style={{ border:'1px solid #ddd', borderRadius:8, padding:12, marginBottom:8, background: active?.id===p.id ? '#eef6ff':'white', cursor:'pointer' }} onClick={()=>selectProject(p)}>
-              <div><b>{p.code}</b> — {p.name}</div>
-              <div style={{ fontSize:12, color:'#666' }}>SKU: {p.sku} • Qty: {p.quantity} • Cutoff: {new Date(p.cutoffDate).toLocaleDateString()}</div>
-              {p.pantoneCode && <div style={{ fontSize:12 }}>Pantone: <b>{p.pantoneCode}</b></div>}
-            </li>
+            <li
+  key={p.id}
+  style={{
+    border: '1px solid',
+    borderColor: isDark ? '#2b3240' : '#e5e7eb',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    background: active?.id===p.id ? (isDark ? '#0f172a' : '#eef6ff') : (isDark ? '#111827' : '#ffffff'),
+    color: isDark ? '#e5e7eb' : '#111827',
+    boxShadow: isDark ? 'none' : '0 1px 2px rgba(0,0,0,.04)',
+    cursor: 'pointer'
+  }}
+  onClick={()=>selectProject(p)}
+>
+  <div style={{fontWeight:700, color: active?.id===p.id ? (isDark ? '#c7d2fe' : '#1d4ed8') : (isDark ? '#e5e7eb' : '#111827')}}>
+    {p.code} — {p.name}
+  </div>
+  <div style={{ fontSize:12, color: isDark ? '#94a3b8' : '#475569' }}>
+    SKU: {p.sku} • Qty: {p.quantity} • Cutoff: {new Date(p.cutoffDate).toLocaleDateString()}
+  </div>
+  {p.pantoneCode && (
+    <div style={{ fontSize:12, color: isDark ? '#a5b4fc' : '#64748b' }}>
+      Pantone: <b>{p.pantoneCode}</b>
+    </div>
+  )}
+</li>
+
           ))}
         </ul>
       </div>
@@ -181,10 +292,10 @@ export default function App() {
                   <table style={{ width:'100%', borderCollapse:'collapse', marginTop:8 }}>
                     <thead><tr><th align="left">Scenario</th><th align="left">Risk</th><th align="left">Stage</th><th align="left">Start</th><th align="left">End</th><th align="right">Days</th><th align="right">Units/Day</th></tr></thead>
                     <tbody>
-                      {planOut.scenarios.map(sc => (
-                        <>
-                          {sc.plan.map((row, idx) => (
-                            <tr key={`${sc.multiplier}-${row.stage}-${idx}`} style={{ borderTop:'1px solid #eee' }}>
+                      {planOut.scenarios.map((sc, scIdx) => (
+                        <React.Fragment key={scIdx}>
+                           {sc.plan.map((row, idx) => (
+                             <tr key={`${sc.multiplier}-${row.stage}-${idx}`} style={{ borderTop:'1px solid #eee' }}>
                               {idx===0 && (
                                 <>
                                   <td rowSpan={sc.plan.length}>x{sc.multiplier}<div style={{ fontSize:12, color:'#666' }}>Slack: {sc.slackDays} d</div></td>
@@ -204,7 +315,7 @@ export default function App() {
                               <td align="right">{row.unitsPerDay}</td>
                             </tr>
                           ))}
-                        </>
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>

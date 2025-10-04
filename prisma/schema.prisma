@@ -1,103 +1,284 @@
 // prisma/schema.prisma
+
 generator client {
   provider   = "prisma-client-js"
   engineType = "binary"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-model Project {
-  id          Int       @id @default(autoincrement())
-  code        String
-  name        String
-  sku         String?
-  quantity    Int
-  cutoffDate  DateTime?
-  pantoneCode String?
-  createdAt   DateTime  @default(now())
+// ========================
+// AUTH & SECURITY MODELS
+// ========================
 
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  mfaSecret    String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  roles       UserRole[]
+  sessions    Session[]
+  auditEvents AuditLog[] @relation("AuditByUser")
+
+  // Invites
+  inviteToken   String?   @unique
+  inviteExpires DateTime?
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  name        String           @unique
+  description String?
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  label           String
+  // back-relation for RolePermission (fixes missing opposite field error)
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+}
+
+model UserRole {
+  id     String @id @default(cuid())
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id])
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+}
+
+model Session {
+  id               String   @id @default(cuid())
+  userId           String
+  refreshTokenHash String   @unique
+  userAgent        String?
+  ip               String?
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String // LOGIN, LOGOUT, ROLE_ASSIGN, PROJECT_ACCESS_DENIED, FILE_DOWNLOAD, COST_APPROVE, MFA_ENABLE, etc.
+  entity    String // USER, PROJECT, FILE, COST, etc.
+  entityId  String?
+  meta      Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  actor User? @relation("AuditByUser", fields: [actorId], references: [id])
+}
+
+// ========================
+// EXISTING PROJECT MODELS
+// (with fixed back-relations)
+// ========================
+
+model Project {
+  id              Int               @id @default(autoincrement())
+  code            String
+  name            String
+  sku             String?
+  quantity        Int
+  cutoffDate      DateTime?
+  pantoneCode     String?
+  createdAt       DateTime          @default(now())
+  complianceItems ComplianceItem[]
+  changes         ChangeLog[]
+  documents       ProjectDocument[]
+  skus            ProjectSku[] // <— add this line
+
+  // Removed `variances VarianceItem[]` because VarianceItem relates to ProjectDocument, not Project
   qcRecords      QCRecord[]
   alerts         Alert[]
   alertRules     AlertRule[]
-  inventoryNeeds InventoryNeed[] // <— back-relation added
+  inventoryNeeds InventoryNeed[]
+  preProdSteps   PreProdStep[]
 }
 
-model QCRecord {
-  id           Int      @id @default(autoincrement())
-  projectId    Int
-  project      Project  @relation(fields: [projectId], references: [id])
-  batchCode    String
-  passed       Int
-  rejected     Int
-  reason       String
-  pantoneMatch String // "Match" | "Mismatch"
-  createdAt    DateTime @default(now())
+model ProjectSku {
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  code      String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, code])
 }
 
-model InventoryNeed {
-  id           Int      @id @default(autoincrement())
-  projectId    Int
-  material     String
-  requiredQty  Int      @default(0)
-  availableQty Int      @default(0)
-  shortfall    Int      @default(0)
-  updatedAt    DateTime @default(now())
+model ComplianceItem {
+  id          Int       @id @default(autoincrement())
+  projectId   Int
+  type        String
+  status      String    @default("PLANNED")
+  owner       String?
+  labName     String?
+  dueDate     DateTime?
+  requestedAt DateTime?
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  documentUrl String?
+  remarks     String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+  @@index([status])
+  @@index([type])
+}
+
+model ChangeLog {
+  id          Int               @id @default(autoincrement())
+  projectId   Int
+  type        String
+  description String?
+  requestedBy String
+  requestedAt DateTime          @default(now())
+  impact      Json?
+  documents   ProjectDocument[]
+
+  approvalRequired Boolean   @default(true)
+  approver         String?
+  approvedBy       String?
+  approvalStatus   String    @default("PENDING")
+  approvalProof    String?
+  approvalDate     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([approvalStatus])
+  @@index([type])
+}
+
+model ProjectDocument {
+  id        Int    @id @default(autoincrement())
+  projectId Int
+  name      String
+
+  // Keep external links if you use them
+  url String?
+
+  // NEW: object stored in MinIO/S3
+  storageKey  String?
+  contentType String?
+
+  // Existing fields you mentioned
+  approvalProof String?
+
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+
+  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ChangeLog    ChangeLog?     @relation(fields: [changeLogId], references: [id])
+  changeLogId  Int?
+  VarianceItem VarianceItem[]
+
+  @@index([projectId, name])
+}
+
+model VarianceItem {
+  id          Int      @id @default(autoincrement())
+  documentId  Int
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ProjectDocument ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model QCRecord {
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  type      String
+  status    String
+  remarks   String?
+  createdAt DateTime @default(now())
+
+  Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model InventoryNeed {
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  item      String
+  quantity  Int
+  createdAt DateTime @default(now())
+
+  Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model AlertRule {
-  id         Int      @id @default(autoincrement())
-  projectId  Int
-  project    Project  @relation(fields: [projectId], references: [id])
-  key        String // e.g., "QC.rejected", "Inventory.shortfall", "Pantone.mismatch"
-  level      String // "AMBER" | "RED"
-  threshold  Int
-  recipients String // comma-separated emails
-  enabled    Boolean  @default(true)
-  createdAt  DateTime @default(now())
-}
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  type      String
+  condition String
+  createdAt DateTime @default(now())
 
-enum AlertStatus {
-  OPEN
-  ACKNOWLEDGED
-  RESOLVED
-  CLOSED
-}
-
-enum AlertActionType {
-  ACK
-  RESOLVE
-  COMMENT
-  REOPEN
+  Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model Alert {
-  id        Int           @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   projectId Int
-  project   Project       @relation(fields: [projectId], references: [id])
-  level     String // AMBER | RED
+  type      String
   message   String
-  status    AlertStatus   @default(OPEN)
-  createdAt DateTime      @default(now())
-  actions   AlertAction[]
+  createdAt DateTime @default(now())
+
+  Project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // back-relation for AlertAction (fixes missing opposite field error)
+  actions AlertAction[]
 }
 
 model AlertAction {
-  id                Int             @id @default(autoincrement())
-  alertId           Int
-  alert             Alert           @relation(fields: [alertId], references: [id])
-  action            AlertActionType // ACK | RESOLVE | COMMENT | REOPEN
-  by                String // who did it (name/email)
-  note              String?
-  correctiveActions String? // free text; keep simple for now
-  preventRecurrence String?
-  costImpactCents   Int? // optional, positive or negative
-  costNote          String?
-  createdAt         DateTime        @default(now())
+  id        Int      @id @default(autoincrement())
+  alertId   Int
+  action    String
+  createdAt DateTime @default(now())
+
+  // rename field to `alert` and add back-relation in Alert
+  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+}
+
+model PreProdStep {
+  id        Int       @id @default(autoincrement())
+  projectId Int
+  step      String
+  status    String
+  dueDate   DateTime?
+  createdAt DateTime  @default(now())
+
+  Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }

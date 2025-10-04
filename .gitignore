@@ -57,3 +57,13 @@ coverage/
 # --- Other ---
 .idea/
 *.iml
+
+# Local envs
+.env
+api/.env
+web/.env
+# Node
+**/node_modules
+# Logs
+**/*.log
+

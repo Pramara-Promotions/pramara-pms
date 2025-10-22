@@ -26,7 +26,9 @@
     "neon:test": "node scripts/test-neon-connection.js",
     "storage:migrate": "node scripts/migrate-minio-to-s3.js",
     "chat:save": "node scripts/save-chat-context.js",
-    "chat:load": "node scripts/load-chat-context.js"
+    "chat:load": "node scripts/load-chat-context.js",
+    "sync:push": "node scripts/sync-push.js",
+    "sync:pull": "node scripts/sync-pull.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

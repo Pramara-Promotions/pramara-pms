@@ -32,15 +32,33 @@ router.get('/me', async (req, res, next) => {
           select: {
             id: true,
             email: true,
+            name: true,
+            status: true,
             isActive: true,
+            departmentId: true,
+            department: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
             roles: {
               include: {
                 role: {
                   select: {
+                    id: true,
                     name: true,
+                    description: true,
                     permissions: {
                       include: {
-                        permission: { select: { code: true } },
+                        permission: { 
+                          select: { 
+                            id: true,
+                            code: true,
+                            name: true,
+                            description: true,
+                          } 
+                        },
                       },
                     },
                   },
@@ -51,22 +69,42 @@ router.get('/me', async (req, res, next) => {
         });
         if (!u) return res.status(401).json({ error: 'User not found' });
 
-        const roleNames = u.roles
-          .map((r) => r?.role?.name)
+        // Map roles to array of role objects
+        const roles = u.roles
+          .map((r) => r?.role ? {
+            id: r.role.id,
+            name: r.role.name,
+            description: r.role.description,
+          } : null)
           .filter(Boolean);
-        const permSet = new Set();
+
+        // Collect unique permissions from all roles
+        const permMap = new Map();
         for (const r of u.roles) {
           for (const rp of r?.role?.permissions || []) {
-            if (rp?.permission?.code) permSet.add(rp.permission.code);
+            if (rp?.permission) {
+              const perm = rp.permission;
+              if (!permMap.has(perm.id)) {
+                permMap.set(perm.id, {
+                  id: perm.id,
+                  name: perm.code, // Use code as name for consistency
+                  description: perm.description || perm.name,
+                });
+              }
+            }
           }
         }
 
         return res.json({
           id: u.id,
           email: u.email,
+          name: u.name,
+          status: u.status,
           isActive: u.isActive,
-          roles: roleNames,
-          permissions: Array.from(permSet),
+          departmentId: u.departmentId,
+          department: u.department,
+          roles: roles,
+          permissions: Array.from(permMap.values()),
         });
       } catch (err) {
         console.error('[me] lookup failed', err);

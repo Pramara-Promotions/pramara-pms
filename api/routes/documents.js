@@ -21,52 +21,19 @@ if (typeof authGuard !== "function") {
 }
 
 /* ────────────────────────────────────────────────────────────
-   Optional S3/MinIO presign support (graceful if missing)
+   Use unified storage layer (supports S3/R2/MinIO)
    ──────────────────────────────────────────────────────────── */
-let S3Client, PutObjectCommand, getSignedUrl;
+let getPresignedPutUrl, getPresignedGetUrl;
 let STORAGE_READY = false;
-let s3 = null;
-
-const {
-  MINIO_ENDPOINT,
-  MINIO_ACCESS_KEY,
-  MINIO_SECRET_KEY,
-  MINIO_BUCKET,
-  MINIO_REGION = "us-east-1",
-  MINIO_USE_SSL = "false",
-} = process.env;
 
 try {
-  ({ S3Client, PutObjectCommand } = require("@aws-sdk/client-s3"));
-  ({ getSignedUrl } = require("@aws-sdk/s3-request-presigner"));
-
-  if (MINIO_ENDPOINT && MINIO_ACCESS_KEY && MINIO_SECRET_KEY && MINIO_BUCKET) {
-    const endpoint =
-      MINIO_ENDPOINT.startsWith("http://") || MINIO_ENDPOINT.startsWith("https://")
-        ? MINIO_ENDPOINT
-        : `${MINIO_USE_SSL === "true" ? "https://" : "http://"}${MINIO_ENDPOINT}`;
-
-    s3 = new S3Client({
-      region: MINIO_REGION,
-      endpoint,
-      forcePathStyle: true, // important for MinIO
-      credentials: {
-        accessKeyId: MINIO_ACCESS_KEY,
-        secretAccessKey: MINIO_SECRET_KEY,
-      },
-    });
-
-    STORAGE_READY = true;
-    console.log(`[documents] Storage ready. Bucket=${MINIO_BUCKET} Endpoint=${endpoint}`);
-  } else {
-    console.warn(
-      "[documents] Storage env incomplete. Set MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET"
-    );
-  }
+  const storage = require("../lib/storage");
+  getPresignedPutUrl = storage.getPresignedPutUrl;
+  getPresignedGetUrl = storage.getPresignedGetUrl;
+  STORAGE_READY = true;
+  console.log("[documents] Using unified storage layer (S3/R2/MinIO)");
 } catch (e) {
-  console.warn(
-    "[documents] @aws-sdk/client-s3 or @aws-sdk/s3-request-presigner not installed. Presign disabled."
-  );
+  console.warn("[documents] Storage not configured:", e?.message);
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -79,17 +46,9 @@ function hasModel(name) {
 const toInt = (v) => Number.parseInt(v, 10);
 
 function buildPublicUrl(key) {
-  // Best-effort path-style URL for MinIO dev:
-  // http(s)://endpoint/bucket/key
-  if (!MINIO_BUCKET || !MINIO_ENDPOINT) return null;
-  const endpoint =
-    MINIO_ENDPOINT.startsWith("http://") || MINIO_ENDPOINT.startsWith("https://")
-      ? MINIO_ENDPOINT
-      : `${MINIO_USE_SSL === "true" ? "https://" : "http://"}${MINIO_ENDPOINT}`;
-  return `${endpoint.replace(/\/+$/, "")}/${encodeURIComponent(MINIO_BUCKET)}/${key
-    .split("/")
-    .map(encodeURIComponent)
-    .join("/")}`;
+  // For presigned URL-based storage, return null
+  // Frontend will request presigned GET URLs instead
+  return null;
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -322,32 +281,26 @@ router.delete("/documents/:id/all", authGuard, async (req, res) => {
 
 /**
  * POST /api/documents/presign
- * Body: { key, contentType? }
- * Returns: { url, method: "PUT", headers: { "Content-Type": ... } }
+ * Body: { projectId, filename, contentType?, sizeBytes? }
+ * Returns: { url, key, method: "PUT", headers: { "Content-Type": ... } }
  */
 router.post("/documents/presign", authGuard, async (req, res) => {
   try {
-    if (!STORAGE_READY || !s3) {
+    if (!STORAGE_READY) {
       return res
         .status(503)
-        .json({ error: "Storage not configured. Install AWS SDK and set MINIO_* env." });
+        .json({ error: "Storage not configured." });
     }
-    const { key, contentType = "application/octet-stream" } = req.body || {};
-    if (!key || typeof key !== "string") {
-      return res.status(400).json({ error: "Missing 'key' in body" });
+    const { projectId, filename, contentType = "application/octet-stream", sizeBytes } = req.body || {};
+    if (!projectId || !filename) {
+      return res.status(400).json({ error: "Missing 'projectId' or 'filename' in body" });
     }
 
-    const cmd = new PutObjectCommand({
-      Bucket: MINIO_BUCKET,
-      Key: key,
-      ContentType: contentType,
-    });
-
-    const url = await getSignedUrl(s3, cmd, { expiresIn: 600 }); // 10 minutes
-    res.json({ url, method: "PUT", headers: { "Content-Type": contentType } });
+    const result = await getPresignedPutUrl({ projectId, filename, contentType, sizeBytes });
+    res.json({ ...result, method: "PUT", headers: { "Content-Type": contentType } });
   } catch (e) {
     console.error("POST /documents/presign failed:", e);
-    res.status(500).json({ error: "Presign failed" });
+    res.status(500).json({ error: e.message || "Presign failed" });
   }
 });
 

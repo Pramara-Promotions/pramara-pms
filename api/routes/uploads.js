@@ -19,55 +19,19 @@ if (typeof authGuard !== "function") {
 }
 
 // ────────────────────────────────────────────────────────────
-// Optional S3/MinIO client (gracefully handle missing deps/env)
+// Use unified storage layer (supports S3/R2/MinIO)
 // ────────────────────────────────────────────────────────────
-let S3Client, PutObjectCommand, getSignedUrl;
+let getPresignedPutUrl, getPresignedGetUrl;
 let STORAGE_READY = false;
-let s3 = null;
-
-// Read env (works for MinIO or AWS S3)
-const {
-  MINIO_ENDPOINT,
-  MINIO_ACCESS_KEY,
-  MINIO_SECRET_KEY,
-  MINIO_BUCKET,
-  MINIO_REGION = "us-east-1",
-  MINIO_USE_SSL = "false",
-} = process.env;
 
 try {
-  // Try to import AWS SDK v3
-  ({ S3Client, PutObjectCommand } = require("@aws-sdk/client-s3"));
-  ({ getSignedUrl } = require("@aws-sdk/s3-request-presigner"));
-
-  if (MINIO_ENDPOINT && MINIO_ACCESS_KEY && MINIO_SECRET_KEY && MINIO_BUCKET) {
-    // Build endpoint (supports http(s)://host:port or just host:port)
-    const endpoint =
-      MINIO_ENDPOINT.startsWith("http://") || MINIO_ENDPOINT.startsWith("https://")
-        ? MINIO_ENDPOINT
-        : `${MINIO_USE_SSL === "true" ? "https://" : "http://"}${MINIO_ENDPOINT}`;
-
-    s3 = new S3Client({
-      region: MINIO_REGION,
-      endpoint,
-      forcePathStyle: true, // important for MinIO
-      credentials: {
-        accessKeyId: MINIO_ACCESS_KEY,
-        secretAccessKey: MINIO_SECRET_KEY,
-      },
-    });
-
-    STORAGE_READY = true;
-    console.log(`[uploads] Storage ready. Bucket=${MINIO_BUCKET} Endpoint=${endpoint}`);
-  } else {
-    console.warn(
-      "[uploads] Storage env incomplete. Set MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET"
-    );
-  }
+  const storage = require("../lib/storage");
+  getPresignedPutUrl = storage.getPresignedPutUrl;
+  getPresignedGetUrl = storage.getPresignedGetUrl;
+  STORAGE_READY = true;
+  console.log("[uploads] Using unified storage layer (S3/R2/MinIO)");
 } catch (e) {
-  console.warn(
-    "[uploads] @aws-sdk/client-s3 or @aws-sdk/s3-request-presigner not installed. Presign disabled."
-  );
+  console.warn("[uploads] Storage not configured:", e?.message);
 }
 
 // ────────────────────────────────────────────────────────────
@@ -79,36 +43,27 @@ router.get("/uploads/ping", (_req, res) => {
 
 // ────────────────────────────────────────────────────────────
 // Presign PUT (recommended flow from web app)
-// body: { key, contentType? }
-// returns: { url, fields? } (PUT URL here; for POST policy you'd return fields)
+// body: { projectId, filename, contentType?, sizeBytes? }
+// returns: { url, key, method: "PUT", headers }
 // ────────────────────────────────────────────────────────────
 router.post("/uploads/presign", authGuard, async (req, res) => {
   try {
-    if (!STORAGE_READY || !s3) {
+    if (!STORAGE_READY) {
       return res
         .status(503)
-        .json({ error: "Storage not configured. Install AWS SDK and set MINIO_* env." });
+        .json({ error: "Storage not configured." });
     }
 
-    const { key, contentType = "application/octet-stream" } = req.body || {};
-    if (!key || typeof key !== "string") {
-      return res.status(400).json({ error: "Missing 'key' in body" });
+    const { projectId, filename, contentType = "application/octet-stream", sizeBytes } = req.body || {};
+    if (!projectId || !filename) {
+      return res.status(400).json({ error: "Missing 'projectId' or 'filename' in body" });
     }
 
-    const putCmd = new PutObjectCommand({
-      Bucket: MINIO_BUCKET,
-      Key: key,
-      ContentType: contentType,
-      // You can set ACL/Metadata here if needed
-    });
-
-    // 10 minutes expiry
-    const url = await getSignedUrl(s3, putCmd, { expiresIn: 600 });
-
-    res.json({ url, method: "PUT", headers: { "Content-Type": contentType } });
+    const result = await getPresignedPutUrl({ projectId, filename, contentType, sizeBytes });
+    res.json({ ...result, method: "PUT", headers: { "Content-Type": contentType } });
   } catch (err) {
     console.error("POST /uploads/presign failed:", err);
-    res.status(500).json({ error: "Presign failed" });
+    res.status(500).json({ error: err.message || "Presign failed" });
   }
 });
 

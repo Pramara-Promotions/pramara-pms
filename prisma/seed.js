@@ -193,13 +193,60 @@ async function main() {
   }
   console.log(`✅ ${Object.keys(DEFAULT_ROLES).length} roles seeded`);
 
-  // 3) Super Admin user
+  // 3) Default Department
+  console.log('🏢 Creating default department...');
+  let defaultDept = await prisma.department.findUnique({ where: { name: 'General' } });
+  if (!defaultDept) {
+    defaultDept = await prisma.department.create({
+      data: {
+        name: 'General',
+        description: 'Default department for all users'
+      }
+    });
+  }
+  console.log('✅ Default department created');
+
+  // 4) Super Admin user
   const adminEmail = 'admin@pramara.local';
   const adminPassword = 'ChangeMe@123';
   console.log('👤 Creating Super Admin user...');
-  await ensureUserWithRole(adminEmail, adminPassword, roles.SUPER_ADMIN.id);
+  let adminUser = await prisma.user.findUnique({ where: { email: adminEmail } });
+  if (!adminUser) {
+    const passwordHash = await argon2.hash(adminPassword);
+    adminUser = await prisma.user.create({
+      data: {
+        email: adminEmail,
+        name: 'Super Admin',
+        passwordHash,
+        isActive: true,
+        status: 'ACTIVE',
+        departmentId: defaultDept.id,
+        trustDeviceDuration: 30,
+        roles: { create: { roleId: roles.SUPER_ADMIN.id } },
+      },
+    });
+  } else {
+    // Update existing user to have proper status and department
+    await prisma.user.update({
+      where: { id: adminUser.id },
+      data: {
+        status: 'ACTIVE',
+        departmentId: defaultDept.id,
+        name: adminUser.name || 'Super Admin',
+      }
+    });
+    // Ensure role link exists
+    const roleLink = await prisma.userRole.findFirst({
+      where: { userId: adminUser.id, roleId: roles.SUPER_ADMIN.id }
+    });
+    if (!roleLink) {
+      await prisma.userRole.create({
+        data: { userId: adminUser.id, roleId: roles.SUPER_ADMIN.id }
+      });
+    }
+  }
 
-  // 4) Demo Project — only the fields your schema requires / supports
+  // 5) Demo Project — only the fields your schema requires / supports
   console.log('📦 Creating demo project...');
   const project = await ensureProject({
     code: 'PMS-DEMO',
@@ -208,12 +255,13 @@ async function main() {
     quantity: 0, // ✅ REQUIRED by your schema
   });
 
-  // 5) Demo related data
+  // 6) Demo related data
   console.log('📊 Seeding project data...');
   await seedProjectData(project.id);
 
   console.log('✅ Seed complete.');
   console.log('   Admin:', adminEmail, '/ password:', adminPassword, '(please change)');
+  console.log('   Default Department: General');
 }
 
 main()

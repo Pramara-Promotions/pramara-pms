@@ -18,16 +18,26 @@ datasource db {
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
+  name         String?
   passwordHash String
   mfaSecret    String?
+  mfaEnforcedAt DateTime?
   isActive     Boolean  @default(true)
+  status       String   @default("PENDING") // PENDING, ACTIVE, INACTIVE, SUSPENDED
+  departmentId String?
+  trustDeviceDuration Int @default(30) // days
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   // Relations
+  department  Department? @relation(fields: [departmentId], references: [id])
   roles       UserRole[]
   sessions    Session[]
+  devices     Device[]
   auditEvents AuditLog[] @relation("AuditByUser")
+  temporaryPermissions TemporaryPermission[]
+  permissionRequests PermissionRequest[]
+  notifications Notification[]
 
   // Invites
   inviteToken   String?   @unique
@@ -38,8 +48,14 @@ model Role {
   id          String           @id @default(cuid())
   name        String           @unique
   description String?
+  status      String           @default("ACTIVE") // ACTIVE, PENDING_APPROVAL
+  createdBy   String?
+  approvedBy  String?
+  approvedAt  DateTime?
+  createdAt   DateTime         @default(now())
   permissions RolePermission[]
   users       UserRole[]
+  approvals   RoleApproval[]
 }
 
 model Permission {
@@ -76,10 +92,32 @@ model Session {
   refreshTokenHash String   @unique
   userAgent        String?
   ip               String?
+  deviceId         String?
   createdAt        DateTime @default(now())
   expiresAt        DateTime
 
-  user User @relation(fields: [userId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+  device Device? @relation(fields: [deviceId], references: [id])
+}
+
+model Device {
+  id          String    @id @default(cuid())
+  userId      String
+  fingerprint String
+  name        String?
+  ip          String?
+  userAgent   String?
+  trusted     Boolean   @default(false)
+  trustUntil  DateTime?
+  lastUsedAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions Session[]
+  auditLogs AuditLog[]
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
 }
 
 model AuditLog {
@@ -91,9 +129,107 @@ model AuditLog {
   meta      Json?
   ip        String?
   userAgent String?
+  deviceId  String?
+  changes   Json?
+  result    String?  // SUCCESS, FAILURE
+  flagged   Boolean  @default(false)
   createdAt DateTime @default(now())
 
-  actor User? @relation("AuditByUser", fields: [actorId], references: [id])
+  actor  User?   @relation("AuditByUser", fields: [actorId], references: [id])
+  device Device? @relation(fields: [deviceId], references: [id])
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entity])
+  @@index([flagged])
+  @@index([createdAt])
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+
+  @@index([name])
+}
+
+model TemporaryPermission {
+  id             String    @id @default(cuid())
+  userId         String
+  permissionCode String
+  startDate      DateTime  @default(now())
+  endDate        DateTime
+  grantedBy      String
+  reason         String?
+  status         String    @default("ACTIVE") // ACTIVE, EXPIRED, REVOKED
+  createdAt      DateTime  @default(now())
+  revokedAt      DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([endDate])
+}
+
+model PermissionRequest {
+  id             String    @id @default(cuid())
+  userId         String
+  permissionCode String
+  reason         String
+  duration       Int?      // days, null = permanent
+  status         String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  requestedAt    DateTime  @default(now())
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  response       String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+model RoleApproval {
+  id         String    @id @default(cuid())
+  roleId     String
+  createdBy  String
+  status     String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewedBy String?
+  reviewedAt DateTime?
+  feedback   String?
+  createdAt  DateTime  @default(now())
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  updatedBy String?
+  updatedAt DateTime @updatedAt
 }
 
 // ====================================================================

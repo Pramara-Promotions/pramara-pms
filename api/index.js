@@ -43,6 +43,12 @@ try { uploadRouter = require('./routes/upload'); } catch {}
 const { documentsRouter } = require('./routes/documents');
 const rolesRouter = require('./routes/roles');
 const { adminRouter } = require('./routes/admin');
+const { departmentsRouter } = require('./routes/departments');
+const { devicesRouter } = require('./routes/devices');
+const { auditRouter } = require('./routes/audit');
+const { temporaryPermissionsRouter } = require('./routes/temporaryPermissions');
+const { permissionRequestsRouter } = require('./routes/permissionRequests');
+const { notificationsRouter } = require('./routes/notifications');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -73,6 +79,12 @@ if (uploadRouter) app.use('/api', uploadRouter);
 app.use('/api', documentsRouter);
 app.use('/api', rolesRouter);
 app.use('/api', adminRouter);
+app.use('/api', departmentsRouter);
+app.use('/api', devicesRouter);
+app.use('/api', auditRouter);
+app.use('/api', temporaryPermissionsRouter);
+app.use('/api', permissionRequestsRouter);
+app.use('/api', notificationsRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

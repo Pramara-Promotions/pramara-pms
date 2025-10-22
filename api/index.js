@@ -50,6 +50,7 @@ const { temporaryPermissionsRouter } = require('./routes/temporaryPermissions');
 const { permissionRequestsRouter } = require('./routes/permissionRequests');
 const { notificationsRouter } = require('./routes/notifications');
 const { invitationsRouter } = require('./routes/invitations');
+const meRouter = require('./routes/me');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -87,6 +88,7 @@ app.use('/api', temporaryPermissionsRouter);
 app.use('/api', permissionRequestsRouter);
 app.use('/api', notificationsRouter);
 app.use('/api', invitationsRouter);
+app.use('/api', meRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';
@@ -176,22 +178,7 @@ app.post('/api/auth/logout', async (_req, res) => {
   }
 });
 
-app.get('/api/me', async (req, res) => {
-  try {
-    const token = req.cookies?.token;
-    if (!token) return res.status(401).json({ error: 'Not authenticated' });
-
-    // Minimal identity for dev. Replace with DB/JWT lookup later.
-    return res.json({
-      email: DEV_AUTH_EMAIL,
-      name: DEV_AUTH_NAME,
-      roles: ['admin'],
-    });
-  } catch (e) {
-    console.error('auth:me', e);
-    res.status(500).json({ error: 'Failed to read session' });
-  }
-});
+// /api/me is handled by routes/me.js (enhanced user payload)
 
 // ====================================================================
 // [LANDMARK 2] PROJECTS CRUD (simple)

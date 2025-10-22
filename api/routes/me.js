@@ -9,14 +9,31 @@ try {
 } catch (_) {}
 
 const router = express.Router();
+const DEV_AUTH_EMAIL = process.env.DEV_AUTH_EMAIL || 'admin@pramara.local';
+const DEV_AUTH_NAME  = process.env.DEV_AUTH_NAME  || 'Admin User';
 
 router.get('/me', async (req, res, next) => {
   try {
     const rawAuth = req.get('authorization') || '';
     const bearer = rawAuth.startsWith('Bearer ') ? rawAuth.slice(7).trim() : '';
-    const token = req.cookies?.token || bearer;
+    const token = (req.cookies?.pms_token || req.cookies?.token) || bearer;
 
     if (!token) return res.status(401).json({ error: 'No token' });
+
+    // Dev token bypass (non-JWT) for local development
+    if (token.startsWith('dev-token-')) {
+      return res.json({
+        id: 'dev-user',
+        email: DEV_AUTH_EMAIL,
+        name: DEV_AUTH_NAME,
+        status: 'ACTIVE',
+        isActive: true,
+        departmentId: null,
+        department: null,
+        roles: [{ id: 'role-dev', name: 'Super Admin', description: 'Dev Super Admin' }],
+        permissions: [],
+      });
+    }
 
     let payload;
     try {
@@ -51,13 +68,12 @@ router.get('/me', async (req, res, next) => {
                     description: true,
                     permissions: {
                       include: {
-                        permission: { 
-                          select: { 
+                        permission: {
+                          select: {
                             id: true,
                             code: true,
-                            name: true,
-                            description: true,
-                          } 
+                            label: true,
+                          }
                         },
                       },
                     },
@@ -88,7 +104,7 @@ router.get('/me', async (req, res, next) => {
                 permMap.set(perm.id, {
                   id: perm.id,
                   name: perm.code, // Use code as name for consistency
-                  description: perm.description || perm.name,
+                  description: perm.label,
                 });
               }
             }

@@ -6,8 +6,9 @@ import RoleManagement from '../features/admin/RoleManagement';
 import DepartmentManagement from '../features/admin/DepartmentManagement';
 import DeviceManagement from '../features/admin/DeviceManagement';
 import AuditLogViewer from '../features/admin/AuditLogViewer';
+import PermissionRequestManagement from '../features/common/PermissionRequestManagement';
 
-type TabType = 'users' | 'roles' | 'departments' | 'devices' | 'audit';
+type TabType = 'users' | 'roles' | 'departments' | 'requests' | 'devices' | 'audit';
 
 export default function Admin() {
   const { isSuperAdmin, hasAnyPermission } = useAuth();
@@ -33,6 +34,7 @@ export default function Admin() {
     { id: 'users', label: 'Users', permission: 'USER_VIEW' },
     { id: 'roles', label: 'Roles', permission: 'ROLE_VIEW' },
     { id: 'departments', label: 'Departments', permission: 'USER_VIEW' },
+    { id: 'requests', label: 'Permission Requests' },
     { id: 'devices', label: 'Devices', requireSuperAdmin: true },
     { id: 'audit', label: 'Audit Logs', permission: 'AUDIT_VIEW' },
   ];
@@ -45,6 +47,8 @@ export default function Admin() {
         return <RoleManagement />;
       case 'departments':
         return <DepartmentManagement />;
+      case 'requests':
+        return <PermissionRequestManagement />;
       case 'devices':
         return <DeviceManagement />;
       case 'audit':

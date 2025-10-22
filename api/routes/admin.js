@@ -67,20 +67,38 @@ router.get("/admin/stats", authGuard, permissionGuard('AUDIT_VIEW', 'SYSTEM_SETT
    Users admin
    ──────────────────────────────────────────────────────────── */
 
+// GET /api/admin/roles — minimal list for assignment UIs
+router.get("/admin/roles", authGuard, permissionGuard('ROLE_VIEW'), async (_req, res) => {
+  if (!hasModel("role")) return res.json([]);
+  try {
+    const roles = await prisma.role.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    res.json(roles);
+  } catch (e) {
+    console.error('[admin] list roles failed:', e);
+    res.status(500).json({ error: 'Failed to fetch roles' });
+  }
+});
+
 // GET /api/admin/users
 router.get("/admin/users", authGuard, permissionGuard('USER_VIEW'), async (_req, res) => {
   if (!hasModel("user")) return res.json([]);
   try {
     const rows = await prisma.user.findMany({
-      select: { 
-        id: true, 
-        email: true, 
-        isActive: true, 
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        status: true,
+        isActive: true,
         createdAt: true,
+        department: { select: { id: true, name: true } },
         roles: {
           include: {
             role: {
-              select: { name: true, description: true }
+              select: { id: true, name: true, description: true }
             }
           }
         }
@@ -88,13 +106,16 @@ router.get("/admin/users", authGuard, permissionGuard('USER_VIEW'), async (_req,
       orderBy: { createdAt: "desc" },
     });
     
-    // Format response with role names
+    // Format response with compact role objects
     const formatted = rows.map(user => ({
       id: user.id,
       email: user.email,
+      name: user.name || null,
+      status: user.status || (user.isActive ? 'ACTIVE' : 'INACTIVE'),
       isActive: user.isActive,
       createdAt: user.createdAt,
-      roles: user.roles.map(ur => ur.role.name),
+      department: user.department,
+      roles: user.roles.map(ur => ({ id: ur.role.id, name: ur.role.name })),
     }));
     
     res.json(formatted);
@@ -210,25 +231,32 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
   }
 });
 
-// PUT /api/admin/users/:id  { isActive? }
+// PUT /api/admin/users/:id  { name?, status?, isActive?, departmentId? }
 router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
     const { id } = req.params;
-    const { isActive } = req.body || {};
+    const { name, status, isActive, departmentId } = req.body || {};
     
+    const updateData = {};
+    if (name !== undefined) updateData.name = name || null;
+    if (status !== undefined) updateData.status = status;
+    if (isActive !== undefined) updateData.isActive = !!isActive;
+    if (departmentId !== undefined) updateData.departmentId = departmentId || null;
+
     const row = await prisma.user.update({
       where: { id },
-      data: {
-        ...(isActive !== undefined ? { isActive: !!isActive } : {}),
-      },
+      data: updateData,
       select: { 
         id: true, 
-        email: true, 
+        email: true,
+        name: true,
+        status: true,
         isActive: true,
+        department: { select: { id: true, name: true } },
         roles: {
           include: {
-            role: { select: { name: true } }
+            role: { select: { id: true, name: true } }
           }
         }
       },
@@ -237,8 +265,11 @@ router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (r
     res.json({
       id: row.id,
       email: row.email,
+      name: row.name,
+      status: row.status,
       isActive: row.isActive,
-      roles: row.roles.map(ur => ur.role.name),
+      department: row.department,
+      roles: row.roles.map(ur => ({ id: ur.role.id, name: ur.role.name })),
     });
   } catch (e) {
     console.error("[admin] update user failed:", e);
@@ -339,6 +370,11 @@ router.delete("/admin/users/:id", authGuard, permissionGuard('USER_DELETE'), asy
       return res.status(400).json({ error: "Cannot delete your own account" });
     }
     
+    // Delete related records first (Prisma cascade doesn't work for all relations)
+    await prisma.userRole.deleteMany({ where: { userId: id } });
+    await prisma.session.deleteMany({ where: { userId: id } });
+    
+    // Now delete the user
     await prisma.user.delete({ where: { id } });
     res.json({ ok: true, message: 'User deleted successfully' });
   } catch (e) {

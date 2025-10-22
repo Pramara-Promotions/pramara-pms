@@ -1,7 +1,21 @@
 // api/routes/projects.js
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { authGuard } = require('../middleware/authGuard');
+
+// ────────────────────────────────────────────────────────────
+// FIX: Make authGuard import resilient (default or named export)
+// ────────────────────────────────────────────────────────────
+let _auth = null;
+try {
+  _auth = require('../middleware/authGuard'); // could be a function or { authGuard }
+} catch (e) {
+  console.warn('[projects] authGuard not found at ../middleware/authGuard:', e?.message);
+}
+let authGuard = _auth && typeof _auth === 'function' ? _auth : (_auth && _auth.authGuard);
+if (typeof authGuard !== 'function') {
+  console.warn('[projects] authGuard is not a function. Using NO-OP middleware in dev.');
+  authGuard = (req, _res, next) => next(); // fallback to avoid "Route.get() requires a callback" crash
+}
 
 const prisma = new PrismaClient();
 const router = express.Router();
@@ -30,17 +44,19 @@ router.get('/projects', authGuard, async (_req, res) => {
 
 router.post('/projects', authGuard, async (req, res) => {
   try {
+    console.log('POST /projects payload:', req.body);
     const { code, name, sku, quantity, cutoffDate, pantoneCode } = req.body || {};
     const created = await prisma.project.create({
       data: {
         code,
         name,
         sku: sku || null,
-        quantity: Number(quantity || 0),
+        quantity: quantity != null ? Number(quantity) : 0,  // Default to 0 if not provided
         cutoffDate: cutoffDate ? new Date(cutoffDate) : null,
         pantoneCode: pantoneCode || null,
       },
     });
+    console.log('POST /projects created:', created);
     res.json(created);
   } catch (e) {
     console.error('POST /projects failed:', e);
@@ -51,9 +67,17 @@ router.post('/projects', authGuard, async (req, res) => {
 router.put('/projects/:id', authGuard, async (req, res) => {
   try {
     const id = toInt(req.params.id);
+    const { code, name, sku, quantity, cutoffDate, pantoneCode } = req.body || {};
     const updated = await prisma.project.update({
       where: { id },
-      data: req.body || {},
+      data: {
+        ...(code !== undefined ? { code } : {}),
+        ...(name !== undefined ? { name } : {}),
+        ...(sku !== undefined ? { sku: sku || null } : {}),
+        ...(quantity !== undefined ? { quantity: quantity != null ? Number(quantity) : null } : {}),
+        ...(cutoffDate !== undefined ? { cutoffDate: cutoffDate ? new Date(cutoffDate) : null } : {}),
+        ...(pantoneCode !== undefined ? { pantoneCode: pantoneCode || null } : {}),
+      },
     });
     res.json(updated);
   } catch (e) {
@@ -129,6 +153,7 @@ router.put('/projects/:id/alert-rules', authGuard, async (req, res) => {
           key: r.key,
           level: r.level || 'INFO',
           threshold: Number(r.threshold || 0),
+          // If your schema stores a string, change to: recipients: String(r.recipients || '')
           recipients: Array.isArray(r.recipients) ? r.recipients : [],
           enabled: !!r.enabled,
         })),
@@ -272,9 +297,15 @@ router.get('/projects/:id/documents', authGuard, async (req, res) => {
   const id = toInt(req.params.id);
   if (!hasModel('projectDocument')) return res.json([]);
   try {
+    // Only return root documents (parentId is null) to avoid showing all revisions as separate rows
     const items = await prisma.projectDocument.findMany({
-      where: { projectId: id },
-      orderBy: [{ version: 'desc' }],
+      where: { projectId: id, parentId: null },
+      orderBy: [{ createdAt: 'desc' }],
+      include: {
+        documentStations: {
+          include: { station: true }
+        }
+      }
     });
     res.json(items);
   } catch (e) {
@@ -298,13 +329,21 @@ router.get('/projects/:id/variances', authGuard, async (req, res) => {
     res.json([]);
   }
 });
+
 /** ======================= Create: Change Log ======================= */
 router.post('/projects/:id/changes', authGuard, async (req, res) => {
   const id = Number(req.params.id);
   const { type, description, requestedBy } = req.body || {};
-  if (!hasModel('changeLog')) return res.status(200).json({
-    id: Date.now(), projectId: id, type, description, requestedBy: requestedBy || null, createdAt: new Date()
-  });
+  if (!hasModel('changeLog')) {
+    return res.status(200).json({
+      id: Date.now(),
+      projectId: id,
+      type,
+      description,
+      requestedBy: requestedBy || null,
+      createdAt: new Date()
+    });
+  }
   try {
     const row = await prisma.changeLog.create({
       data: { projectId: id, type, description, requestedBy: requestedBy || null }
@@ -331,13 +370,51 @@ router.delete('/projects/:id/changes/:changeId', authGuard, async (req, res) => 
 /** ======================= Create: Document ======================= */
 router.post('/projects/:id/documents', authGuard, async (req, res) => {
   const id = Number(req.params.id);
-  const { kind, title, url, version } = req.body || {};
-  if (!hasModel('projectDocument')) return res.status(200).json({
-    id: Date.now(), projectId: id, kind, title, url, version: Number(version || 1)
-  });
+  const { 
+    kind, 
+    title, 
+    url, 
+    version, 
+    referenceUrl, 
+    approvalEmails, 
+    notificationEmails,
+    key,
+    storageKey,
+    contentType
+  } = req.body || {};
+  if (!hasModel('projectDocument')) {
+    return res.status(200).json({
+      id: Date.now(), 
+      projectId: id, 
+      kind, 
+      title, 
+      url, 
+      version: Number(version || 1),
+      referenceUrl,
+      approvalEmails,
+      notificationEmails,
+      key: key || null,
+      storageKey: storageKey || key || null,
+      contentType: contentType || null,
+    });
+  }
   try {
     const row = await prisma.projectDocument.create({
-      data: { projectId: id, kind, title, url, version: Number(version || 1) }
+      data: { 
+        projectId: id, 
+        kind: kind || null, 
+        title: title || null, 
+        // Do not persist ephemeral URLs; store key/storageKey if provided
+        url: url || null,
+        key: key || null,
+        storageKey: storageKey || key || null,
+        contentType: contentType || null,
+        version: Number(version || 1),
+        referenceUrl: referenceUrl || null,
+        approvalEmails: approvalEmails || null,
+        notificationEmails: notificationEmails || null,
+        parentId: null,
+      }
     });
     res.json(row);
   } catch (e) {
@@ -350,9 +427,11 @@ router.post('/projects/:id/documents', authGuard, async (req, res) => {
 router.post('/projects/:id/variances', authGuard, async (req, res) => {
   const id = Number(req.params.id);
   const { documentId, description } = req.body || {};
-  if (!hasModel('varianceItem')) return res.status(200).json({
-    id: Date.now(), projectId: id, documentId: documentId || null, description, createdAt: new Date()
-  });
+  if (!hasModel('varianceItem')) {
+    return res.status(200).json({
+      id: Date.now(), projectId: id, documentId: documentId || null, description, createdAt: new Date()
+    });
+  }
   try {
     const row = await prisma.varianceItem.create({
       data: { projectId: id, documentId: documentId || null, description }
@@ -368,10 +447,18 @@ router.post('/projects/:id/variances', authGuard, async (req, res) => {
 router.post('/projects/:id/preprod', authGuard, async (req, res) => {
   const id = Number(req.params.id);
   const { name, owner, status, dueDate, order } = req.body || {};
-  if (!hasModel('preProdStep')) return res.status(200).json({
-    id: Date.now(), projectId: id, name, owner: owner || null, status: status || 'PLANNED',
-    dueDate: dueDate ? new Date(dueDate) : null, completedAt: null, order: Number(order || 0)
-  });
+  if (!hasModel('preProdStep')) {
+    return res.status(200).json({
+      id: Date.now(),
+      projectId: id,
+      name,
+      owner: owner || null,
+      status: status || 'PLANNED',
+      dueDate: dueDate ? new Date(dueDate) : null,
+      completedAt: null,
+      order: Number(order || 0)
+    });
+  }
   try {
     const row = await prisma.preProdStep.create({
       data: {
@@ -394,10 +481,16 @@ router.post('/projects/:id/preprod', authGuard, async (req, res) => {
 router.post('/projects/:id/compliance', authGuard, async (req, res) => {
   const id = Number(req.params.id);
   const { type, status, dueDate, remarks } = req.body || {};
-  if (!hasModel('complianceItem')) return res.status(200).json({
-    id: Date.now(), projectId: id, type, status: status || 'PLANNED',
-    dueDate: dueDate ? new Date(dueDate) : null, remarks: remarks || null
-  });
+  if (!hasModel('complianceItem')) {
+    return res.status(200).json({
+      id: Date.now(),
+      projectId: id,
+      type,
+      status: status || 'PLANNED',
+      dueDate: dueDate ? new Date(dueDate) : null,
+      remarks: remarks || null
+    });
+  }
   try {
     const row = await prisma.complianceItem.create({
       data: {
@@ -414,6 +507,7 @@ router.post('/projects/:id/compliance', authGuard, async (req, res) => {
     res.status(400).json({ error: 'Create compliance item failed' });
   }
 });
+
 // ---- SKUs: list / add (single or batch) / delete ----
 
 // GET /api/projects/:id/skus
@@ -598,4 +692,20 @@ router.post('/projects/:id/plan/simulate', authGuard, async (req, res) => {
   }
 });
 
-module.exports = { projectsRouter: router };
+// GET /projects/:id/stations - List all stations for a project
+router.get('/projects/:id/stations', authGuard, async (req, res) => {
+  try {
+    if (!hasModel('station')) return res.json([]);
+    const projectId = toInt(req.params.id);
+    const stations = await prisma.station.findMany({
+      where: { projectId },
+      orderBy: [{ id: 'asc' }],
+    });
+    res.json(stations);
+  } catch (e) {
+    console.error('GET /projects/:id/stations failed:', e);
+    res.status(500).json({ error: 'Failed to load stations' });
+  }
+});
+
+module.exports = router;

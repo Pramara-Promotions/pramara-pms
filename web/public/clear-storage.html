@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Storage & Fix Errors</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; margin-top: 0; }
+        .success { color: #22c55e; font-weight: bold; }
+        .info { background: #e0f2fe; padding: 15px; border-radius: 6px; margin: 20px 0; }
+        button {
+            background: #3b82f6;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover { background: #2563eb; }
+        code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Storage Cleared Successfully!</h1>
+        
+        <div class="success" id="status">✓ localStorage cleared</div>
+        
+        <div class="info">
+            <h3>What was fixed:</h3>
+            <ul>
+                <li>Removed <code>pms-tasks</code> from localStorage (fixes selection.includes error)</li>
+                <li>Cleared session storage (requires re-login)</li>
+            </ul>
+        </div>
+        
+        <div class="info">
+            <h3>Next Steps:</h3>
+            <ol>
+                <li>Click the button below to go to login</li>
+                <li>Login with: <code>admin@pramara.local</code> / <code>ChangeMe@123</code></li>
+                <li>After login, look for the <strong>user avatar icon</strong> in the top-right corner</li>
+                <li>Click the avatar to see the logout menu</li>
+            </ol>
+        </div>
+        
+        <button onclick="window.location.href='/login'">Go to Login Page</button>
+    </div>
+    
+    <script>
+        // Clear the problematic localStorage item
+        localStorage.removeItem('pms-tasks');
+        
+        console.log('✓ Storage cleared successfully');
+    </script>
+</body>
+</html>

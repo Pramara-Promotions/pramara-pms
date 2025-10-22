@@ -1,47 +1,47 @@
 {
   "name": "pramara-pms",
   "version": "1.0.0",
-  "description": "Pramara PMS – initial repo",
-  "main": "index.js",
+  "description": "Pramara Project Management System — unified backend and frontend setup",
+  "main": "server.js",
+  "type": "commonjs",
   "scripts": {
-    "dev": "nodemon server.js",
-    "start": "node server.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev --name init",
+    "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "prisma:migrate": "prisma migrate dev"
+    "db:seed": "prisma db seed",
+    "db:reset": "prisma migrate reset --skip-generate --skip-seed",
+    "api:dev": "cd api && npm run dev",
+    "api:start": "cd api && npm start",
+    "web:dev": "cd web && npm run dev",
+    "web:dev:network": "cd web && npm run dev -- --host",
+    "web:build": "cd web && npm run build",
+    "web:preview": "cd web && npm run preview",
+    "dev": "concurrently \"npm run api:dev\" \"npm run web:dev\"",
+    "dev:network": "concurrently \"npm run api:dev\" \"npm run web:dev:network\"",
+    "start": "npm run api:start",
+    "setup:local": "node scripts/setup-env.js local",
+    "setup:network": "node scripts/setup-env.js network",
+    "network:ip": "node scripts/get-network-ip.js",
+    "neon:test": "node scripts/test-neon-connection.js"
+    ,"storage:migrate": "node scripts/migrate-minio-to-s3.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/yourselfmyself124-droid/pramara-pms.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/yourselfmyself124-droid/pramara-pms/issues"
-  },
-  "homepage": "https://github.com/yourselfmyself124-droid/pramara-pms#readme",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.901.0",
-    "@aws-sdk/s3-request-presigner": "^3.901.0",
-    "@prisma/client": "^6.16.2",
+    "@prisma/client": "^5.18.0",
     "argon2": "^0.44.0",
-    "body-parser": "^2.2.0",
-    "cors": "^2.8.5",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.1.0",
-    "helmet": "^8.1.0",
-    "jsonwebtoken": "^9.0.2",
-    "prisma": "^6.16.2",
-    "qrcode": "^1.5.4",
-    "react-router-dom": "^7.9.3",
-    "speakeasy": "^2.0.0",
-    "uuid": "^13.0.0",
-    "zod": "^4.1.11"
+    "bcryptjs": "^2.4.3",
+    "concurrently": "^8.2.2",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
-  }
+    "prisma": "^5.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Pramara",
+  "license": "MIT"
 }

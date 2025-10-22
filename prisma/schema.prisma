@@ -1,5 +1,7 @@
 // prisma/schema.prisma
-
+// ====================================================================
+// [LANDMARK A] GENERATOR & DATASOURCE
+// ====================================================================
 generator client {
   provider   = "prisma-client-js"
   engineType = "binary"
@@ -10,10 +12,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ========================
-// AUTH & SECURITY MODELS
-// ========================
-
+// ====================================================================
+// [LANDMARK B] AUTH & SECURITY MODELS
+// ====================================================================
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -45,7 +46,7 @@ model Permission {
   id              String           @id @default(cuid())
   code            String           @unique
   label           String
-  // back-relation for RolePermission (fixes missing opposite field error)
+  // back-relation for RolePermission
   rolePermissions RolePermission[]
 }
 
@@ -84,8 +85,8 @@ model Session {
 model AuditLog {
   id        String   @id @default(cuid())
   actorId   String?
-  action    String // LOGIN, LOGOUT, ROLE_ASSIGN, PROJECT_ACCESS_DENIED, FILE_DOWNLOAD, COST_APPROVE, MFA_ENABLE, etc.
-  entity    String // USER, PROJECT, FILE, COST, etc.
+  action    String
+  entity    String
   entityId  String?
   meta      Json?
   ip        String?
@@ -95,41 +96,76 @@ model AuditLog {
   actor User? @relation("AuditByUser", fields: [actorId], references: [id])
 }
 
-// ========================
-// EXISTING PROJECT MODELS
-// (with fixed back-relations)
-// ========================
-
+// ====================================================================
+// [LANDMARK C] PROJECT & EXECUTION MODELS
+// ====================================================================
 model Project {
-  id              Int               @id @default(autoincrement())
-  code            String
-  name            String
-  sku             String?
-  quantity        Int
-  cutoffDate      DateTime?
-  pantoneCode     String?
-  createdAt       DateTime          @default(now())
+  id          Int       @id @default(autoincrement())
+  code        String
+  name        String
+  sku         String?
+  quantity    Int
+  cutoffDate  DateTime?
+  pantoneCode String?
+  createdAt   DateTime  @default(now())
+
+  // Relations
   complianceItems ComplianceItem[]
   changes         ChangeLog[]
   documents       ProjectDocument[]
-  skus            ProjectSku[] // <— add this line
+  skus            ProjectSku[]
+  qcRecords       QCRecord[]
+  alerts          Alert[]
+  alertRules      AlertRule[]
+  inventoryNeeds  InventoryNeed[]
+  preProdSteps    PreProdStep[]
+  variances       VarianceItem[]
 
-  // Removed `variances VarianceItem[]` because VarianceItem relates to ProjectDocument, not Project
-  qcRecords      QCRecord[]
-  alerts         Alert[]
-  alertRules     AlertRule[]
-  inventoryNeeds InventoryNeed[]
-  preProdSteps   PreProdStep[]
+  stations        Station[]
+
+  pref           ProjectPref?
+  purchaseOrders PurchaseOrder[]
+}
+
+// [LMK: PRISMA — CASCADE CHILDREN WHEN PROJECT DELETES]
+// (Prisma does NOT support /* */ comments; use // only.)
+
+model ProjectPref {
+  id          Int     @id @default(autoincrement())
+  projectId   Int     @unique
+  skuAttrKeys Json?
+  lastPo      String?
+  // [LMK] cascade when a project is deleted
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model PurchaseOrder {
+  id         Int      @id @default(autoincrement())
+  projectId  Int
+  poNumber   String
+  fileKey    String
+  createdAt  DateTime @default(now())
+  // [LMK] cascade when a project is deleted
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, poNumber])
+  @@index([projectId])
 }
 
 model ProjectSku {
-  id        Int      @id @default(autoincrement())
-  projectId Int
-  code      String
-  createdAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  projectId  Int
+  poNumber   String?
+  code       String
+  name       String?
+  color      String?
+  type       String?
+  orderQty   Int?
+  attributes Json?
+  // [LMK] cascade when a project is deleted
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
+  @@index([projectId])
   @@unique([projectId, code])
 }
 
@@ -184,91 +220,169 @@ model ChangeLog {
 }
 
 model ProjectDocument {
-  id        Int    @id @default(autoincrement())
+  id                Int       @id @default(autoincrement())
+  projectId         Int
+  kind              String
+  title             String
+  url               String?
+  referenceUrl      String?
+  key               String?
+  storageKey        String?
+  contentType       String?
+  version           Int       @default(1)
+  active            Boolean   @default(false)
+  tags              Json?
+  notes             String?
+  uploadedBy        String?
+  uploadedAt        DateTime  @default(now())
+  approvedBy        String?
+  approverRole      String?
+  approvedAt        DateTime?
+  approvalProof     String?
+  verifiedBy        String?
+  verifierRole      String?
+  verifiedAt        DateTime?
+  verificationProof String?
+  affectedTeams     Json?
+  isStandard        Boolean   @default(false)
+  sourceChangeId    Int?
+  approvalEmails    Json?
+  notificationEmails Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Versioning
+  parentId          Int?
+  parent            ProjectDocument? @relation("DocumentParent", fields: [parentId], references: [id])
+  revisions         ProjectDocument[] @relation("DocumentParent")
+  revisionNote      String?
+
+  // Tagging to stations
+  documentStations  DocumentStation[]
+
+  project   Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  changeLog ChangeLog?     @relation(fields: [sourceChangeId], references: [id])
+  variances VarianceItem[] @relation("VarianceDocument")
+
+  @@index([projectId, kind, title])
+  @@index([parentId])
+}
+
+// Station model (if not already present)
+model Station {
+  id        Int      @id @default(autoincrement())
   projectId Int
   name      String
+  // ... add more fields as needed
+  documents DocumentStation[]
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
 
-  // Keep external links if you use them
-  url String?
+// Join table for many-to-many between ProjectDocument and Station
+model DocumentStation {
+  id           Int             @id @default(autoincrement())
+  documentId   Int
+  stationId    Int
+  document     ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  station      Station         @relation(fields: [stationId], references: [id], onDelete: Cascade)
 
-  // NEW: object stored in MinIO/S3
-  storageKey  String?
-  contentType String?
-
-  // Existing fields you mentioned
-  approvalProof String?
-
-  version   Int      @default(1)
-  createdAt DateTime @default(now())
-
-  project      Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  ChangeLog    ChangeLog?     @relation(fields: [changeLogId], references: [id])
-  changeLogId  Int?
-  VarianceItem VarianceItem[]
-
-  @@index([projectId, name])
+  @@unique([documentId, stationId])
 }
 
 model VarianceItem {
-  id          Int      @id @default(autoincrement())
-  documentId  Int
-  description String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id          Int       @id @default(autoincrement())
+  projectId   Int
+  category    String
+  field       String
+  expected    String
+  actual      String
+  sourceDocId Int?
+  remarks     String?
+  status      String    @default("DEVIATION")
+  resolvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  ProjectDocument ProjectDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  Project Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source  ProjectDocument? @relation("VarianceDocument", fields: [sourceDocId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
 }
 
 model QCRecord {
-  id        Int      @id @default(autoincrement())
-  projectId Int
-  type      String
-  status    String
-  remarks   String?
-  createdAt DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  projectId    Int
+  batchCode    String?
+  passed       Int      @default(0)
+  rejected     Int      @default(0)
+  reason       String?
+  pantoneMatch String?  @default("Match")
+  createdAt    DateTime @default(now())
 
   Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model InventoryNeed {
-  id        Int      @id @default(autoincrement())
-  projectId Int
-  item      String
-  quantity  Int
-  createdAt DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  projectId    Int
+  material     String
+  requiredQty  Int
+  availableQty Int
+  shortfall    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 model AlertRule {
-  id        Int      @id @default(autoincrement())
-  projectId Int
-  type      String
-  condition String
-  createdAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  projectId  Int
+  key        String
+  level      String
+  threshold  Int      @default(0)
+  recipients String?
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, key])
 }
 
 model Alert {
   id        Int      @id @default(autoincrement())
   projectId Int
-  type      String
+  level     String
   message   String
+  status    String   @default("OPEN")
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   Project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  // back-relation for AlertAction (fixes missing opposite field error)
   actions AlertAction[]
+
+  @@index([projectId])
+  @@index([status])
 }
 
 model AlertAction {
-  id        Int      @id @default(autoincrement())
-  alertId   Int
-  action    String
-  createdAt DateTime @default(now())
+  id                Int      @id @default(autoincrement())
+  alertId           Int
+  action            String
+  by                String?
+  note              String?
+  correctiveActions String?
+  preventRecurrence String?
+  costImpactCents   Int?
+  costNote          String?
+  createdAt         DateTime @default(now())
 
-  // rename field to `alert` and add back-relation in Alert
   alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
 }
 

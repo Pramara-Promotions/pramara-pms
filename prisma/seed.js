@@ -85,48 +85,73 @@ async function seedProjectData(projectId) {
   // InventoryNeed
   if (!await prisma.inventoryNeed.findFirst({ where: { projectId } })) {
     await prisma.inventoryNeed.create({
-      data: { projectId, text: 'Add steel sheets (Grade 304) to inventory' },
+      data: {
+        projectId,
+        material: 'Steel Sheet 304',
+        requiredQty: 100,
+        availableQty: 0,
+      },
     });
   }
 
   // AlertRule
   if (!await prisma.alertRule.findFirst({ where: { projectId } })) {
     await prisma.alertRule.create({
-      data: { projectId, name: 'Low stock: fasteners', threshold: 50 },
+      data: {
+        projectId,
+  key: 'low_stock_fasteners',
+  level: 'warning',
+  threshold: 50,
+      },
     });
   }
 
   // PreProdStep
   if (!await prisma.preProdStep.findFirst({ where: { projectId } })) {
     await prisma.preProdStep.create({
-      data: { projectId, title: 'Finalize bill of materials (Rev A)' },
+      data: {
+        projectId,
+        step: 'Finalize bill of materials (Rev A)',
+        status: 'pending',
+      },
     });
   }
 
   // ComplianceItem
   if (!await prisma.complianceItem.findFirst({ where: { projectId } })) {
     await prisma.complianceItem.create({
-      data: { projectId, title: 'ISO 9001 – Doc control updated' },
+      data: {
+        projectId,
+        type: 'ISO 9001',
+        status: 'PLANNED',
+        remarks: 'Doc control updated',
+      },
     });
   }
 
   // ChangeLog
   if (!await prisma.changeLog.findFirst({ where: { projectId } })) {
     await prisma.changeLog.create({
-      data: { projectId, description: 'Updated welding spec WPS-12 to Rev C' },
+      data: {
+        projectId,
+        type: 'Welding Spec',
+        description: 'Updated welding spec WPS-12 to Rev C',
+        requestedBy: 'admin@pramara.local',
+      },
     });
   }
 
   // ProjectDocument
   if (!await prisma.projectDocument.findFirst({ where: { projectId } })) {
-    await prisma.projectDocument.create({
-      data: {
-        projectId,
-        name: 'Drawing Set – Rev A',
-        url: 'https://example.com/drawings/rev-a.pdf',
-        version: 1,
-      },
-    });
+      await prisma.projectDocument.create({
+        data: {
+          projectId,
+          kind: 'drawing',
+          title: 'Drawing Set – Rev A',
+          url: 'https://example.com/drawings/rev-a.pdf',
+          version: 1,
+        },
+      });
   }
 }
 

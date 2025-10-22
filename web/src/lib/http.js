@@ -1,26 +1,42 @@
 // web/src/lib/http.js
+const env = (import.meta && import.meta.env) || {};
+
+// In development, use relative URLs to go through Vite proxy
+// In production, use the configured API base
+const isDev = env.MODE === 'development' || !env.PROD;
+const rawBase = isDev ? "" : (env.VITE_API_BASE || env.VITE_API_URL || "");
+const normalizedBase = String(rawBase).replace(/\/$/, "");
+const API_BASE = normalizedBase.endsWith("/api") ? normalizedBase : normalizedBase ? `${normalizedBase}/api` : "";
+const ABS_URL = /^https?:\/\//i;
+
+function resolveUrl(path) {
+  if (ABS_URL.test(path)) return path;
+  const cleaned =
+    path === "/api"
+      ? "/"
+      : path.startsWith("/api/")
+        ? path.slice(4)
+        : path;
+  const suffix = cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
+  
+  // In dev mode with no API_BASE, return relative path for Vite proxy
+  if (!API_BASE) {
+    return `/api${suffix}`;
+  }
+  return `${API_BASE}${suffix}`;
+}
+
 export async function http(path, init = {}) {
-  const addAuth = (token, init) => {
-    const headers = new Headers(init.headers || {});
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    return { ...init, headers };
+  const url = resolveUrl(path);
+  
+  // Always include credentials to send/receive cookies
+  const fetchInit = {
+    ...init,
+    credentials: "include",  // Force include, don't use fallback
   };
 
-  let token = sessionStorage.getItem("accessToken");
-  let res = await fetch(path, addAuth(token, init));
-
-  if (res.status === 401 && sessionStorage.getItem("refreshToken")) {
-    const r = await fetch("/api/auth/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: sessionStorage.getItem("refreshToken") }),
-    });
-    if (r.ok) {
-      const data = await r.json();
-      sessionStorage.setItem("accessToken", data.accessToken);
-      sessionStorage.setItem("refreshToken", data.refreshToken);
-      res = await fetch(path, addAuth(data.accessToken, init));
-    }
-  }
+  console.log('[http] Fetching:', url, 'with credentials:', fetchInit.credentials);
+  const res = await fetch(url, fetchInit);
+  console.log('[http] Response status:', res.status, 'for', url);
   return res;
 }

@@ -5,7 +5,25 @@ const { PrismaClient } = require("@prisma/client");
 const app = express();
 const prisma = new PrismaClient();
 
-app.use(cors());
+// Dynamic CORS configuration for multi-device development
+const corsOrigin = process.env.CORS_ORIGIN || "http://localhost:5173";
+const allowedOrigins = corsOrigin.split(',').map(o => o.trim());
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true // Allow cookies for auth
+}));
+
 app.use(express.json());
 
 // ------------ Helpers: get rules & evaluate ----------------

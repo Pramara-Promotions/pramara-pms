@@ -1,8 +1,8 @@
 // web/src/pages/Account.jsx
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Card } from "../components/Card.jsx";
 import { Row } from "../components/Row.jsx";
-import { api } from "../lib/api.js";
+import { http } from "../lib/http.js";
 
 export default function Account() {
   const [user, setUser] = useState(null);
@@ -14,9 +14,9 @@ export default function Account() {
 
   // ---- Load user + sessions ----
   async function load() {
-    const me = await api("/api/me");
+    const me = await http("/api/me");
     if (me.ok) setUser(await me.json());
-    const s = await api("/api/sessions/me");
+    const s = await http("/api/sessions/me");
     if (s.ok) setSessions(await s.json());
   }
 
@@ -26,7 +26,7 @@ export default function Account() {
 
   // ---- MFA setup ----
   async function startMfa() {
-    const r = await api("/api/auth/mfa/setup", { method: "POST" });
+    const r = await http("/api/auth/mfa/setup", { method: "POST" });
     if (r.ok) {
       const d = await r.json();
       setMfaQR(d.qrDataUrl);
@@ -36,7 +36,7 @@ export default function Account() {
 
   async function verifyMfa(e) {
     e.preventDefault();
-    const r = await api("/api/auth/mfa/verify", {
+    const r = await http("/api/auth/mfa/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ base32: mfaBase32, token: mfaToken }),
@@ -53,13 +53,13 @@ export default function Account() {
   // ---- Session revoke ----
   async function revoke(id) {
     if (!confirm("Sign this device out?")) return;
-    const r = await api(`/api/sessions/${id}`, { method: "DELETE" });
+    const r = await http(`/api/sessions/${id}`, { method: "DELETE" });
     if (r.ok) setSessions((s) => s.filter((x) => x.id !== id));
   }
 
   async function revokeAll() {
     if (!confirm("Sign out of all sessions?")) return;
-    const r = await api("/api/sessions", { method: "DELETE" });
+    const r = await http("/api/sessions", { method: "DELETE" });
     if (r.ok) {
       alert("All sessions cleared; please log in again");
       sessionStorage.clear();

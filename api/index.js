@@ -41,6 +41,7 @@ const projectsRouter = require('./routes/projects');
 let uploadRouter = null;
 try { uploadRouter = require('./routes/upload'); } catch {}
 const { documentsRouter } = require('./routes/documents');
+const rolesRouter = require('./routes/roles');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -69,6 +70,7 @@ app.use('/uploads', express.static(path.resolve(__dirname, 'public', 'uploads'))
 app.use('/api', projectsRouter);
 if (uploadRouter) app.use('/api', uploadRouter);
 app.use('/api', documentsRouter);
+app.use('/api', rolesRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

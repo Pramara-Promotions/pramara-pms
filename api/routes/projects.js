@@ -17,6 +17,9 @@ if (typeof authGuard !== 'function') {
   authGuard = (req, _res, next) => next(); // fallback to avoid "Route.get() requires a callback" crash
 }
 
+// Permission guard for RBAC
+const { permissionGuard } = require('../middleware/permissionGuard');
+
 const prisma = new PrismaClient();
 const router = express.Router();
 
@@ -30,7 +33,7 @@ const toInt = (v) => Number.parseInt(v, 10);
 
 /** ============= Projects: list / create / update / delete ============= */
 
-router.get('/projects', authGuard, async (_req, res) => {
+router.get('/projects', authGuard, permissionGuard('PROJECT_VIEW'), async (_req, res) => {
   try {
     const items = await prisma.project.findMany({
       orderBy: [{ createdAt: 'desc' }],
@@ -38,11 +41,11 @@ router.get('/projects', authGuard, async (_req, res) => {
     res.json(items);
   } catch (e) {
     console.error('GET /projects failed:', e);
-    res.json([]); // don’t 500 the UI
+    res.json([]); // don't 500 the UI
   }
 });
 
-router.post('/projects', authGuard, async (req, res) => {
+router.post('/projects', authGuard, permissionGuard('PROJECT_CREATE'), async (req, res) => {
   try {
     console.log('POST /projects payload:', req.body);
     const { code, name, sku, quantity, cutoffDate, pantoneCode } = req.body || {};
@@ -64,7 +67,7 @@ router.post('/projects', authGuard, async (req, res) => {
   }
 });
 
-router.put('/projects/:id', authGuard, async (req, res) => {
+router.put('/projects/:id', authGuard, permissionGuard('PROJECT_EDIT'), async (req, res) => {
   try {
     const id = toInt(req.params.id);
     const { code, name, sku, quantity, cutoffDate, pantoneCode } = req.body || {};
@@ -86,7 +89,7 @@ router.put('/projects/:id', authGuard, async (req, res) => {
   }
 });
 
-router.delete('/projects/:id', authGuard, async (req, res) => {
+router.delete('/projects/:id', authGuard, permissionGuard('PROJECT_DELETE'), async (req, res) => {
   const id = toInt(req.params.id);
   try {
     // Best-effort clean up if related tables exist

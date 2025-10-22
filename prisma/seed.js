@@ -1,18 +1,9 @@
 // prisma/seed.js  (CommonJS, idempotent, aligned to your schema)
 const { PrismaClient } = require('@prisma/client');
 const argon2 = require('argon2');
+const { PERMISSIONS_ARRAY, DEFAULT_ROLES } = require('../api/config/permissions');
 
 const prisma = new PrismaClient();
-
-// ---- App permissions ----
-const PERMS = [
-  ['USER_MANAGE', 'Manage users'],
-  ['PROJECT_VIEW', 'View projects'],
-  ['PROJECT_EDIT', 'Edit projects'],
-  ['DOC_UPLOAD', 'Upload documents'],
-  ['RULE_EDIT', 'Edit alert rules'],
-  ['COMPLIANCE_EDIT', 'Edit compliance items'],
-];
 
 /* ---------- helpers ---------- */
 async function ensurePermission(code, label) {
@@ -26,9 +17,36 @@ async function ensurePermission(code, label) {
   return prisma.permission.create({ data: { code, label } });
 }
 
-async function ensureRole(name) {
+async function ensureRole(name, description) {
   const existing = await prisma.role.findUnique({ where: { name } });
-  return existing || prisma.role.create({ data: { name } });
+  if (existing) {
+    // Update description if changed
+    if (description && existing.description !== description) {
+      return prisma.role.update({ where: { name }, data: { description } });
+    }
+    return existing;
+  }
+  return prisma.role.create({ data: { name, description } });
+}
+
+async function assignPermissionsToRole(roleId, permissionCodes) {
+  for (const code of permissionCodes) {
+    const permission = await prisma.permission.findUnique({ where: { code } });
+    if (!permission) {
+      console.warn(`⚠️  Permission ${code} not found, skipping...`);
+      continue;
+    }
+
+    const existing = await prisma.rolePermission.findFirst({
+      where: { roleId, permissionId: permission.id },
+    });
+
+    if (!existing) {
+      await prisma.rolePermission.create({
+        data: { roleId, permissionId: permission.id },
+      });
+    }
+  }
 }
 
 async function ensureUserWithRole(email, rawPassword, roleId) {
@@ -159,20 +177,30 @@ async function seedProjectData(projectId) {
 async function main() {
   console.log('Seeding…');
 
-  // 1) Permissions
-  for (const [code, label] of PERMS) {
+  // 1) Permissions - seed all from config
+  console.log('📋 Seeding permissions...');
+  for (const { code, label } of PERMISSIONS_ARRAY) {
     await ensurePermission(code, label);
   }
+  console.log(`✅ ${PERMISSIONS_ARRAY.length} permissions seeded`);
 
-  // 2) Role
-  const superAdmin = await ensureRole('Super Admin');
+  // 2) Roles - create default roles
+  console.log('👥 Seeding roles...');
+  const roles = {};
+  for (const [key, config] of Object.entries(DEFAULT_ROLES)) {
+    roles[key] = await ensureRole(config.name, config.description);
+    await assignPermissionsToRole(roles[key].id, config.permissions);
+  }
+  console.log(`✅ ${Object.keys(DEFAULT_ROLES).length} roles seeded`);
 
   // 3) Super Admin user
   const adminEmail = 'admin@pramara.local';
   const adminPassword = 'ChangeMe@123';
-  await ensureUserWithRole(adminEmail, adminPassword, superAdmin.id);
+  console.log('👤 Creating Super Admin user...');
+  await ensureUserWithRole(adminEmail, adminPassword, roles.SUPER_ADMIN.id);
 
   // 4) Demo Project — only the fields your schema requires / supports
+  console.log('📦 Creating demo project...');
   const project = await ensureProject({
     code: 'PMS-DEMO',
     name: 'Pramara PMS Demo',
@@ -181,6 +209,7 @@ async function main() {
   });
 
   // 5) Demo related data
+  console.log('📊 Seeding project data...');
   await seedProjectData(project.id);
 
   console.log('✅ Seed complete.');

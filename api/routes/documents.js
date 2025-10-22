@@ -20,6 +20,9 @@ if (typeof authGuard !== "function") {
   authGuard = (_req, _res, next) => next();
 }
 
+// Permission guard for RBAC
+const { permissionGuard } = require("../middleware/permissionGuard");
+
 /* ────────────────────────────────────────────────────────────
    Use unified storage layer (supports S3/R2/MinIO)
    ──────────────────────────────────────────────────────────── */
@@ -60,7 +63,7 @@ function buildPublicUrl(key) {
  * List documents (optionally filtered by project)
  * Only returns root documents (parentId is null) to avoid showing all revisions
  */
-router.get("/documents", authGuard, async (req, res) => {
+router.get("/documents", authGuard, permissionGuard('DOC_VIEW'), async (req, res) => {
   try {
     if (!hasModel("projectDocument")) return res.json([]);
     const projectId = req.query.projectId ? Number(req.query.projectId) : null;
@@ -105,7 +108,7 @@ router.get("/documents/:id", authGuard, async (req, res) => {
  * Body: { projectId, kind?, title?, key?, url?, version? }
  * - If only "key" is provided (S3 object key), we attempt to build a public URL.
  */
-router.post("/documents", authGuard, async (req, res) => {
+router.post("/documents", authGuard, permissionGuard('DOC_UPLOAD'), async (req, res) => {
   try {
     if (!hasModel("projectDocument")) {
       // Echo back minimally so UI proceeds even if schema isn't ready
@@ -163,7 +166,7 @@ router.post("/documents", authGuard, async (req, res) => {
  * PUT /api/documents/:id
  * Update a document
  */
-router.put("/documents/:id", authGuard, async (req, res) => {
+router.put("/documents/:id", authGuard, permissionGuard('DOC_EDIT'), async (req, res) => {
   try {
     if (!hasModel("projectDocument")) return res.status(404).json({ error: "Not found" });
     const id = toInt(req.params.id);
@@ -234,7 +237,7 @@ router.put("/documents/:id", authGuard, async (req, res) => {
  */
 
 // Delete a single version (if root, promote next available revision to root if any)
-router.delete("/documents/:id", authGuard, async (req, res) => {
+router.delete("/documents/:id", authGuard, permissionGuard('DOC_DELETE'), async (req, res) => {
   try {
     if (!hasModel("projectDocument")) return res.json({ ok: true });
     const id = toInt(req.params.id);
@@ -284,7 +287,7 @@ router.delete("/documents/:id/all", authGuard, async (req, res) => {
  * Body: { projectId, filename, contentType?, sizeBytes? }
  * Returns: { url, key, method: "PUT", headers: { "Content-Type": ... } }
  */
-router.post("/documents/presign", authGuard, async (req, res) => {
+router.post("/documents/presign", authGuard, permissionGuard('DOC_UPLOAD'), async (req, res) => {
   try {
     if (!STORAGE_READY) {
       return res

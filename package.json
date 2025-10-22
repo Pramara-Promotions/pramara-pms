@@ -23,8 +23,10 @@
     "setup:local": "node scripts/setup-env.js local",
     "setup:network": "node scripts/setup-env.js network",
     "network:ip": "node scripts/get-network-ip.js",
-    "neon:test": "node scripts/test-neon-connection.js"
-    ,"storage:migrate": "node scripts/migrate-minio-to-s3.js"
+    "neon:test": "node scripts/test-neon-connection.js",
+    "storage:migrate": "node scripts/migrate-minio-to-s3.js",
+    "chat:save": "node scripts/save-chat-context.js",
+    "chat:load": "node scripts/load-chat-context.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

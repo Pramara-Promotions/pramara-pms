@@ -1,0 +1,110 @@
+# Chat Context Checkpoint
+**Timestamp:** 22/10/2025, 1:37:10 pm  
+**Description:** Cloud setup complete: Neon DB + R2 storage working, ready for second laptop
+
+---
+
+## Current State Summary
+# Cloud Setup Context - October 22, 2025
+
+## Current State
+- **Database**: Neon Postgres (direct connection, not pooled)
+  - Connection string stored in `.env.cloud` (not in Git)
+- **Storage**: Cloudflare R2 (S3-compatible)
+  - Bucket: `pramara-dev`
+  - Account ID: `2566e6fe84a59272502bdae9e2ceff41`
+  - Access credentials stored in `.env.cloud` (not in Git)
+- **CORS**: Configured for `http://localhost:5173`
+- **App Status**: ✅ Running successfully, uploads/downloads verified working
+
+## Setup Complete
+1. ✅ Neon DB provisioned and connected
+2. ✅ Cloudflare R2 bucket created with CORS
+3. ✅ `.env.cloud` template filled with all credentials
+4. ✅ `.env.cloud` added to `.gitignore` (security)
+5. ✅ App running with cloud config (API :4000, Web :5173)
+6. ✅ File uploads/downloads tested with R2
+7. ✅ Changes committed and pushed to `phase2-execution-control` branch
+
+## Second Laptop Setup Steps
+1. Clone repo: `git clone https://github.com/Pramara-Promotions/pramara-pms.git`
+2. Checkout branch: `git checkout phase2-execution-control`
+3. Copy `.env.cloud` from Laptop 1 (via USB/cloud/manual entry)
+4. Copy to active config: `Copy-Item -Force ".env.cloud" ".env"`
+5. Install dependencies: `npm install` (root), then `cd web; npm install`
+6. Start app: `npm run dev`
+7. Test uploads/downloads on http://localhost:5173
+
+## Important Files
+- **`.env.cloud`**: Template with Neon + R2 credentials (⚠️ NOT in Git, transfer manually)
+- **`api/lib/storage.js`**: Unified storage layer, auto-selects R2 mode
+- **`docs/MULTI_DEVICE_SETUP.md`**: Detailed multi-device setup guide
+- **`docs/MULTI_DEVICE_QUICK_START.md`**: Quick reference guide
+
+## Key Configuration
+```env
+DATABASE_URL=postgresql://neondb_owner:npg_...@ep-patient-math-a1631fzx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
+S3_ENDPOINT=https://2566e6fe84a59272502bdae9e2ceff41.r2.cloudflarestorage.com
+S3_BUCKET=pramara-dev
+S3_FORCE_PATH_STYLE=true
+STORAGE_DRIVER=s3
+S3_ACCESS_KEY_ID=<from R2 token>
+S3_SECRET_ACCESS_KEY=<from R2 token>
+CORS_ORIGIN=http://localhost:5173
+```
+
+## Next Steps (Optional)
+- [ ] MinIO→R2 migration if you have existing local files
+- [ ] Update CORS to allow second laptop IP if needed
+- [ ] Verify cross-device access with both laptops
+
+## Notes
+- Both laptops share the SAME database and storage
+- No LAN/VPN dependencies - works from anywhere with internet
+- R2 free tier: 10 GB storage, no egress fees
+- Neon free tier: 0.5 GB storage, auto-suspend after inactivity
+
+## Troubleshooting
+If uploads fail:
+1. Check R2 CORS allows your origin
+2. Verify S3_* credentials in `.env`
+3. Check browser console for presigned URL errors
+4. Confirm S3_FORCE_PATH_STYLE=true
+
+If DB connection fails:
+1. Check DATABASE_URL format (no psql wrapper, no channel_binding)
+2. Verify Neon project is not suspended
+3. Test connection: `npm run test:neon`
+
+
+---
+
+## What to Tell Copilot on Next Device
+
+Copy and paste this to Copilot when you switch devices:
+
+```
+I'm continuing from another device. Please read:
+1. docs/CLOUD_SETUP_CONTEXT.md (current project state)
+2. docs/chat-context/2025-10-22T08-07-10.md (last conversation checkpoint)
+
+Quick summary: Cloud setup complete: Neon DB + R2 storage working, ready for second laptop
+
+What's our next step?
+```
+
+---
+
+## Recent Git Activity
+```
+65d6b61 Add cloud setup context documentation
+799e796 Cloud setup: Neon DB + Cloudflare R2 storage
+d8b365a Phase-1 final freeze: Foundations & Intake stable; docs & env examples added
+c1770af Apply .gitignore to clean repo
+abd4bd9 chore: remove mailmap after rewrite
+66adcd5 chore: save work before history rewrite
+2198de9 chore: save work before history rewrite
+72d6e77 feat: per-project alert rules + recipients (QC, Inventory, Pantone)
+4ebfaac feat: working API + React UI (projects, QC, alerts, inventory, planner)
+4fd769e chore: initial repo
+```

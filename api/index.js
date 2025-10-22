@@ -42,6 +42,7 @@ let uploadRouter = null;
 try { uploadRouter = require('./routes/upload'); } catch {}
 const { documentsRouter } = require('./routes/documents');
 const rolesRouter = require('./routes/roles');
+const { adminRouter } = require('./routes/admin');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -66,11 +67,12 @@ app.use(express.json({ limit: process.env.MAX_UPLOAD_BYTES || '20mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.resolve(__dirname, 'public', 'uploads')));
 
-// Register projects router for /api/projects/* endpoints
+// Register routers for /api/* endpoints
 app.use('/api', projectsRouter);
 if (uploadRouter) app.use('/api', uploadRouter);
 app.use('/api', documentsRouter);
 app.use('/api', rolesRouter);
+app.use('/api', adminRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

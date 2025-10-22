@@ -21,18 +21,8 @@ if (typeof authGuard !== "function") {
   authGuard = (_req, _res, next) => next();
 }
 
-/* ────────────────────────────────────────────────────────────
-   Optional role check (no-op if role/claims unavailable)
-   ──────────────────────────────────────────────────────────── */
-function adminOnly(req, res, next) {
-  // If your authGuard sets req.user / req.auth.user with role, enforce it here.
-  // Otherwise, allow through to keep dev moving.
-  const role = req?.user?.role || req?.auth?.user?.role || null;
-  if (role && role.toLowerCase() !== "admin") {
-    return res.status(403).json({ error: "Admin only" });
-  }
-  return next();
-}
+// Import permission guard for RBAC
+const { permissionGuard } = require("../middleware/permissionGuard");
 
 /* ────────────────────────────────────────────────────────────
    Helpers
@@ -47,7 +37,7 @@ const toInt = (v) => Number.parseInt(v, 10);
    ──────────────────────────────────────────────────────────── */
 
 // GET /api/admin/health
-router.get("/admin/health", authGuard, adminOnly, async (_req, res) => {
+router.get("/admin/health", authGuard, permissionGuard.role('Super Admin'), async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`; // ping db
     res.json({ ok: true, db: "up", time: new Date().toISOString() });
@@ -58,7 +48,7 @@ router.get("/admin/health", authGuard, adminOnly, async (_req, res) => {
 });
 
 // GET /api/admin/stats
-router.get("/admin/stats", authGuard, adminOnly, async (_req, res) => {
+router.get("/admin/stats", authGuard, permissionGuard('AUDIT_VIEW', 'SYSTEM_SETTINGS'), async (_req, res) => {
   try {
     const out = {};
     if (hasModel("user")) out.users = await prisma.user.count();
@@ -78,55 +68,126 @@ router.get("/admin/stats", authGuard, adminOnly, async (_req, res) => {
    ──────────────────────────────────────────────────────────── */
 
 // GET /api/admin/users
-router.get("/admin/users", authGuard, adminOnly, async (_req, res) => {
+router.get("/admin/users", authGuard, permissionGuard('USER_VIEW'), async (_req, res) => {
   if (!hasModel("user")) return res.json([]);
   try {
     const rows = await prisma.user.findMany({
-      select: { id: true, email: true, name: true, role: true, isActive: true, createdAt: true },
+      select: { 
+        id: true, 
+        email: true, 
+        isActive: true, 
+        createdAt: true,
+        roles: {
+          include: {
+            role: {
+              select: { name: true, description: true }
+            }
+          }
+        }
+      },
       orderBy: { createdAt: "desc" },
     });
-    res.json(rows);
+    
+    // Format response with role names
+    const formatted = rows.map(user => ({
+      id: user.id,
+      email: user.email,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      roles: user.roles.map(ur => ur.role.name),
+    }));
+    
+    res.json(formatted);
   } catch (e) {
     console.error("[admin] list users failed:", e);
     res.json([]);
   }
 });
 
-// POST /api/admin/users  { email, name?, role?, password? }
-router.post("/admin/users", authGuard, adminOnly, async (req, res) => {
+// POST /api/admin/users  { email, password?, roleIds?: ['roleId1', ...] }
+router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
-    const { email, name, role = "user", password = "ChangeMe@123" } = req.body || {};
+    const { email, password = "ChangeMe@123", roleIds = [] } = req.body || {};
     if (!email) return res.status(400).json({ error: "email is required" });
 
-    const passwordHash = await bcrypt.hash(String(password), 10);
-    const row = await prisma.user.create({
-      data: { email: String(email).toLowerCase().trim(), name: name || null, role, isActive: true, passwordHash },
-      select: { id: true, email: true, name: true, role: true, isActive: true },
+    // Check if user already exists
+    const existing = await prisma.user.findUnique({ where: { email: String(email).toLowerCase().trim() } });
+    if (existing) {
+      return res.status(400).json({ error: "User with this email already exists" });
+    }
+
+    const argon2 = require('argon2');
+    const passwordHash = await argon2.hash(String(password));
+    
+    // Create user with roles
+    const user = await prisma.user.create({
+      data: { 
+        email: String(email).toLowerCase().trim(), 
+        passwordHash,
+        isActive: true,
+        ...(roleIds.length > 0 ? {
+          roles: {
+            create: roleIds.map(roleId => ({ roleId }))
+          }
+        } : {})
+      },
+      select: { 
+        id: true, 
+        email: true, 
+        isActive: true, 
+        createdAt: true,
+        roles: {
+          include: {
+            role: { select: { name: true } }
+          }
+        }
+      },
     });
-    res.status(201).json(row);
+    
+    res.status(201).json({
+      id: user.id,
+      email: user.email,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      roles: user.roles.map(ur => ur.role.name),
+    });
   } catch (e) {
     console.error("[admin] create user failed:", e);
-    res.status(400).json({ error: "Create user failed" });
+    res.status(400).json({ error: e.message || "Create user failed" });
   }
 });
 
-// PUT /api/admin/users/:id  { name?, role?, isActive? }
-router.put("/admin/users/:id", authGuard, adminOnly, async (req, res) => {
+// PUT /api/admin/users/:id  { isActive? }
+router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
-    const id = toInt(req.params.id);
-    const { name, role, isActive } = req.body || {};
+    const { id } = req.params;
+    const { isActive } = req.body || {};
+    
     const row = await prisma.user.update({
       where: { id },
       data: {
-        ...(name !== undefined ? { name } : {}),
-        ...(role !== undefined ? { role } : {}),
         ...(isActive !== undefined ? { isActive: !!isActive } : {}),
       },
-      select: { id: true, email: true, name: true, role: true, isActive: true },
+      select: { 
+        id: true, 
+        email: true, 
+        isActive: true,
+        roles: {
+          include: {
+            role: { select: { name: true } }
+          }
+        }
+      },
     });
-    res.json(row);
+    
+    res.json({
+      id: row.id,
+      email: row.email,
+      isActive: row.isActive,
+      roles: row.roles.map(ur => ur.role.name),
+    });
   } catch (e) {
     console.error("[admin] update user failed:", e);
     if (e?.code === "P2025") return res.status(404).json({ error: "User not found" });
@@ -135,15 +196,17 @@ router.put("/admin/users/:id", authGuard, adminOnly, async (req, res) => {
 });
 
 // POST /api/admin/users/:id/reset-password  { password }
-router.post("/admin/users/:id/reset-password", authGuard, adminOnly, async (req, res) => {
+router.post("/admin/users/:id/reset-password", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
-    const id = toInt(req.params.id);
+    const { id } = req.params;
     const { password } = req.body || {};
     if (!password) return res.status(400).json({ error: "password required" });
-    const passwordHash = await bcrypt.hash(String(password), 10);
+    
+    const argon2 = require('argon2');
+    const passwordHash = await argon2.hash(String(password));
     await prisma.user.update({ where: { id }, data: { passwordHash } });
-    res.json({ ok: true });
+    res.json({ ok: true, message: 'Password reset successfully' });
   } catch (e) {
     console.error("[admin] reset password failed:", e);
     if (e?.code === "P2025") return res.status(404).json({ error: "User not found" });
@@ -151,13 +214,81 @@ router.post("/admin/users/:id/reset-password", authGuard, adminOnly, async (req,
   }
 });
 
-// DELETE /api/admin/users/:id
-router.delete("/admin/users/:id", authGuard, adminOnly, async (req, res) => {
+// GET /api/admin/users/:id - Get single user with full details
+router.get("/admin/users/:id", authGuard, permissionGuard('USER_VIEW'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
-    const id = toInt(req.params.id);
+    const { id } = req.params;
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        roles: {
+          include: {
+            role: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+                permissions: {
+                  include: {
+                    permission: { select: { code: true, label: true } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Format response
+    const formatted = {
+      id: user.id,
+      email: user.email,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      roles: user.roles.map(ur => ({
+        id: ur.role.id,
+        name: ur.role.name,
+        description: ur.role.description,
+      })),
+      permissions: [...new Set(
+        user.roles.flatMap(ur =>
+          ur.role.permissions.map(rp => rp.permission.code)
+        )
+      )],
+    };
+
+    res.json(formatted);
+  } catch (e) {
+    console.error("[admin] get user failed:", e);
+    res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+
+// DELETE /api/admin/users/:id
+router.delete("/admin/users/:id", authGuard, permissionGuard('USER_DELETE'), async (req, res) => {
+  if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
+  try {
+    const { id } = req.params;
+    
+    // Prevent deleting yourself
+    if (req.auth?.user?.id === id) {
+      return res.status(400).json({ error: "Cannot delete your own account" });
+    }
+    
     await prisma.user.delete({ where: { id } });
-    res.json({ ok: true });
+    res.json({ ok: true, message: 'User deleted successfully' });
   } catch (e) {
     console.error("[admin] delete user failed:", e);
     if (e?.code === "P2025") return res.status(404).json({ error: "User not found" });

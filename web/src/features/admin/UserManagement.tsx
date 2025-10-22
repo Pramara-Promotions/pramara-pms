@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../common/AuthProvider';
 import PermissionGate from '../../components/auth/PermissionGate';
+import InviteUserModal from './InviteUserModal';
 import { http } from '../../lib/http';
 
 type User = {
@@ -180,27 +181,12 @@ export default function UserManagement() {
         )}
       </div>
 
-      {/* Invite Modal - Placeholder */}
-      {showInviteModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Invite User
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Invite user form coming soon...
-            </p>
-            <div className="flex justify-end space-x-2">
-              <button
-                onClick={() => setShowInviteModal(false)}
-                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg text-sm hover:bg-gray-300 dark:hover:bg-gray-600"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Invite User Modal */}
+      <InviteUserModal
+        isOpen={showInviteModal}
+        onClose={() => setShowInviteModal(false)}
+        onSuccess={fetchUsers}
+      />
     </div>
   );
 }

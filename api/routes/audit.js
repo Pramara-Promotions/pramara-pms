@@ -1,13 +1,13 @@
 // api/routes/audit.js
 const express = require('express');
-const { authGuard } = require('../middleware/authGuard');
+const authGuard = require('../middleware/authGuard');
 const { permissionGuard } = require('../middleware/permissionGuard');
 const { getAuditLogs } = require('../middleware/auditLogger');
 
 const router = express.Router();
 
 // Get audit logs (Super Admin only)
-router.get('/audit-logs', authGuard(), permissionGuard.role('Super Admin'), async (req, res) => {
+router.get('/audit-logs', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
   try {
     const {
       actorId,
@@ -39,7 +39,7 @@ router.get('/audit-logs', authGuard(), permissionGuard.role('Super Admin'), asyn
 });
 
 // Get flagged actions (Super Admin only)
-router.get('/audit-logs/flagged', authGuard(), permissionGuard.role('Super Admin'), async (req, res) => {
+router.get('/audit-logs/flagged', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
   try {
     const { limit = 50, offset = 0 } = req.query;
     
@@ -57,7 +57,7 @@ router.get('/audit-logs/flagged', authGuard(), permissionGuard.role('Super Admin
 });
 
 // Get user's own audit trail
-router.get('/audit-logs/me', authGuard(), async (req, res) => {
+router.get('/audit-logs/me', authGuard, async (req, res) => {
   try {
     const { limit = 50, offset = 0 } = req.query;
     
@@ -75,3 +75,4 @@ router.get('/audit-logs/me', authGuard(), async (req, res) => {
 });
 
 module.exports = { auditRouter: router };
+

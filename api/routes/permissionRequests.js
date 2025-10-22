@@ -1,6 +1,6 @@
 // api/routes/permissionRequests.js
 const express = require('express');
-const { authGuard } = require('../middleware/authGuard');
+const authGuard = require('../middleware/authGuard');
 const { permissionGuard } = require('../middleware/permissionGuard');
 const { PrismaClient } = require('@prisma/client');
 const { logAudit } = require('../middleware/auditLogger');
@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 const router = express.Router();
 
 // Create permission request (any authenticated user)
-router.post('/permission-requests', authGuard(), async (req, res) => {
+router.post('/permission-requests', authGuard, async (req, res) => {
   try {
     const { permissionCode, reason, duration } = req.body;
     
@@ -100,7 +100,7 @@ router.post('/permission-requests', authGuard(), async (req, res) => {
 });
 
 // List permission requests (admin can see all, user can see their own)
-router.get('/permission-requests', authGuard(), async (req, res) => {
+router.get('/permission-requests', authGuard, async (req, res) => {
   try {
     const { status, userId } = req.query;
     
@@ -142,7 +142,7 @@ router.get('/permission-requests', authGuard(), async (req, res) => {
 });
 
 // Get single permission request
-router.get('/permission-requests/:id', authGuard(), async (req, res) => {
+router.get('/permission-requests/:id', authGuard, async (req, res) => {
   try {
     const request = await prisma.permissionRequest.findUnique({
       where: { id: req.params.id },
@@ -177,7 +177,7 @@ router.get('/permission-requests/:id', authGuard(), async (req, res) => {
 });
 
 // Approve/reject permission request
-router.post('/permission-requests/:id/review', authGuard(), permissionGuard('USER_EDIT'), async (req, res) => {
+router.post('/permission-requests/:id/review', authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   try {
     const { approved, response, temporary } = req.body;
     
@@ -267,7 +267,7 @@ router.post('/permission-requests/:id/review', authGuard(), permissionGuard('USE
 });
 
 // Delete permission request (user can delete their own pending requests)
-router.delete('/permission-requests/:id', authGuard(), async (req, res) => {
+router.delete('/permission-requests/:id', authGuard, async (req, res) => {
   try {
     const request = await prisma.permissionRequest.findUnique({
       where: { id: req.params.id }
@@ -299,3 +299,4 @@ router.delete('/permission-requests/:id', authGuard(), async (req, res) => {
 });
 
 module.exports = { permissionRequestsRouter: router };
+

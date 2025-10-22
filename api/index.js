@@ -49,6 +49,7 @@ const { auditRouter } = require('./routes/audit');
 const { temporaryPermissionsRouter } = require('./routes/temporaryPermissions');
 const { permissionRequestsRouter } = require('./routes/permissionRequests');
 const { notificationsRouter } = require('./routes/notifications');
+const { invitationsRouter } = require('./routes/invitations');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -85,6 +86,7 @@ app.use('/api', auditRouter);
 app.use('/api', temporaryPermissionsRouter);
 app.use('/api', permissionRequestsRouter);
 app.use('/api', notificationsRouter);
+app.use('/api', invitationsRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

@@ -1,13 +1,13 @@
 // api/routes/notifications.js
 const express = require('express');
-const { authGuard } = require('../middleware/authGuard');
+const authGuard = require('../middleware/authGuard');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
 // Get user's notifications
-router.get('/notifications', authGuard(), async (req, res) => {
+router.get('/notifications', authGuard, async (req, res) => {
   try {
     const { unreadOnly, limit = 50, offset = 0 } = req.query;
     
@@ -35,7 +35,7 @@ router.get('/notifications', authGuard(), async (req, res) => {
 });
 
 // Mark notification as read
-router.patch('/notifications/:id/read', authGuard(), async (req, res) => {
+router.patch('/notifications/:id/read', authGuard, async (req, res) => {
   try {
     const notification = await prisma.notification.findUnique({
       where: { id: req.params.id }
@@ -62,7 +62,7 @@ router.patch('/notifications/:id/read', authGuard(), async (req, res) => {
 });
 
 // Mark all notifications as read
-router.post('/notifications/read-all', authGuard(), async (req, res) => {
+router.post('/notifications/read-all', authGuard, async (req, res) => {
   try {
     const result = await prisma.notification.updateMany({
       where: {
@@ -80,7 +80,7 @@ router.post('/notifications/read-all', authGuard(), async (req, res) => {
 });
 
 // Delete notification
-router.delete('/notifications/:id', authGuard(), async (req, res) => {
+router.delete('/notifications/:id', authGuard, async (req, res) => {
   try {
     const notification = await prisma.notification.findUnique({
       where: { id: req.params.id }
@@ -140,3 +140,4 @@ module.exports = {
   createNotification,
   notifyUsers
 };
+

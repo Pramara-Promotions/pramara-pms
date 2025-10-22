@@ -104,11 +104,11 @@ router.get("/admin/users", authGuard, permissionGuard('USER_VIEW'), async (_req,
   }
 });
 
-// POST /api/admin/users  { email, password?, roleIds?: ['roleId1', ...] }
+// POST /api/admin/users  { email, name?, departmentId?, roleIds?: ['roleId1', ...], sendInvite?: boolean }
 router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
-    const { email, password = "ChangeMe@123", roleIds = [] } = req.body || {};
+    const { email, name, departmentId, roleIds = [], sendInvite = true } = req.body || {};
     if (!email) return res.status(400).json({ error: "email is required" });
 
     // Check if user already exists
@@ -118,14 +118,35 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
     }
 
     const argon2 = require('argon2');
-    const passwordHash = await argon2.hash(String(password));
+    const { generateInviteToken, sendInvitationEmail } = require('../lib/emailService');
+    const { logAudit } = require('../middleware/auditLogger');
+    const { getClientIP } = require('../lib/deviceFingerprint');
+    
+    // Generate temporary password and invite token
+    const tempPassword = "ChangeMe@123";
+    const passwordHash = await argon2.hash(tempPassword);
+    
+    let inviteToken = null;
+    let inviteExpires = null;
+    
+    if (sendInvite) {
+      inviteToken = generateInviteToken();
+      inviteExpires = new Date();
+      inviteExpires.setDate(inviteExpires.getDate() + 7); // 7 days expiry
+    }
     
     // Create user with roles
     const user = await prisma.user.create({
       data: { 
-        email: String(email).toLowerCase().trim(), 
+        email: String(email).toLowerCase().trim(),
+        name: name || null,
         passwordHash,
         isActive: true,
+        status: sendInvite ? 'PENDING' : 'ACTIVE',
+        departmentId: departmentId || null,
+        trustDeviceDuration: 30,
+        inviteToken,
+        inviteExpires,
         ...(roleIds.length > 0 ? {
           roles: {
             create: roleIds.map(roleId => ({ roleId }))
@@ -134,9 +155,14 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
       },
       select: { 
         id: true, 
-        email: true, 
+        email: true,
+        name: true,
+        status: true,
         isActive: true, 
         createdAt: true,
+        department: {
+          select: { id: true, name: true }
+        },
         roles: {
           include: {
             role: { select: { name: true } }
@@ -145,12 +171,38 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
       },
     });
     
+    // Send invitation email if requested
+    if (sendInvite && inviteToken) {
+      const inviteUrl = `${process.env.APP_URL || 'http://localhost:5173'}/invite/${inviteToken}`;
+      await sendInvitationEmail({
+        email: user.email,
+        inviteUrl,
+        inviterName: req.auth?.user?.email || 'Admin'
+      });
+    }
+    
+    // Log the action
+    await logAudit({
+      actorId: req.auth?.user?.id || null,
+      action: 'USER_CREATE',
+      entity: 'USER',
+      entityId: user.id,
+      changes: { created: { email: user.email, roles: user.roles.map(ur => ur.role.name) } },
+      ip: getClientIP(req),
+      userAgent: req.headers['user-agent'],
+      result: 'SUCCESS'
+    });
+    
     res.status(201).json({
       id: user.id,
       email: user.email,
+      name: user.name,
+      status: user.status,
       isActive: user.isActive,
       createdAt: user.createdAt,
+      department: user.department,
       roles: user.roles.map(ur => ur.role.name),
+      inviteSent: sendInvite
     });
   } catch (e) {
     console.error("[admin] create user failed:", e);
@@ -301,7 +353,7 @@ router.delete("/admin/users/:id", authGuard, permissionGuard('USER_DELETE'), asy
    ──────────────────────────────────────────────────────────── */
 
 // GET /api/admin/sessions
-router.get("/admin/sessions", authGuard, adminOnly, async (_req, res) => {
+router.get("/admin/sessions", authGuard, permissionGuard.role('Super Admin'), async (_req, res) => {
   if (!hasModel("session")) return res.json([]);
   try {
     const rows = await prisma.session.findMany({
@@ -316,7 +368,7 @@ router.get("/admin/sessions", authGuard, adminOnly, async (_req, res) => {
 });
 
 // DELETE /api/admin/sessions/:id
-router.delete("/admin/sessions/:id", authGuard, adminOnly, async (req, res) => {
+router.delete("/admin/sessions/:id", authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
   if (!hasModel("session")) return res.status(503).json({ error: "Session model not available" });
   try {
     const id = toInt(req.params.id);

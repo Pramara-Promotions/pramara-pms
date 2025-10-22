@@ -1,6 +1,6 @@
 // api/routes/temporaryPermissions.js
 const express = require('express');
-const { authGuard } = require('../middleware/authGuard');
+const authGuard = require('../middleware/authGuard');
 const { permissionGuard } = require('../middleware/permissionGuard');
 const { PrismaClient } = require('@prisma/client');
 const { logAudit } = require('../middleware/auditLogger');
@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 const router = express.Router();
 
 // List temporary permissions for a user
-router.get('/users/:userId/temp-permissions', authGuard(), permissionGuard('USER_VIEW'), async (req, res) => {
+router.get('/users/:userId/temp-permissions', authGuard, permissionGuard('USER_VIEW'), async (req, res) => {
   try {
     const permissions = await prisma.temporaryPermission.findMany({
       where: {
@@ -28,7 +28,7 @@ router.get('/users/:userId/temp-permissions', authGuard(), permissionGuard('USER
 });
 
 // Grant temporary permission
-router.post('/users/:userId/temp-permissions', authGuard(), permissionGuard('USER_EDIT'), async (req, res) => {
+router.post('/users/:userId/temp-permissions', authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   try {
     const { permissionCode, startDate, endDate, reason } = req.body;
     
@@ -94,7 +94,7 @@ router.post('/users/:userId/temp-permissions', authGuard(), permissionGuard('USE
 });
 
 // Revoke temporary permission
-router.delete('/temp-permissions/:id', authGuard(), permissionGuard('USER_EDIT'), async (req, res) => {
+router.delete('/temp-permissions/:id', authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   try {
     const tempPerm = await prisma.temporaryPermission.findUnique({
       where: { id: req.params.id }
@@ -132,7 +132,7 @@ router.delete('/temp-permissions/:id', authGuard(), permissionGuard('USER_EDIT')
 });
 
 // Auto-expire job (to be called by a cron job or scheduled task)
-router.post('/temp-permissions/expire-check', authGuard(), permissionGuard.role('Super Admin'), async (req, res) => {
+router.post('/temp-permissions/expire-check', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
   try {
     const now = new Date();
     
@@ -154,7 +154,7 @@ router.post('/temp-permissions/expire-check', authGuard(), permissionGuard.role(
 });
 
 // Get expiring soon permissions (for notifications)
-router.get('/temp-permissions/expiring-soon', authGuard(), permissionGuard('USER_VIEW'), async (req, res) => {
+router.get('/temp-permissions/expiring-soon', authGuard, permissionGuard('USER_VIEW'), async (req, res) => {
   try {
     const daysAhead = parseInt(req.query.days) || 2;
     const now = new Date();
@@ -189,3 +189,4 @@ router.get('/temp-permissions/expiring-soon', authGuard(), permissionGuard('USER
 });
 
 module.exports = { temporaryPermissionsRouter: router };
+

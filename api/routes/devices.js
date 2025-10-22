@@ -1,6 +1,6 @@
 // api/routes/devices.js
 const express = require('express');
-const { authGuard } = require('../middleware/authGuard');
+const authGuard = require('../middleware/authGuard');
 const { permissionGuard } = require('../middleware/permissionGuard');
 const { PrismaClient } = require('@prisma/client');
 const { generateDeviceFingerprint, parseUserAgent, getClientIP } = require('../lib/deviceFingerprint');
@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 const router = express.Router();
 
 // Get user's own devices
-router.get('/devices/me', authGuard(), async (req, res) => {
+router.get('/devices/me', authGuard, async (req, res) => {
   try {
     const devices = await prisma.device.findMany({
       where: { userId: req.auth.user.id },
@@ -29,7 +29,7 @@ router.get('/devices/me', authGuard(), async (req, res) => {
 });
 
 // Get all devices (Super Admin only)
-router.get('/devices', authGuard(), permissionGuard.role('Super Admin'), async (req, res) => {
+router.get('/devices', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
   try {
     const { userId, trusted, limit = 50, offset = 0 } = req.query;
     
@@ -66,7 +66,7 @@ router.get('/devices', authGuard(), permissionGuard.role('Super Admin'), async (
 });
 
 // Update device name (user can name their own devices)
-router.put('/devices/:id/name', authGuard(), async (req, res) => {
+router.put('/devices/:id/name', authGuard, async (req, res) => {
   try {
     const { name } = req.body;
     
@@ -101,7 +101,7 @@ router.put('/devices/:id/name', authGuard(), async (req, res) => {
 });
 
 // Revoke device (user can revoke their own, Super Admin can revoke any)
-router.delete('/devices/:id', authGuard(), async (req, res) => {
+router.delete('/devices/:id', authGuard, async (req, res) => {
   try {
     const device = await prisma.device.findUnique({
       where: { id: req.params.id },
@@ -135,7 +135,7 @@ router.delete('/devices/:id', authGuard(), async (req, res) => {
 });
 
 // Trust/untrust device (Super Admin can set for any user)
-router.put('/devices/:id/trust', authGuard(), async (req, res) => {
+router.put('/devices/:id/trust', authGuard, async (req, res) => {
   try {
     const { trusted, trustDays } = req.body;
     
@@ -177,7 +177,7 @@ router.put('/devices/:id/trust', authGuard(), async (req, res) => {
 });
 
 // Force logout from device (terminates all sessions)
-router.post('/devices/:id/logout', authGuard(), async (req, res) => {
+router.post('/devices/:id/logout', authGuard, async (req, res) => {
   try {
     const device = await prisma.device.findUnique({
       where: { id: req.params.id }
@@ -205,3 +205,4 @@ router.post('/devices/:id/logout', authGuard(), async (req, res) => {
 });
 
 module.exports = { devicesRouter: router };
+

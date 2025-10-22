@@ -1,6 +1,6 @@
 // api/routes/departments.js
 const express = require('express');
-const { authGuard } = require('../middleware/authGuard');
+const authGuard = require('../middleware/authGuard');
 const { permissionGuard } = require('../middleware/permissionGuard');
 const { PrismaClient } = require('@prisma/client');
 
@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 const router = express.Router();
 
 // List all departments
-router.get('/departments', authGuard(), permissionGuard('USER_VIEW'), async (req, res) => {
+router.get('/departments', authGuard, permissionGuard('USER_VIEW'), async (req, res) => {
   try {
     const departments = await prisma.department.findMany({
       include: {
@@ -27,7 +27,7 @@ router.get('/departments', authGuard(), permissionGuard('USER_VIEW'), async (req
 });
 
 // Get department by ID
-router.get('/departments/:id', authGuard(), permissionGuard('USER_VIEW'), async (req, res) => {
+router.get('/departments/:id', authGuard, permissionGuard('USER_VIEW'), async (req, res) => {
   try {
     const department = await prisma.department.findUnique({
       where: { id: req.params.id },
@@ -62,7 +62,7 @@ router.get('/departments/:id', authGuard(), permissionGuard('USER_VIEW'), async 
 });
 
 // Create department (Admin only)
-router.post('/departments', authGuard(), permissionGuard('USER_CREATE'), async (req, res) => {
+router.post('/departments', authGuard, permissionGuard('USER_CREATE'), async (req, res) => {
   try {
     const { name, description } = req.body;
     
@@ -88,7 +88,7 @@ router.post('/departments', authGuard(), permissionGuard('USER_CREATE'), async (
 });
 
 // Update department
-router.put('/departments/:id', authGuard(), permissionGuard('USER_EDIT'), async (req, res) => {
+router.put('/departments/:id', authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   try {
     const { name, description } = req.body;
     
@@ -114,7 +114,7 @@ router.put('/departments/:id', authGuard(), permissionGuard('USER_EDIT'), async 
 });
 
 // Delete department (only if no users)
-router.delete('/departments/:id', authGuard(), permissionGuard('USER_DELETE'), async (req, res) => {
+router.delete('/departments/:id', authGuard, permissionGuard('USER_DELETE'), async (req, res) => {
   try {
     // Check if department has users
     const userCount = await prisma.user.count({
@@ -142,3 +142,4 @@ router.delete('/departments/:id', authGuard(), permissionGuard('USER_DELETE'), a
 });
 
 module.exports = { departmentsRouter: router };
+

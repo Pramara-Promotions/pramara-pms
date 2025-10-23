@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "mustChangePassword" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "passwordResetAt" TIMESTAMP(3),
+ADD COLUMN     "passwordResetMethod" TEXT;

@@ -32,9 +32,11 @@ export default function DeviceManagement() {
       const res = await http('/api/devices');
       if (!res.ok) throw new Error(`Failed to fetch devices (${res.status})`);
       const data = await res.json();
-      setDevices(data);
+      // Handle both array (old format) and object with devices property (new format)
+      setDevices(Array.isArray(data) ? data : (data.devices || []));
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load devices');
+      setDevices([]); // Set empty array on error
     } finally {
       setLoading(false);
     }

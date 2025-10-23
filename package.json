@@ -20,6 +20,7 @@
     "dev": "concurrently \"npm run api:dev\" \"npm run web:dev\"",
     "dev:network": "concurrently \"npm run api:dev\" \"npm run web:dev:network\"",
     "start": "npm run api:start",
+  "test:mfa-e2e": "node api/scripts/test-mfa-e2e.js",
     "setup:local": "node scripts/setup-env.js local",
     "setup:network": "node scripts/setup-env.js network",
     "network:ip": "node scripts/get-network-ip.js",

@@ -26,8 +26,13 @@ import Alerts from "./pages/Alerts";
 import Reports from "./pages/Reports";
 import Admin from "./pages/Admin";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import MFASetup from "./pages/MFASetup";
+import ChangePassword from "./pages/ChangePassword";
 import Account from "./pages/Account";
 import NewProject from "./pages/projects/NewProject";
+import AcceptInvite from "./pages/AcceptInvite";
 import NotFound from "./pages/NotFound";
 
 /****************************************************
@@ -148,6 +153,36 @@ const loginRoute = createRoute({
   component: Login,
 });
 
+const changePasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "change-password",
+  component: ChangePassword,
+});
+
+const forgotPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "forgot-password",
+  component: ForgotPassword,
+});
+
+const resetPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "reset-password/$token",
+  component: ResetPassword,
+});
+
+const mfaSetupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "mfa-setup",
+  component: MFASetup,
+});
+
+const inviteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "invite/$token",
+  component: AcceptInvite,
+});
+
 const accountRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "account",
@@ -176,6 +211,11 @@ const routeTree = rootRoute.addChildren([
     accountRoute,
   ]),
   loginRoute,
+  forgotPasswordRoute,
+  changePasswordRoute,
+  resetPasswordRoute,
+  mfaSetupRoute,
+  inviteRoute,
 ]);
 
 projectsRoute.addChildren([projectsIndexRoute, projectDetailRoute, newProjectRoute]);

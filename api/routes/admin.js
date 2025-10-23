@@ -24,6 +24,9 @@ if (typeof authGuard !== "function") {
 // Import permission guard for RBAC
 const { permissionGuard } = require("../middleware/permissionGuard");
 
+// Import audit logger
+const { logAudit } = require("../middleware/auditLogger");
+
 /* ────────────────────────────────────────────────────────────
    Helpers
    ──────────────────────────────────────────────────────────── */
@@ -94,6 +97,10 @@ router.get("/admin/users", authGuard, permissionGuard('USER_VIEW'), async (_req,
         status: true,
         isActive: true,
         createdAt: true,
+        mfaSecret: true,
+        mfaEnforcedAt: true,
+        trustDeviceDuration: true,
+        auditRetentionDays: true,
         department: { select: { id: true, name: true } },
         roles: {
           include: {
@@ -114,6 +121,10 @@ router.get("/admin/users", authGuard, permissionGuard('USER_VIEW'), async (_req,
       status: user.status || (user.isActive ? 'ACTIVE' : 'INACTIVE'),
       isActive: user.isActive,
       createdAt: user.createdAt,
+      mfaSecret: user.mfaSecret,
+      mfaEnforcedAt: user.mfaEnforcedAt,
+      trustDeviceDuration: user.trustDeviceDuration,
+      auditRetentionDays: user.auditRetentionDays,
       department: user.department,
       roles: user.roles.map(ur => ({ id: ur.role.id, name: ur.role.name })),
     }));
@@ -153,7 +164,7 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
     if (sendInvite) {
       inviteToken = generateInviteToken();
       inviteExpires = new Date();
-      inviteExpires.setDate(inviteExpires.getDate() + 7); // 7 days expiry
+      inviteExpires.setMinutes(inviteExpires.getMinutes() + 30); // 30 minutes expiry
     }
     
     // Create user with roles
@@ -168,6 +179,7 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
         trustDeviceDuration: 30,
         inviteToken,
         inviteExpires,
+        createdById: req.user.userId, // Track who created this user
         ...(roleIds.length > 0 ? {
           roles: {
             create: roleIds.map(roleId => ({ roleId }))
@@ -195,11 +207,32 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
     // Send invitation email if requested
     if (sendInvite && inviteToken) {
       const inviteUrl = `${process.env.APP_URL || 'http://localhost:5173'}/invite/${inviteToken}`;
-      await sendInvitationEmail({
-        email: user.email,
-        inviteUrl,
-        inviterName: req.auth?.user?.email || 'Admin'
-      });
+      const { emailService } = require('../lib/emailService');
+      
+      try {
+        await emailService.sendTemplate({
+          to: user.email,
+          templateName: 'user-invitation',
+          data: {
+            userName: user.name || user.email,
+            inviterName: req.auth?.user?.name || req.auth?.user?.email || 'Admin',
+            inviteUrl,
+            expiresAt: new Date(inviteExpires).toLocaleDateString('en-US', { 
+              weekday: 'long', 
+              year: 'numeric', 
+              month: 'long', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })
+          },
+          userId: null  // System email - bypass user permission check
+        });
+        console.log(`[USER_CREATE] Invitation email sent to ${user.email}`);
+      } catch (emailError) {
+        console.error(`[USER_CREATE] Failed to send invitation email:`, emailError);
+        // Don't fail user creation if email fails
+      }
     }
     
     // Log the action
@@ -231,18 +264,222 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
   }
 });
 
-// PUT /api/admin/users/:id  { name?, status?, isActive?, departmentId? }
+// POST /api/admin/users/:id/resend-invitation - Resend invitation email
+router.post("/admin/users/:id/resend-invitation", authGuard, permissionGuard('USER_CREATE'), async (req, res) => {
+  if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
+  try {
+    const { id } = req.params;
+    
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        status: true,
+        inviteToken: true,
+        inviteExpires: true
+      }
+    });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (user.status !== 'PENDING') {
+      return res.status(400).json({ error: 'User has already accepted invitation' });
+    }
+    
+    // Generate new invite token and expiry
+    const { generateInviteToken } = require('../lib/emailService');
+    const inviteToken = generateInviteToken();
+    const inviteExpires = new Date();
+    inviteExpires.setMinutes(inviteExpires.getMinutes() + 30); // 30 minutes expiry
+    
+    // Update user with new token
+    await prisma.user.update({
+      where: { id },
+      data: {
+        inviteToken,
+        inviteExpires
+      }
+    });
+    
+    // Send invitation email
+    const inviteUrl = `${process.env.APP_URL || 'http://localhost:5173'}/invite/${inviteToken}`;
+    const { emailService } = require('../lib/emailService');
+    
+    try {
+      await emailService.sendTemplate({
+        to: user.email,
+        templateName: 'user-invitation',
+        data: {
+          userName: user.name || user.email,
+          inviterName: req.auth?.user?.name || req.auth?.user?.email || 'Admin',
+          inviteUrl,
+          expiresAt: inviteExpires.toLocaleDateString('en-US', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        },
+        userId: null  // System email - bypass user permission check
+      });
+      console.log(`[RESEND_INVITE] Invitation email sent to ${user.email}`);
+    } catch (emailError) {
+      console.error(`[RESEND_INVITE] Failed to send invitation email:`, emailError);
+      return res.status(500).json({ error: 'Failed to send invitation email: ' + emailError.message });
+    }
+    
+    // Log the action
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      actorId: req.auth?.user?.id || null,
+      action: 'USER_INVITE_RESENT',
+      targetType: 'USER',
+      targetId: user.id,
+      details: { email: user.email },
+      outcome: 'success'
+    });
+    
+    res.json({ 
+      success: true, 
+      message: 'Invitation email resent successfully',
+      expiresAt: inviteExpires
+    });
+  } catch (e) {
+    console.error("[admin] resend invitation failed:", e);
+    res.status(400).json({ error: e.message || "Resend invitation failed" });
+  }
+});
+
+// POST /api/admin/users/:id/disable-mfa - Disable MFA for a user (Superadmin only)
+router.post("/admin/users/:id/disable-mfa", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
+  if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
+  try {
+    const { id } = req.params;
+    
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        mfaSecret: true,
+        mfaEnforcedAt: true
+      }
+    });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (!user.mfaSecret || !user.mfaEnforcedAt) {
+      return res.status(400).json({ error: 'MFA is not enabled for this user' });
+    }
+    
+    // Disable MFA by clearing secret and enforced date
+    await prisma.user.update({
+      where: { id },
+      data: {
+        mfaSecret: null,
+        mfaEnforcedAt: null
+      }
+    });
+    
+    // Revoke all trusted devices for security
+    await prisma.device.updateMany({
+      where: { userId: id, trusted: true },
+      data: { trusted: false }
+    });
+    
+    // Invalidate all sessions - force re-login
+    await prisma.session.deleteMany({
+      where: { userId: id }
+    });
+    
+    // Send notification email to user
+    const { sendEmail } = require('../lib/emailService');
+    try {
+      await sendEmail({
+        to: user.email,
+        template: 'mfa-disabled',
+        data: {
+          name: user.name || user.email,
+          disabledBy: req.auth?.user?.name || req.auth?.user?.email || 'Administrator',
+          disabledAt: new Date().toLocaleString()
+        },
+        userId: null // System email
+      });
+    } catch (emailError) {
+      console.error('[DISABLE_MFA] Failed to send notification email:', emailError);
+      // Don't fail the request if email fails
+    }
+    
+    // Log the action
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      actorId: req.auth?.user?.id || null,
+      action: 'MFA_DISABLED_BY_ADMIN',
+      targetType: 'USER',
+      targetId: user.id,
+      details: { 
+        email: user.email,
+        disabledBy: req.auth?.user?.email || 'system',
+        reason: 'Admin action'
+      },
+      outcome: 'success'
+    });
+    
+    console.log(`[DISABLE_MFA] MFA disabled for user ${user.email} by ${req.auth?.user?.email || 'admin'}`);
+    
+    res.json({ 
+      success: true, 
+      message: 'MFA disabled successfully. User has been logged out from all devices and will need to set up MFA again.'
+    });
+  } catch (e) {
+    console.error("[admin] disable MFA failed:", e);
+    res.status(400).json({ error: e.message || "Disable MFA failed" });
+  }
+});
+
+// PUT /api/admin/users/:id  { name?, status?, isActive?, departmentId?, trustDeviceDuration?, auditRetentionDays?, emailOutboundEnabled?, emailTrainingMode? }
 router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
     const { id } = req.params;
-    const { name, status, isActive, departmentId } = req.body || {};
+    const { 
+      name, 
+      status, 
+      isActive, 
+      departmentId, 
+      trustDeviceDuration, 
+      auditRetentionDays,
+      emailOutboundEnabled,
+      emailTrainingMode
+    } = req.body || {};
     
     const updateData = {};
     if (name !== undefined) updateData.name = name || null;
     if (status !== undefined) updateData.status = status;
     if (isActive !== undefined) updateData.isActive = !!isActive;
     if (departmentId !== undefined) updateData.departmentId = departmentId || null;
+    if (trustDeviceDuration !== undefined) {
+      updateData.trustDeviceDuration = Math.max(1, Math.min(365, parseInt(trustDeviceDuration) || 30));
+    }
+    if (auditRetentionDays !== undefined) {
+      // Enforce minimum 15 days (AUDIT_CONFIG.MINIMUM_RETENTION_DAYS)
+      updateData.auditRetentionDays = Math.max(15, Math.min(365, parseInt(auditRetentionDays) || 90));
+    }
+    if (emailOutboundEnabled !== undefined) {
+      updateData.emailOutboundEnabled = !!emailOutboundEnabled;
+    }
+    if (emailTrainingMode !== undefined) {
+      updateData.emailTrainingMode = !!emailTrainingMode;
+    }
 
     const row = await prisma.user.update({
       where: { id },
@@ -262,6 +499,23 @@ router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (r
       },
     });
     
+    // Log the update
+    if (req.user?.id) {
+      const { logAudit } = require('../middleware/auditLogger');
+      const { getClientIP } = require('../lib/deviceFingerprint');
+      await logAudit({
+        actorId: req.user.id,
+        action: 'USER_UPDATE',
+        entity: 'USER',
+        entityId: id,
+        changes: updateData,
+        meta: { userEmail: row.email },
+        ip: getClientIP(req),
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    }
+    
     res.json({
       id: row.id,
       email: row.email,
@@ -278,22 +532,250 @@ router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (r
   }
 });
 
-// POST /api/admin/users/:id/reset-password  { password }
+// POST /api/admin/users/:id/reset-password  { method: 'email' | 'manual' }
 router.post("/admin/users/:id/reset-password", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
     const { id } = req.params;
-    const { password } = req.body || {};
-    if (!password) return res.status(400).json({ error: "password required" });
+    const { method } = req.body || {};
     
+    if (!method || !['email', 'manual'].includes(method)) {
+      return res.status(400).json({ error: "method required: 'email' or 'manual'" });
+    }
+
+    // Get user details
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, name: true }
+    });
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Generate a secure random password (12 characters, alphanumeric + symbols)
+    const crypto = require('crypto');
+    const generatePassword = () => {
+      const length = 12;
+      const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+      let password = '';
+      const randomBytes = crypto.randomBytes(length);
+      for (let i = 0; i < length; i++) {
+        password += charset[randomBytes[i] % charset.length];
+      }
+      return password;
+    };
+
+    const temporaryPassword = generatePassword();
     const argon2 = require('argon2');
-    const passwordHash = await argon2.hash(String(password));
-    await prisma.user.update({ where: { id }, data: { passwordHash } });
-    res.json({ ok: true, message: 'Password reset successfully' });
+    const passwordHash = await argon2.hash(temporaryPassword);
+
+    // Update user with new password and set flags
+    await prisma.user.update({
+      where: { id },
+      data: {
+        passwordHash,
+        mustChangePassword: true, // Force password change on first login
+        passwordResetAt: new Date(),
+        passwordResetMethod: method, // 'email' or 'manual'
+      }
+    });
+
+    // Create security alert record (for 7-day banner)
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+    await prisma.notification.create({
+      data: {
+        userId: id,
+        type: 'SECURITY_ALERT',
+        title: 'Password Reset Without MFA',
+        message: `Your password was reset by an administrator without MFA verification on ${new Date().toLocaleString()}. If you did not request this, please contact your administrator immediately. This alert expires on ${expiresAt.toLocaleDateString()}.`,
+      }
+    });
+
+    // Notify admin (Super Admin or user's department admin)
+    const adminUsers = await prisma.user.findMany({
+      where: {
+        roles: {
+          some: {
+            role: { name: 'Super Admin' }
+          }
+        }
+      },
+      select: { id: true }
+    });
+
+    for (const admin of adminUsers) {
+      await prisma.notification.create({
+        data: {
+          userId: admin.id,
+          type: 'ADMIN_ALERT',
+          title: 'Non-MFA Password Reset Performed',
+          message: `Password reset without MFA for user ${user.email} (${user.name || 'No name'}) via ${method} method by ${req.user?.email || 'Unknown admin'}`,
+        }
+      });
+    }
+
+    // Log audit trail
+    if (hasModel("auditLog") && req.user?.id) {
+      const { logAudit } = require('../middleware/auditLogger');
+      const { getClientIP } = require('../lib/deviceFingerprint');
+      await logAudit({
+        actorId: req.user.id,
+        action: 'PASSWORD_RESET_ADMIN',
+        entity: 'USER',
+        entityId: id,
+        changes: { method, timestamp: new Date() },
+        meta: { userEmail: user.email, resetMethod: method },
+        ip: getClientIP(req),
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    }
+
+    // Send response based on method
+    if (method === 'email') {
+      // Send email with temporary password
+      const { sendPasswordResetEmail } = require('../lib/emailService');
+      await sendPasswordResetEmail(user.email, user.name || user.email, temporaryPassword);
+      
+      res.json({
+        ok: true,
+        message: 'Password reset email sent successfully',
+        method: 'email'
+      });
+    } else if (method === 'manual') {
+      // Return password for manual sharing
+      res.json({
+        ok: true,
+        temporaryPassword,
+        message: 'Temporary password generated. Share securely with user.',
+        method: 'manual',
+        warning: 'User must change password on first login. This password will not be shown again.'
+      });
+    }
+
   } catch (e) {
     console.error("[admin] reset password failed:", e);
     if (e?.code === "P2025") return res.status(404).json({ error: "User not found" });
-    res.status(400).json({ error: "Reset password failed" });
+    res.status(500).json({ error: "Reset password failed" });
+  }
+});
+
+// PUT /api/admin/users/:id/mfa - Enable/Disable MFA for a user
+router.put("/admin/users/:id/mfa", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
+  if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
+  try {
+    const { id } = req.params;
+    const { enabled } = req.body;
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Update MFA status
+    const updatedUser = await prisma.user.update({
+      where: { id },
+      data: {
+        mfaSecret: enabled ? 'PENDING_SETUP' : null, // Set to PENDING_SETUP when enabling, null when disabling
+        mfaEnforcedAt: enabled ? new Date() : null,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        mfaSecret: true,
+        mfaEnforcedAt: true,
+      }
+    });
+
+    // Audit log
+    await logAudit({
+      actorId: req.user?.id || 'unknown',
+      action: enabled ? 'MFA_ENABLED' : 'MFA_RESET',
+      entity: 'USER',
+      entityId: id,
+      changes: {
+        before: { mfaEnabled: !!user.mfaSecret },
+        after: { mfaEnabled: enabled },
+      },
+      meta: { 
+        targetUser: user.email,
+        adminAction: true,
+        requiresReview: !enabled // Flag MFA resets for review
+      },
+      ip: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.json({ 
+      success: true, 
+      message: enabled ? 'MFA enabled. User will be prompted to set it up on next login.' : 'MFA reset successfully.',
+      user: updatedUser 
+    });
+  } catch (e) {
+    console.error("[admin] MFA update failed:", e);
+    res.status(500).json({ error: "Failed to update MFA settings" });
+  }
+});
+
+// POST /api/admin/users/:id/force-logout - Force logout user from all devices
+router.post("/admin/users/:id/force-logout", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
+  if (!hasModel("user") || !hasModel("device")) return res.status(503).json({ error: "Models not available" });
+  try {
+    const { id } = req.params;
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({ 
+      where: { id },
+      select: { id: true, email: true, name: true }
+    });
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Revoke all trusted devices
+    const revokedDevices = await prisma.device.updateMany({
+      where: { userId: id, trusted: true },
+      data: { 
+        trusted: false,
+        lastUsedAt: new Date() // Update timestamp
+      }
+    });
+
+    // TODO: If you have a Session model, also delete all active sessions here
+    // await prisma.session.deleteMany({ where: { userId: id } });
+
+    // Audit log - this is a security-critical action
+    await logAudit({
+      actorId: req.user?.id || 'unknown',
+      action: 'FORCE_LOGOUT',
+      entity: 'USER',
+      entityId: id,
+      changes: {
+        devicesRevoked: revokedDevices.count,
+      },
+      meta: { 
+        targetUser: user.email,
+        reason: 'Admin forced logout',
+        adminAction: true,
+        securityAction: true,
+      },
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+      result: 'SUCCESS'
+    });
+
+    res.json({ 
+      success: true, 
+      message: `User ${user.email} has been logged out from all devices.`,
+      devicesRevoked: revokedDevices.count
+    });
+  } catch (e) {
+    console.error("[admin] Force logout failed:", e);
+    res.status(500).json({ error: "Failed to force logout" });
   }
 });
 
@@ -370,12 +852,36 @@ router.delete("/admin/users/:id", authGuard, permissionGuard('USER_DELETE'), asy
       return res.status(400).json({ error: "Cannot delete your own account" });
     }
     
+    // Get user info before deletion
+    const userToDelete = await prisma.user.findUnique({
+      where: { id },
+      select: { email: true, name: true }
+    });
+    
     // Delete related records first (Prisma cascade doesn't work for all relations)
     await prisma.userRole.deleteMany({ where: { userId: id } });
     await prisma.session.deleteMany({ where: { userId: id } });
     
     // Now delete the user
     await prisma.user.delete({ where: { id } });
+    
+    // Log the deletion (FLAGGED action)
+    if (req.user?.id && userToDelete) {
+      const { logAudit } = require('../middleware/auditLogger');
+      const { getClientIP } = require('../lib/deviceFingerprint');
+      await logAudit({
+        actorId: req.user.id,
+        action: 'USER_DELETE',
+        entity: 'USER',
+        entityId: id,
+        changes: { deleted: { email: userToDelete.email, name: userToDelete.name } },
+        meta: { userEmail: userToDelete.email },
+        ip: getClientIP(req),
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    }
+    
     res.json({ ok: true, message: 'User deleted successfully' });
   } catch (e) {
     console.error("[admin] delete user failed:", e);
@@ -414,6 +920,147 @@ router.delete("/admin/sessions/:id", authGuard, permissionGuard.role('Super Admi
     console.error("[admin] delete session failed:", e);
     if (e?.code === "P2025") return res.status(404).json({ error: "Session not found" });
     res.status(400).json({ error: "Delete session failed" });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────
+   EMAIL SYSTEM SETTINGS (Super Admin Only)
+   ──────────────────────────────────────────────────────────── */
+
+// GET /api/admin/email-settings
+router.get("/admin/email-settings", authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  if (!hasModel("systemSetting")) return res.status(503).json({ error: "SystemSetting model not available" });
+  
+  try {
+    const settings = await prisma.systemSetting.findMany({
+      where: {
+        key: {
+          in: ['emailOutboundEnabled', 'emailTrainingMode', 'emailInboundEnabled']
+        }
+      }
+    });
+
+    const result = {
+      emailOutboundEnabled: false,
+      emailTrainingMode: true,
+      emailInboundEnabled: false
+    };
+
+    settings.forEach(setting => {
+      result[setting.key] = setting.value;
+    });
+
+    res.json(result);
+  } catch (e) {
+    console.error("[admin] get email settings failed:", e);
+    res.status(500).json({ error: "Failed to fetch email settings" });
+  }
+});
+
+// PUT /api/admin/email-settings
+router.put("/admin/email-settings", authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  if (!hasModel("systemSetting")) return res.status(503).json({ error: "SystemSetting model not available" });
+  
+  try {
+    const { emailOutboundEnabled, emailTrainingMode, emailInboundEnabled } = req.body;
+    const updates = [];
+
+    if (typeof emailOutboundEnabled === 'boolean') {
+      updates.push(
+        prisma.systemSetting.upsert({
+          where: { key: 'emailOutboundEnabled' },
+          create: { key: 'emailOutboundEnabled', value: emailOutboundEnabled, updatedBy: req.user.email },
+          update: { value: emailOutboundEnabled, updatedBy: req.user.email }
+        })
+      );
+    }
+
+    if (typeof emailTrainingMode === 'boolean') {
+      updates.push(
+        prisma.systemSetting.upsert({
+          where: { key: 'emailTrainingMode' },
+          create: { key: 'emailTrainingMode', value: emailTrainingMode, updatedBy: req.user.email },
+          update: { value: emailTrainingMode, updatedBy: req.user.email }
+        })
+      );
+    }
+
+    if (typeof emailInboundEnabled === 'boolean') {
+      updates.push(
+        prisma.systemSetting.upsert({
+          where: { key: 'emailInboundEnabled' },
+          create: { key: 'emailInboundEnabled', value: emailInboundEnabled, updatedBy: req.user.email },
+          update: { value: emailInboundEnabled, updatedBy: req.user.email }
+        })
+      );
+    }
+
+    await Promise.all(updates);
+
+    // Log audit
+    await logAudit({
+      action: 'EMAIL_SETTINGS_UPDATED',
+      entity: 'SystemSetting',
+      entityId: 'email',
+      userId: req.user.id,
+      userEmail: req.user.email,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || 'Unknown',
+      details: { emailOutboundEnabled, emailTrainingMode, emailInboundEnabled },
+      flagged: true
+    });
+
+    res.json({ ok: true, message: 'Email settings updated successfully' });
+  } catch (e) {
+    console.error("[admin] update email settings failed:", e);
+    res.status(500).json({ error: "Failed to update email settings" });
+  }
+});
+
+// PUT /api/admin/users/:id/email-permissions
+router.put("/admin/users/:id/email-permissions", authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
+  
+  try {
+    const id = toInt(req.params.id);
+    const { emailOutboundEnabled, emailInboundEnabled, emailOverrideSystem } = req.body;
+    
+    const updates = {};
+    if (typeof emailOutboundEnabled === 'boolean') updates.emailOutboundEnabled = emailOutboundEnabled;
+    if (typeof emailInboundEnabled === 'boolean') updates.emailInboundEnabled = emailInboundEnabled;
+    if (typeof emailOverrideSystem === 'boolean') updates.emailOverrideSystem = emailOverrideSystem;
+
+    const user = await prisma.user.update({
+      where: { id },
+      data: updates,
+      select: {
+        id: true,
+        email: true,
+          name: true,
+        emailOutboundEnabled: true,
+        emailInboundEnabled: true,
+        emailOverrideSystem: true
+      }
+    });
+
+    // Log audit
+    await logAudit({
+      action: 'USER_EMAIL_PERMISSIONS_UPDATED',
+      entity: 'User',
+      entityId: id,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent') || 'Unknown',
+      details: { targetUser: user.email, updates },
+      flagged: true
+    });
+
+    res.json(user);
+  } catch (e) {
+    console.error("[admin] update user email permissions failed:", e);
+    if (e?.code === "P2025") return res.status(404).json({ error: "User not found" });
+    res.status(500).json({ error: "Failed to update email permissions" });
   }
 });
 

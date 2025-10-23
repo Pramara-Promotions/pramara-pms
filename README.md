@@ -145,7 +145,7 @@ See `.env.example` for all available configuration options.
 
 ## License
 
-Proprietary - Pramara Promotions
+Proprietary - Shubham Mishra
 
 ---
 

@@ -4,6 +4,16 @@ const { getClientIP } = require('../lib/deviceFingerprint');
 
 const prisma = new PrismaClient();
 
+// CRITICAL SECURITY POLICY: Audit log configuration
+// These settings are IMMUTABLE and cannot be changed via API
+const AUDIT_CONFIG = Object.freeze({
+  MINIMUM_RETENTION_DAYS: 15,    // Hardcoded minimum - cannot be less (enforced system-wide)
+  ALLOW_DELETE: false,            // NEVER allow deletion (only manual server cleanup allowed)
+  ALLOW_UPDATE: false,            // Logs are immutable
+  DEFAULT_RETENTION_DAYS: 90,     // Default retention for new users
+  MAX_RETENTION_DAYS: 365,        // Maximum allowed retention
+});
+
 // Actions that should be flagged for Super Admin review
 const FLAGGED_ACTIONS = [
   'USER_CREATE_WITH_ADMIN_PERMS',
@@ -11,8 +21,11 @@ const FLAGGED_ACTIONS = [
   'ROLE_CREATE_CUSTOM',
   'BULK_OPERATION',
   'MFA_DISABLED',
+  'MFA_RESET',
   'PERMISSION_GRANT_OUT_OF_SCOPE',
-  'DEVICE_FORCE_LOGOUT'
+  'DEVICE_FORCE_LOGOUT',
+  'AUDIT_RETENTION_CHANGED',      // Always flag audit setting changes
+  'SECURITY_POLICY_CHANGED'
 ];
 
 /**
@@ -120,6 +133,10 @@ function auditMiddleware(action, entity) {
 
 /**
  * Get audit logs with filtering
+ * SECURITY: Respects user retention periods
+ * - Regular users: See logs within their retention period
+ * - Super Admin: See all logs (no retention limit)
+ * - Nobody can delete logs (enforced by AUDIT_CONFIG)
  */
 async function getAuditLogs({
   actorId = null,
@@ -129,7 +146,9 @@ async function getAuditLogs({
   startDate = null,
   endDate = null,
   limit = 100,
-  offset = 0
+  offset = 0,
+  userRetentionDays = null, // User's retention period (null for Super Admin = unlimited)
+  isSuperAdmin = false
 }) {
   const where = {};
   
@@ -137,8 +156,19 @@ async function getAuditLogs({
   if (action) where.action = action;
   if (entity) where.entity = entity;
   if (flaggedOnly) where.flagged = true;
+  
+  // Apply user retention period (if not Super Admin)
+  if (!isSuperAdmin && userRetentionDays) {
+    const retentionCutoff = new Date();
+    retentionCutoff.setDate(retentionCutoff.getDate() - userRetentionDays);
+    
+    where.createdAt = where.createdAt || {};
+    where.createdAt.gte = retentionCutoff;
+  }
+  
+  // Apply date filters if specified
   if (startDate || endDate) {
-    where.createdAt = {};
+    where.createdAt = where.createdAt || {};
     if (startDate) where.createdAt.gte = new Date(startDate);
     if (endDate) where.createdAt.lte = new Date(endDate);
   }
@@ -168,12 +198,22 @@ async function getAuditLogs({
   
   const total = await prisma.auditLog.count({ where });
   
-  return { logs, total };
+  return { 
+    logs, 
+    total,
+    retentionInfo: {
+      minimumRetentionDays: AUDIT_CONFIG.MINIMUM_RETENTION_DAYS,
+      userRetentionDays: userRetentionDays,
+      isSuperAdmin: isSuperAdmin,
+      canDelete: AUDIT_CONFIG.ALLOW_DELETE, // Always false
+    }
+  };
 }
 
 module.exports = {
   logAudit,
   auditMiddleware,
   getAuditLogs,
-  FLAGGED_ACTIONS
+  FLAGGED_ACTIONS,
+  AUDIT_CONFIG
 };

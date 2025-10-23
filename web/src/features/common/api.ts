@@ -69,7 +69,15 @@ function safeParse(s: string) {
 export const AuthAPI = {
   // POST /api/auth/login
   login(payload: { email: string; password: string; totp?: string }) {
-    return apiFetch<{ token?: string; user?: any }>("/auth/login", {
+    return apiFetch<{ 
+      token?: string; 
+      user?: any; 
+      ok?: boolean;
+      requiresMfa?: boolean;
+      tempToken?: string;
+      message?: string;
+      mustChangePassword?: boolean;
+    }>("/auth/login", {
       json: payload,
     });
   },
@@ -82,6 +90,90 @@ export const AuthAPI = {
   // POST /api/auth/logout
   logout() {
     return apiFetch<void>("/auth/logout", { method: "POST" });
+  },
+};
+
+/* ------------ MFA API ------------- */
+
+export const MFAAPI = {
+  // POST /api/mfa/setup - Start MFA setup
+  setup() {
+    return apiFetch<{
+      secret: string;
+      qrCode: string;
+      backupCodes: string[];
+      otpauthUrl: string;
+    }>("/mfa/setup", { method: "POST" });
+  },
+
+  // POST /api/mfa/verify - Verify and enable MFA
+  verify(payload: { token: string; backupCodes: string[] }) {
+    return apiFetch<{
+      ok: boolean;
+      message: string;
+      enabledAt: string;
+    }>("/mfa/verify", { json: payload });
+  },
+
+  // POST /api/mfa/disable - Disable MFA
+  disable(password: string) {
+    return apiFetch<{
+      ok: boolean;
+      message: string;
+    }>("/mfa/disable", { json: { password } });
+  },
+
+  // POST /api/mfa/verify-login - Verify MFA during login
+  verifyLogin(payload: { 
+    tempToken: string; 
+    totpToken: string; 
+    trustDevice?: boolean 
+  }) {
+    return apiFetch<{
+      ok: boolean;
+      token: string;
+      user: any;
+    }>("/mfa/verify-login", { json: payload });
+  },
+};
+
+/* ------------ Admin Email API ------------- */
+
+export const EmailAdminAPI = {
+  // GET /api/admin/email-settings
+  getSettings() {
+    return apiFetch<{
+      emailOutboundEnabled: boolean;
+      emailTrainingMode: boolean;
+      emailInboundEnabled: boolean;
+    }>("/admin/email-settings");
+  },
+
+  // PUT /api/admin/email-settings
+  updateSettings(payload: {
+    emailOutboundEnabled?: boolean;
+    emailTrainingMode?: boolean;
+    emailInboundEnabled?: boolean;
+  }) {
+    return apiFetch<{
+      ok: boolean;
+      message: string;
+    }>("/admin/email-settings", { 
+      method: "PUT",
+      json: payload 
+    });
+  },
+
+  // PUT /api/admin/users/:id/email-permissions
+  updateUserPermissions(userId: number, payload: {
+    emailOutboundEnabled?: boolean;
+    emailInboundEnabled?: boolean;
+    emailOverrideSystem?: boolean;
+  }) {
+    return apiFetch<any>(`/admin/users/${userId}/email-permissions`, {
+      method: "PUT",
+      json: payload
+    });
   },
 };
 

@@ -6,6 +6,7 @@ import InviteUserModal from './InviteUserModal';
 import EditUserModal from './EditUserModal';
 import TemporaryPermissionsModal from './TemporaryPermissionsModal';
 import { http } from '../../lib/http';
+import { useToast } from '../../ui/toast/ToastProvider';
 
 type User = {
   id: string;
@@ -13,6 +14,10 @@ type User = {
   name?: string;
   status: string;
   isActive: boolean;
+  mfaSecret?: string;
+  mfaEnforcedAt?: string;
+  trustDeviceDuration?: number;
+  auditRetentionDays?: number;
   department?: { id: string; name: string };
   roles?: ({ id: string; name: string } | string)[];
   createdAt?: string;
@@ -20,6 +25,7 @@ type User = {
 
 export default function UserManagement() {
   const { hasPermission } = useAuth();
+  const { showToastOk, showToastErr } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +122,51 @@ export default function UserManagement() {
 
   const handleDeleteCancel = () => {
     setUserToDelete(null);
+  };
+
+  const handleResendInvitation = async (user: User) => {
+    if (!confirm(`Resend invitation email to ${user.email}?`)) {
+      return;
+    }
+
+    try {
+      const res = await http(`/api/admin/users/${user.id}/resend-invitation`, {
+        method: 'POST',
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to resend invitation');
+      }
+
+      const data = await res.json();
+      showToastOk(`Invitation email sent to ${user.email}`);
+      await fetchUsers();
+    } catch (e: any) {
+      showToastErr(e?.message ?? 'Failed to resend invitation');
+    }
+  };
+
+  const handleDisableMFA = async (user: User) => {
+    if (!confirm(`⚠️ DISABLE MFA for ${user.email}?\n\nThis will remove two-factor authentication from this account. They will need to set it up again.\n\nThis action should only be done in exceptional circumstances.`)) {
+      return;
+    }
+
+    try {
+      const res = await http(`/api/admin/users/${user.id}/disable-mfa`, {
+        method: 'POST',
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to disable MFA');
+      }
+
+      showToastOk(`MFA disabled for ${user.email}`);
+      await fetchUsers();
+    } catch (e: any) {
+      showToastErr(e?.message ?? 'Failed to disable MFA');
+    }
   };
 
   // Bulk selection handlers
@@ -347,7 +398,8 @@ export default function UserManagement() {
 
       {/* Users Table */}
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
           <thead className="bg-gray-50 dark:bg-gray-900">
             <tr>
               <th className="px-6 py-3 text-left">
@@ -366,6 +418,9 @@ export default function UserManagement() {
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 Roles
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                MFA
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                 Status
@@ -420,6 +475,24 @@ export default function UserManagement() {
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
+                  {user.mfaSecret && user.mfaEnforcedAt ? (
+                    <span className="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 rounded-full flex items-center gap-1 w-fit">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      Enabled
+                    </span>
+                  ) : user.mfaSecret ? (
+                    <span className="px-2 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300 rounded-full">
+                      Pending
+                    </span>
+                  ) : (
+                    <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 rounded-full">
+                      Disabled
+                    </span>
+                  )}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
                   {getStatusBadge(user.status)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
@@ -430,6 +503,24 @@ export default function UserManagement() {
                     >
                       Edit
                     </button>
+                    {user.status === 'PENDING' && (
+                      <button 
+                        onClick={() => handleResendInvitation(user)}
+                        className="text-green-600 hover:text-green-900 dark:text-green-400 dark:hover:text-green-300 mr-3"
+                        title="Resend invitation email"
+                      >
+                        Resend Invite
+                      </button>
+                    )}
+                    {user.mfaSecret && user.mfaEnforcedAt && (
+                      <button 
+                        onClick={() => handleDisableMFA(user)}
+                        className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 mr-3"
+                        title="Disable MFA for this user (Admin only)"
+                      >
+                        Disable MFA
+                      </button>
+                    )}
                     <button 
                       onClick={() => setUserForTempPerms(user)}
                       className="text-purple-600 hover:text-purple-900 dark:text-purple-400 dark:hover:text-purple-300 mr-3"
@@ -451,6 +542,7 @@ export default function UserManagement() {
             ))}
           </tbody>
         </table>
+        </div>
 
         {users.length === 0 && (
           <div className="text-center py-12">

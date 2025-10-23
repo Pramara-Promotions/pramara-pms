@@ -51,6 +51,8 @@ const { permissionRequestsRouter } = require('./routes/permissionRequests');
 const { notificationsRouter } = require('./routes/notifications');
 const { invitationsRouter } = require('./routes/invitations');
 const meRouter = require('./routes/me');
+const authRouter = require('./routes/auth');
+const inviteRouter = require('./routes/invite');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -89,6 +91,7 @@ app.use('/api', permissionRequestsRouter);
 app.use('/api', notificationsRouter);
 app.use('/api', invitationsRouter);
 app.use('/api', meRouter);
+app.use('/api', inviteRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';
@@ -126,57 +129,15 @@ app.get('/', (_req, res) => {
 // Replace later with real JWT/user lookup.
 // ====================================================================
 
-const DEV_AUTH_EMAIL = process.env.DEV_AUTH_EMAIL || 'admin@pramara.local';
-const DEV_AUTH_NAME  = process.env.DEV_AUTH_NAME  || 'Admin User';
+// ====================================================================
+// [LANDMARK 1] AUTHENTICATION ROUTES
+// ====================================================================
+// Use proper auth router with device tracking and audit logging
+app.use('/api/auth', authRouter);
 
-// Helper: read boolean from env
-function envTrue(v) { return String(v || '').toLowerCase() === 'true'; }
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password /* mfa */ } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
-
-    // DEV ACCEPTANCE:
-    // Accept any password for the configured dev email; otherwise 401.
-    if (String(email).toLowerCase() !== DEV_AUTH_EMAIL.toLowerCase()) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    // Set a simple dev token (replace with JWT later)
-    const token = 'dev-token-' + Date.now();
-
-    // cookie options – secure only in prod with HTTPS
-    const secureCookies = envTrue(process.env.COOKIE_SECURE);
-    res.cookie('token', token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: secureCookies,
-      path: '/',
-      maxAge: 7 * 24 * 3600 * 1000, // 7 days
-    });
-
-    return res.json({
-      ok: true,
-      user: { email: DEV_AUTH_EMAIL, name: DEV_AUTH_NAME, roles: ['admin'] },
-    });
-  } catch (e) {
-    console.error('auth:login', e);
-    res.status(500).json({ error: 'Login failed' });
-  }
-});
-
-app.post('/api/auth/logout', async (_req, res) => {
-  try {
-    res.clearCookie('token', { path: '/' });
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('auth:logout', e);
-    res.status(500).json({ error: 'Logout failed' });
-  }
-});
+// MFA routes
+const mfaRouter = require('./routes/mfa');
+app.use('/api/mfa', mfaRouter);
 
 // /api/me is handled by routes/me.js (enhanced user payload)
 

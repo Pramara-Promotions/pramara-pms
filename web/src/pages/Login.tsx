@@ -2,7 +2,8 @@
 import React, { useState } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useAuth } from '../features/common/AuthProvider';
-import { http } from '../lib/http';
+import { AuthAPI } from '../features/common/api';
+import MFAVerifyScreen from '../features/auth/MFAVerifyScreen';
 import loginBg from '../assets/login-bg.jpg';
 import logoImg from '../assets/logo.png';
 
@@ -13,33 +14,78 @@ export default function Login() {
 
   const [email, setEmail] = useState('admin@pramara.local');
   const [password, setPassword] = useState('ChangeMe@123');
-  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  
+  // MFA state
+  const [showMFA, setShowMFA] = useState(false);
+  const [tempToken, setTempToken] = useState('');
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr(null);
+    
     try {
-      const res = await http('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, code: code || undefined }),
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || `Login failed (${res.status})`);
+      const data = await AuthAPI.login({ email, password });
+      
+      // Check if MFA setup is required (new users)
+      if (data.requiresMfaSetup && data.tempToken) {
+        // Store temp token and redirect to MFA setup
+        sessionStorage.setItem('mfa_setup_token', data.tempToken);
+        nav({ to: '/mfa-setup', replace: true });
+        return;
       }
+      
+      // Check if MFA verification is required
+      if (data.requiresMfa && data.tempToken) {
+        setTempToken(data.tempToken);
+        setShowMFA(true);
+        setBusy(false);
+        return;
+      }
+      
+      // Check if user must change password
+      if (data.mustChangePassword) {
+        await refresh();
+        nav({ to: '/change-password', replace: true });
+        return;
+      }
+      
+      // Normal login success
       await refresh();
-  const from = (routerState.location.state as any)?.from?.pathname || '/';
-  nav({ to: from, replace: true });
+      const from = (routerState.location.state as any)?.from?.pathname || '/';
+      nav({ to: from, replace: true });
     } catch (e: any) {
       setErr(e?.message || 'Login failed');
     } finally {
       setBusy(false);
     }
   };
+
+  const handleMFASuccess = async (user: any) => {
+    // MFA verified, session created
+    await refresh();
+    const from = (routerState.location.state as any)?.from?.pathname || '/';
+    nav({ to: from, replace: true });
+  };
+
+  const handleMFACancel = () => {
+    setShowMFA(false);
+    setTempToken('');
+    setErr(null);
+  };
+
+  // Show MFA screen if required
+  if (showMFA && tempToken) {
+    return (
+      <MFAVerifyScreen 
+        tempToken={tempToken}
+        onSuccess={handleMFASuccess}
+        onCancel={handleMFACancel}
+      />
+    );
+  }
 
   return (
     <div
@@ -83,17 +129,6 @@ export default function Login() {
             />
           </div>
 
-          <div>
-            <label className='mb-1 block text-sm font-medium text-slate-600'>Authenticator code (optional)</label>
-            <input
-              className='w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200'
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              inputMode='numeric'
-              autoComplete='one-time-code'
-            />
-          </div>
-
           <button
             type='submit'
             disabled={busy}
@@ -101,6 +136,9 @@ export default function Login() {
           >
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
+          <div className='mt-2 text-right'>
+            <a href='/forgot-password' className='text-xs text-indigo-600 hover:underline'>Forgot password?</a>
+          </div>
         </form>
       </div>
     </div>

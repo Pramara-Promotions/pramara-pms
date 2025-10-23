@@ -53,40 +53,34 @@ export default function MFA() {
     } finally { setBusy(false); }
   }
 
-  async function disableMFA() {
-    if (!confirm("Disable MFA for this account?")) return;
-    setBusy(true); setErr("");
-    try {
-      const res = await fetch("/api/auth/mfa/disable", withAuthHeaders({ method: "POST" }));
-      const data = await res.json();
-      if (!res.ok) return setErr(data.error || "Disable failed");
-      setMe((prev) => ({ ...prev, mfaEnabled: false }));
-      setQr(null); setBase32(null); setToken("");
-      alert("MFA disabled.");
-    } finally { setBusy(false); }
-  }
-
   if (!me) return null;
 
   return (
     <div style={{ maxWidth: 680, margin: "24px auto", padding: 16, fontFamily: "system-ui, Arial" }}>
       <h2>Two-Factor Authentication (TOTP)</h2>
       <p>Use Google Authenticator, Authy, or any TOTP app.</p>
+      <p style={{ color: "#dc2626", fontSize: 14, background: "#fee2e2", padding: "8px 12px", borderRadius: 6, marginBottom: 16 }}>
+        <strong>⚠️ MFA is mandatory for all users.</strong> You cannot disable it yourself. Contact your administrator if needed.
+      </p>
 
       {me.mfaEnabled ? (
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ color: "#166534", background: "#ecfdf5", padding: "4px 8px", borderRadius: 6 }}>
-            MFA is currently <b>enabled</b>.
+            MFA is currently <b>enabled</b> and active.
           </span>
-          <button onClick={disableMFA} disabled={busy} style={{ padding: "6px 10px", color: "#b91c1c" }}>
-            Disable MFA
-          </button>
         </div>
       ) : (
         <>
+          <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", padding: 12, borderRadius: 6, marginBottom: 16 }}>
+            <strong>⚠️ MFA Setup Required</strong>
+            <p style={{ margin: "4px 0 0 0", fontSize: 14 }}>
+              You must enable MFA to secure your account. This is required for all users.
+            </p>
+          </div>
+          
           {!qr ? (
             <button onClick={startSetup} disabled={busy} style={{ padding: "8px 12px" }}>
-              {busy ? "Starting…" : "Start MFA setup"}
+              {busy ? "Starting…" : "Start MFA Setup"}
             </button>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 16, alignItems: "center" }}>

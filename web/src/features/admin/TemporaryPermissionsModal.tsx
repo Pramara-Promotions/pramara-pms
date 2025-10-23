@@ -84,9 +84,10 @@ export default function TemporaryPermissionsModal({
       const res = await http('/api/permissions');
       if (!res.ok) throw new Error('Failed to fetch permissions');
       const data = await res.json();
-      setAllPermissions(data);
+      setAllPermissions(Array.isArray(data) ? data : []);
     } catch (err: any) {
       console.error('Error fetching permissions:', err);
+      setAllPermissions([]);
     }
   };
 
@@ -182,8 +183,8 @@ export default function TemporaryPermissionsModal({
 
   if (!isOpen) return null;
 
-  // Group permissions by module
-  const permissionsByModule = allPermissions.reduce((acc, perm) => {
+  // Group permissions by module - with safety check
+  const permissionsByModule = (Array.isArray(allPermissions) ? allPermissions : []).reduce((acc, perm) => {
     if (!acc[perm.module]) acc[perm.module] = [];
     acc[perm.module].push(perm);
     return acc;

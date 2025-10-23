@@ -4,6 +4,7 @@ import { Menu, Search, Plus, LayoutGrid, ClipboardList, PackageCheck, AlertTrian
 import clsx from 'clsx'
 import CommandPalette from '../../features/common/CommandPalette'
 import QuickAddModal from '../../features/common/QuickAddModal'
+import SecurityAlertBanner from './SecurityAlertBanner'
 import { useAuth } from '../../features/common/AuthProvider'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -127,6 +128,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </header>
+
+        {/* Security Alert Banner */}
+        <SecurityAlertBanner />
 
         <main className="flex-1 overflow-auto p-4">
           <div className="mx-auto max-w-[1400px]">{children}</div>

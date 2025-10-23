@@ -26,6 +26,19 @@ model User {
   status       String   @default("PENDING") // PENDING, ACTIVE, INACTIVE, SUSPENDED
   departmentId String?
   trustDeviceDuration Int @default(30) // days
+  auditRetentionDays Int @default(90) // days - minimum 15
+  
+  // Email Permission Controls (Training Mode Safety)
+  emailOutboundEnabled Boolean @default(false) // New users cannot send emails by default
+  emailInboundEnabled  Boolean @default(false) // New users cannot process incoming emails
+  emailOverrideSystem  Boolean @default(false) // Can send even if system-wide disabled
+  emailTrainingMode    Boolean @default(false) // User-specific training mode (dummy emails only)
+  
+  // Password Reset Security Fields
+  mustChangePassword Boolean @default(false) // Force password change on next login
+  passwordResetAt    DateTime? // When password was last reset by admin
+  passwordResetMethod String? // 'email' or 'manual' - tracking for audit
+  
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -42,6 +55,9 @@ model User {
   // Invites
   inviteToken   String?   @unique
   inviteExpires DateTime?
+  createdById   String?   // Who invited this user
+  createdBy     User?     @relation("UserInvitedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  invitedUsers  User[]    @relation("UserInvitedBy")
 }
 
 model Role {
@@ -230,6 +246,55 @@ model SystemSetting {
   value     Json
   updatedBy String?
   updatedAt DateTime @updatedAt
+}
+
+// ====================================================================
+// [LANDMARK B.5] EMAIL SYSTEM
+// ====================================================================
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  subject     String
+  htmlBody    String   @db.Text
+  textBody    String?  @db.Text
+  variables   String[] // e.g., ['userName', 'projectName', 'actionUrl']
+  category    String   // 'auth', 'notification', 'compliance', etc.
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EmailLog {
+  id              String   @id @default(cuid())
+  to              String
+  cc              String[]
+  bcc             String[]
+  from            String
+  replyTo         String?
+  subject         String
+  htmlBody        String?  @db.Text
+  textBody        String?  @db.Text
+  
+  // Template used (if any)
+  templateId      String?
+  templateData    Json?
+  
+  // Delivery tracking
+  status          String   // 'sent', 'dummy_training_mode', 'failed', 'blocked_user_disabled', 'blocked_system_disabled'
+  provider        String   @default("resend")
+  providerMsgId   String?  // External tracking ID from Resend
+  sentAt          DateTime?
+  error           String?
+  
+  // Metadata
+  userId          String?  // Who triggered this email
+  notificationId  String?  // Link to notification if triggered by one
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([status, createdAt])
+  @@index([userId])
 }
 
 // ====================================================================

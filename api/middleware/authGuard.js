@@ -65,6 +65,30 @@ async function authGuard(req, res, next) {
     // If we have Prisma, load full user data with roles & permissions
     if (prisma && payload.sub) {
       try {
+        // SECURITY: Validate that the session still exists (enables Force Logout)
+        const session = await prisma.session.findUnique({
+          where: { refreshTokenHash: token },
+          select: { 
+            id: true, 
+            userId: true, 
+            expiresAt: true 
+          }
+        });
+
+        if (!session) {
+          return res.status(401).json({ error: 'Session not found or has been terminated' });
+        }
+
+        if (new Date() > session.expiresAt) {
+          // Clean up expired session
+          await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
+          return res.status(401).json({ error: 'Session expired' });
+        }
+
+        if (session.userId !== String(payload.sub)) {
+          return res.status(401).json({ error: 'Session user mismatch' });
+        }
+
         const user = await prisma.user.findUnique({
           where: { id: String(payload.sub) },
           select: {
@@ -126,6 +150,7 @@ async function authGuard(req, res, next) {
           email: user.email,
           roles: roles.map(r => r.name),
           permissions: Array.from(permSet),
+          sessionId: session.id, // Add session ID for tracking
         };
 
         return next();

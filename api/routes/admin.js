@@ -26,6 +26,9 @@ const { permissionGuard } = require("../middleware/permissionGuard");
 
 // Import audit logger
 const { logAudit } = require("../middleware/auditLogger");
+const { emailService } = require("../lib/emailService");
+let emailInboundService = null;
+try { emailInboundService = require("../lib/emailInboundService"); } catch {}
 
 /* ────────────────────────────────────────────────────────────
    Helpers
@@ -63,6 +66,87 @@ router.get("/admin/stats", authGuard, permissionGuard('AUDIT_VIEW', 'SYSTEM_SETT
   } catch (e) {
     console.error("[admin] stats failed:", e);
     res.status(500).json({ error: "Failed to load stats" });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────
+   System Settings — Email (Outbound/Training/Inbound)
+   ──────────────────────────────────────────────────────────── */
+
+// GET /api/admin/email-settings
+router.get("/admin/email-settings", authGuard, permissionGuard.role('Super Admin'), async (_req, res) => {
+  try {
+    const [emailOutboundEnabled, emailTrainingMode, emailInboundEnabled] = await Promise.all([
+      emailService.getSystemSetting('emailOutboundEnabled', false),
+      emailService.getSystemSetting('emailTrainingMode', true),
+      emailService.getSystemSetting('emailInboundEnabled', false),
+    ]);
+    res.json({ emailOutboundEnabled: !!emailOutboundEnabled, emailTrainingMode: !!emailTrainingMode, emailInboundEnabled: !!emailInboundEnabled });
+  } catch (e) {
+    console.error('[admin] get email-settings failed:', e);
+    res.status(500).json({ error: 'Failed to load email settings' });
+  }
+});
+
+// PUT /api/admin/email-settings
+router.put("/admin/email-settings", authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  try {
+    const { emailOutboundEnabled, emailTrainingMode, emailInboundEnabled } = req.body || {};
+    const actorId = req.auth?.user?.id || null;
+
+    const writes = [];
+    if (typeof emailOutboundEnabled === 'boolean') {
+      writes.push(emailService.setSystemSetting('emailOutboundEnabled', emailOutboundEnabled, actorId));
+    }
+    if (typeof emailTrainingMode === 'boolean') {
+      writes.push(emailService.setSystemSetting('emailTrainingMode', emailTrainingMode, actorId));
+    }
+    let inboundChangedTo = null;
+    if (typeof emailInboundEnabled === 'boolean') {
+      writes.push(emailService.setSystemSetting('emailInboundEnabled', emailInboundEnabled, actorId));
+      inboundChangedTo = emailInboundEnabled;
+    }
+    await Promise.all(writes);
+
+    // Start/stop inbound polling immediately if toggled
+    try {
+      if (inboundChangedTo != null && emailInboundService) {
+        if (inboundChangedTo) {
+          // Start polling (5 minute interval)
+          if (typeof emailInboundService.startPolling === 'function') {
+            emailInboundService.startPolling(5);
+          }
+        } else {
+          if (typeof emailInboundService.stopPolling === 'function') {
+            emailInboundService.stopPolling();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[admin] toggling inbound service failed:', e?.message);
+    }
+
+    res.json({ ok: true, message: 'Email settings updated' });
+  } catch (e) {
+    console.error('[admin] update email-settings failed:', e);
+    res.status(500).json({ error: 'Failed to update email settings' });
+  }
+});
+
+// GET /api/admin/email-inbound/status
+router.get('/admin/email-inbound/status', authGuard, permissionGuard.role('Super Admin'), async (_req, res) => {
+  try {
+    const enabled = !!(await emailService.getSystemSetting('emailInboundEnabled', false));
+    const imapConfigured = !!(process.env.IMAP_USER && process.env.IMAP_PASSWORD);
+    const status = {
+      enabled,
+      imapConfigured,
+      connected: !!(emailInboundService && emailInboundService.isConnected),
+      polling: !!(emailInboundService && emailInboundService.isPolling),
+    };
+    res.json(status);
+  } catch (e) {
+    res.status(200).json({ enabled: false, imapConfigured: false, connected: false, polling: false });
   }
 });
 

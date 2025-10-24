@@ -1,11 +1,12 @@
 import { Link, useRouterState, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { Menu, Search, Plus, LayoutGrid, ClipboardList, PackageCheck, AlertTriangle, BarChart3, Settings, LogOut, User } from 'lucide-react'
+import { Menu, Search, Plus, LayoutGrid, ClipboardList, PackageCheck, AlertTriangle, BarChart3, Settings, LogOut, User, Mail } from 'lucide-react'
 import clsx from 'clsx'
 import CommandPalette from '../../features/common/CommandPalette'
 import QuickAddModal from '../../features/common/QuickAddModal'
 import SecurityAlertBanner from './SecurityAlertBanner'
 import { useAuth } from '../../features/common/AuthProvider'
+import NotificationBell from '../../features/notifications/NotificationBell'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -64,6 +65,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <NavItem to="/tasks"     icon={PackageCheck} label="Tasks" />
           <NavItem to="/qc"        icon={AlertTriangle}label="QC" />
           <NavItem to="/alerts"    icon={AlertTriangle}label="Alerts" />
+          <NavItem to="/inbox"     icon={Mail}         label="Inbox" />
           <NavItem to="/reports"   icon={BarChart3}    label="Reports" />
           <NavItem to="/admin"     icon={Settings}     label="Admin" />
         </nav>
@@ -81,6 +83,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Notification Bell */}
+            <NotificationBell />
+            
             {/* Removed '+ New' button, only user menu remains */}
             {user && (
               <div className="relative">

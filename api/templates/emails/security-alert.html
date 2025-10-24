@@ -1,0 +1,56 @@
+<h2>Security Alert - Suspicious Activity Detected 🚨</h2>
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<div class="alert alert-danger">
+  <strong>⚠️ SECURITY ALERT</strong><br>
+  We detected suspicious activity on your account that requires your immediate attention.
+</div>
+
+<p><strong>Activity Details:</strong></p>
+<ul>
+  <li><strong>Alert Type:</strong> {{alertType}}</li>
+  <li><strong>Severity:</strong> {{severity}}</li>
+  <li><strong>Date & Time:</strong> {{alertDateTime}}</li>
+  <li><strong>Description:</strong> {{alertDescription}}</li>
+</ul>
+
+<p><strong>What happened?</strong></p>
+<p>{{detailedDescription}}</p>
+
+<div class="alert alert-warning">
+  <strong>🔒 Immediate Actions Required:</strong>
+  <ol>
+    <li>Review the suspicious activity details below</li>
+    <li>Change your password immediately if you suspect unauthorized access</li>
+    <li>Enable Multi-Factor Authentication (MFA) if not already enabled</li>
+    <li>Review your active sessions and revoke any you don't recognize</li>
+    <li>Contact your administrator if you need assistance</li>
+  </ol>
+</div>
+
+<p style="text-align: center;">
+  <a href="{{securityUrl}}" class="button">Review Security Settings</a>
+  <a href="{{auditLogUrl}}" class="button" style="background-color: #dc3545;">View Audit Log</a>
+</p>
+
+<p><strong>Suspicious Activity Log:</strong></p>
+<ul>
+  {{#each activities}}
+  <li>{{this}}</li>
+  {{/each}}
+</ul>
+
+<div class="alert alert-info">
+  <strong>Need Help?</strong><br>
+  Contact IT Security immediately:<br>
+  Email: <a href="mailto:{{securityEmail}}">{{securityEmail}}</a><br>
+  Administrator: <a href="mailto:{{adminEmail}}">{{adminEmail}}</a>
+</div>
+
+<p><strong>Security Incident Reference:</strong> <code>{{incidentId}}</code></p>
+
+<p>This is an automated security alert. Please do not ignore this message.</p>
+
+<p>Best regards,<br>
+Pramara PMS Security Team</p>

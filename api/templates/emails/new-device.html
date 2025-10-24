@@ -1,0 +1,44 @@
+<h2>New Device Login Detected 🔔</h2>
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<div class="alert alert-warning">
+  <strong>⚠️ A new device was used to access your account</strong>
+</div>
+
+<p>We detected a login from a device we haven't seen before:</p>
+
+<p><strong>Device Information:</strong></p>
+<ul>
+  <li><strong>Device:</strong> {{deviceInfo}}</li>
+  <li><strong>Browser:</strong> {{browser}}</li>
+  <li><strong>Operating System:</strong> {{operatingSystem}}</li>
+  <li><strong>Location:</strong> {{location}}</li>
+  <li><strong>IP Address:</strong> {{ipAddress}}</li>
+  <li><strong>Date & Time:</strong> {{loginDateTime}}</li>
+</ul>
+
+<div class="alert alert-success">
+  <strong>✅ Was this you?</strong><br>
+  If you recognize this login, no action is needed. The device has been registered and you may be asked to trust it.
+</div>
+
+<div class="alert alert-danger">
+  <strong>🚨 This wasn't you?</strong><br>
+  If you don't recognize this activity, your account may be compromised. Take immediate action:
+  <ol>
+    <li>Change your password immediately</li>
+    <li>Enable Multi-Factor Authentication (MFA)</li>
+    <li>Review your active sessions and revoke any you don't recognize</li>
+    <li>Contact your administrator at <a href="mailto:{{adminEmail}}">{{adminEmail}}</a></li>
+  </ol>
+</div>
+
+<p style="text-align: center;">
+  <a href="{{securityUrl}}" class="button">Review Security Settings</a>
+</p>
+
+<p><strong>Device ID:</strong> <code>{{deviceId}}</code></p>
+
+<p>Best regards,<br>
+Pramara PMS Security Team</p>

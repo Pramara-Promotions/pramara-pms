@@ -339,4 +339,76 @@ app.post("/api/projects/:id/plan/simulate", async (req, res) => {
 });
 
 const port = process.env.PORT || 4000;
-app.listen(port, () => console.log(`API running on http://localhost:${port}`));
+
+// Create HTTP server for Socket.IO
+const http = require('http');
+const server = http.createServer(app);
+
+// Setup Socket.IO for real-time notifications
+const { Server } = require('socket.io');
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true
+  }
+});
+
+// Make io available globally for notification service
+global.io = io;
+
+// Socket.IO authentication and room joining
+io.on('connection', (socket) => {
+  console.log(`🔌 Client connected: ${socket.id}`);
+
+  // Authenticate and join user room
+  socket.on('authenticate', async (token) => {
+    try {
+      // Verify JWT token (reuse auth logic)
+      const jwt = require('jsonwebtoken');
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-key-change-in-production');
+      
+      // Join user-specific room
+      const userRoom = `user:${decoded.userId}`;
+      socket.join(userRoom);
+      socket.userId = decoded.userId;
+      
+      console.log(`✅ Socket ${socket.id} authenticated as user ${decoded.userId}`);
+      socket.emit('authenticated', { userId: decoded.userId });
+    } catch (error) {
+      console.error('❌ Socket authentication failed:', error);
+      socket.emit('auth_error', { error: 'Invalid token' });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`🔌 Client disconnected: ${socket.id}`);
+  });
+});
+
+// ====================================================================
+// [LANDMARK 4] START EMAIL SERVICES
+// ====================================================================
+
+// Start Email Inbound Service (IMAP polling)
+const { emailInboundService } = require('./api/lib/emailInboundService');
+emailInboundService.startPolling(5).then(() => {
+  console.log('✅ Email inbound service started (polling every 5 minutes)');
+}).catch(err => {
+  console.error('❌ Failed to start email inbound service:', err.message);
+  console.log('   → Check IMAP settings in System Settings');
+});
+
+// Start Email Digest Service (cron jobs)
+const { emailDigestService } = require('./api/lib/emailDigestService');
+emailDigestService.start().then(() => {
+  console.log('✅ Email digest service started');
+  console.log('   → Daily digests: 8:00 AM every day');
+  console.log('   → Weekly digests: 8:00 AM every Monday');
+}).catch(err => {
+  console.error('❌ Failed to start email digest service:', err.message);
+});
+
+server.listen(port, () => {
+  console.log(`✅ API running on http://localhost:${port}`);
+  console.log(`🔌 WebSocket server ready for real-time notifications`);
+});

@@ -155,6 +155,37 @@ router.post("/documents", authGuard, permissionGuard('DOC_UPLOAD'), async (req, 
         notificationEmails: notificationEmails || null,
       },
     });
+    // Fire-and-forget: trigger extraction for supported types when small enough
+    try {
+      const sizeBytes = 0; // Unknown at this stage unless client sent it; best-effort
+      const filename = (title || row.key || row.storageKey || 'document').toString();
+      const mime = contentType || 'application/octet-stream';
+      if ((row.storageKey || row.key) && /pdf|word|excel|image\//i.test(mime)) {
+        const { documentIntelligence } = require('../lib/documentIntelligence');
+        const job = await documentIntelligence.createJob({
+          entity: 'ProjectDocument',
+          entityId: String(row.id),
+          filename,
+          mimeType: mime,
+          sizeBytes,
+          sourceType: 'upload',
+          sourceId: null,
+          fileKey: row.storageKey || row.key,
+          meta: { projectId: row.projectId }
+        });
+        if (job.processingMode === 'immediate') {
+          const { getPresignedGetUrl } = require('../lib/storage');
+          const { url: presigned } = await getPresignedGetUrl({ key: row.storageKey || row.key });
+          const resp = await fetch(presigned);
+          const buffer = Buffer.from(await resp.arrayBuffer());
+          // Process but don't block response
+          documentIntelligence.processJob(job.id, buffer).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('[documents] extraction trigger failed:', e?.message);
+    }
+
     res.status(201).json(row);
   } catch (e) {
     console.error("POST /documents failed:", e);
@@ -367,6 +398,34 @@ router.post("/documents/:id/revise", authGuard, async (req, res) => {
       },
       include: { revisions: true }
     });
+    // Trigger extraction if new file provided and type supported
+    try {
+      const hasNewFile = req.body && (req.body.key || req.body.storageKey);
+      const mime = req.body?.contentType || newDoc.contentType || 'application/octet-stream';
+      if (hasNewFile && /pdf|word|excel|image\//i.test(mime)) {
+        const { documentIntelligence } = require('../lib/documentIntelligence');
+        const job = await documentIntelligence.createJob({
+          entity: 'ProjectDocument',
+          entityId: String(newDoc.id),
+          filename: newDoc.title || newDoc.key || newDoc.storageKey || 'document',
+          mimeType: mime,
+          sizeBytes: 0,
+          sourceType: 'upload',
+          sourceId: null,
+          fileKey: newDoc.storageKey || newDoc.key,
+          meta: { projectId: newDoc.projectId }
+        });
+        if (job.processingMode === 'immediate') {
+          const { getPresignedGetUrl } = require('../lib/storage');
+          const { url: presigned } = await getPresignedGetUrl({ key: newDoc.storageKey || newDoc.key });
+          const resp = await fetch(presigned);
+          const buffer = Buffer.from(await resp.arrayBuffer());
+          documentIntelligence.processJob(job.id, buffer).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('[documents:revise] extraction trigger failed:', e?.message);
+    }
     // Optionally tag stations
     if (Array.isArray(stations) && stations.length > 0) {
       for (const stationId of stations) {

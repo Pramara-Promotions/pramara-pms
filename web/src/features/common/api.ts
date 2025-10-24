@@ -3,8 +3,8 @@
 
 type Json = Record<string, unknown> | unknown[];
 
-const API_HOST = `${window.location.protocol}//${window.location.hostname}:4000`;
-const API_BASE = `${API_HOST}/api`;           // <-- important: includes /api
+// Use relative URL so Vite proxy handles the request
+const API_BASE = `/api`;           // <-- important: includes /api
 
 function join(base: string, path: string) {
   // Prevent // when caller passes "/me", "/auth/login", etc.
@@ -162,6 +162,13 @@ export const EmailAdminAPI = {
       method: "PUT",
       json: payload 
     });
+  },
+
+  // GET /api/admin/email-inbound/status
+  getInboundStatus() {
+    return apiFetch<{ enabled: boolean; imapConfigured: boolean; connected: boolean; polling: boolean }>(
+      "/admin/email-inbound/status"
+    );
   },
 
   // PUT /api/admin/users/:id/email-permissions

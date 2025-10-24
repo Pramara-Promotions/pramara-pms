@@ -1,0 +1,40 @@
+<h2>Account Locked - Security Alert 🔒</h2>
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<div class="alert alert-danger">
+  <strong>⚠️ Your account has been locked</strong><br>
+  Date: {{lockDate}}<br>
+  Time: {{lockTime}}<br>
+  Reason: {{lockReason}}
+</div>
+
+<p><strong>Why was my account locked?</strong></p>
+<p>{{lockDetails}}</p>
+
+<p><strong>What happens now?</strong></p>
+<ul>
+  <li>You cannot log in until an administrator unlocks your account</li>
+  <li>All your active sessions have been terminated</li>
+  <li>Your devices have been deauthorized</li>
+  <li>This action has been logged in the audit trail</li>
+</ul>
+
+<div class="alert alert-warning">
+  <strong>🔓 To Unlock Your Account:</strong><br>
+  Please contact your system administrator or IT support team to request account reactivation.
+</div>
+
+<p><strong>Contact Information:</strong></p>
+<ul>
+  <li>Administrator: {{adminName}}</li>
+  <li>Email: <a href="mailto:{{adminEmail}}">{{adminEmail}}</a></li>
+  <li>Support: <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></li>
+</ul>
+
+<p>If you believe this is a mistake or if you have questions, please reach out to your administrator immediately.</p>
+
+<p><strong>Security Incident Reference:</strong> <code>{{incidentId}}</code></p>
+
+<p>Best regards,<br>
+Pramara PMS Security Team</p>

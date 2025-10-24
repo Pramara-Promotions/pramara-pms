@@ -50,9 +50,13 @@ const { temporaryPermissionsRouter } = require('./routes/temporaryPermissions');
 const { permissionRequestsRouter } = require('./routes/permissionRequests');
 const { notificationsRouter } = require('./routes/notifications');
 const { invitationsRouter } = require('./routes/invitations');
+const { emailLogsRouter } = require('./routes/emailLogs');
+const { inboxRouter } = require('./routes/inbox');
+const { emailAnalyticsRouter } = require('./routes/emailAnalytics');
 const meRouter = require('./routes/me');
 const authRouter = require('./routes/auth');
 const inviteRouter = require('./routes/invite');
+const { docIntelligenceRouter } = require('./routes/docIntelligence');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -77,6 +81,16 @@ app.use(express.json({ limit: process.env.MAX_UPLOAD_BYTES || '20mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.resolve(__dirname, 'public', 'uploads')));
 
+// ====================================================================
+// [CRITICAL] AUTH ROUTES MUST BE FIRST
+// ====================================================================
+// Register auth routes BEFORE other routers to prevent middleware interference
+app.use('/api/auth', authRouter);
+
+// MFA routes
+const mfaRouter = require('./routes/mfa');
+app.use('/api/mfa', mfaRouter);
+
 // Register routers for /api/* endpoints
 app.use('/api', projectsRouter);
 if (uploadRouter) app.use('/api', uploadRouter);
@@ -90,8 +104,12 @@ app.use('/api', temporaryPermissionsRouter);
 app.use('/api', permissionRequestsRouter);
 app.use('/api', notificationsRouter);
 app.use('/api', invitationsRouter);
+app.use('/api', emailLogsRouter);
+app.use('/api', inboxRouter);
+app.use('/api', emailAnalyticsRouter);
 app.use('/api', meRouter);
 app.use('/api', inviteRouter);
+app.use('/api', docIntelligenceRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';
@@ -120,26 +138,6 @@ app.get('/api/debug', (req, res) => {
 app.get('/', (_req, res) => {
   res.send('✅ API is running');
 });
-
-// ====================================================================
-// [LANDMARK AUTH] VERY-LIGHT AUTH STUB (DEV-ONLY)
-// Frontend expects: POST /api/auth/login, POST /api/auth/logout, GET /api/me
-// - Sets an httpOnly cookie "token" on login
-// - /api/me returns a minimal user object if cookie is present
-// Replace later with real JWT/user lookup.
-// ====================================================================
-
-// ====================================================================
-// [LANDMARK 1] AUTHENTICATION ROUTES
-// ====================================================================
-// Use proper auth router with device tracking and audit logging
-app.use('/api/auth', authRouter);
-
-// MFA routes
-const mfaRouter = require('./routes/mfa');
-app.use('/api/mfa', mfaRouter);
-
-// /api/me is handled by routes/me.js (enhanced user payload)
 
 // ====================================================================
 // [LANDMARK 2] PROJECTS CRUD (simple)
@@ -1508,9 +1506,95 @@ app.use((err, req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 4000;
+
+// ====================================================================
+// [WEBSOCKET & EMAIL SERVICES] Socket.IO + Email Services Setup
+// ====================================================================
 if (require.main === module) {
-  app.listen(PORT, () => {
+  // Create HTTP server for Socket.IO
+  const http = require('http');
+  const server = http.createServer(app);
+
+  // Setup Socket.IO for real-time notifications
+  const { Server } = require('socket.io');
+  const allowedOrigins = (process.env.WEB_ORIGIN || 'http://localhost:5173').split(',');
+  const io = new Server(server, {
+    cors: {
+      origin: allowedOrigins,
+      credentials: true
+    }
+  });
+
+  // Make io available globally for notification service
+  global.io = io;
+
+  // Socket.IO authentication and room joining
+  io.on('connection', async (socket) => {
+    console.log(`🔌 Client connected: ${socket.id}`);
+
+    // Try to authenticate from cookie
+    try {
+      const jwt = require('jsonwebtoken');
+      const cookieParser = require('cookie-parser');
+      
+      // Parse cookies from handshake
+      const cookies = socket.handshake.headers.cookie;
+      if (cookies) {
+        const parsedCookies = {};
+        cookies.split(';').forEach(cookie => {
+          const [name, value] = cookie.trim().split('=');
+          parsedCookies[name] = value;
+        });
+        
+        const token = parsedCookies.token;
+        if (token) {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret-key-change-in-production');
+          
+          // Join user-specific room
+          const userRoom = `user:${decoded.sub}`;
+          socket.join(userRoom);
+          socket.userId = decoded.sub;
+          
+          console.log(`✅ Socket ${socket.id} authenticated as user ${decoded.sub}`);
+          socket.emit('authenticated', { userId: decoded.sub });
+        } else {
+          console.log(`⚠️ Socket ${socket.id} connected without auth token`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Socket authentication failed:', error.message);
+    }
+
+    socket.on('disconnect', () => {
+      console.log(`🔌 Client disconnected: ${socket.id}`);
+    });
+  });
+
+  // Start Email Inbound Service (IMAP polling)
+  try {
+    const emailInboundService = require('./lib/emailInboundService');
+    if (emailInboundService && emailInboundService.startPolling) {
+      emailInboundService.startPolling(5);
+      console.log('✅ Email inbound service started (polling every 5 minutes)');
+    }
+  } catch (err) {
+    console.error('❌ Failed to start email inbound service:', err.message);
+  }
+
+  // Start Email Digest Service (cron jobs)
+  try {
+    const emailDigestService = require('./lib/emailDigestService');
+    if (emailDigestService && emailDigestService.start) {
+      emailDigestService.start();
+      // Don't log here since the service already logs
+    }
+  } catch (err) {
+    console.error('❌ Failed to start email digest service:', err.message);
+  }
+
+  server.listen(PORT, () => {
     console.log(`🚀 API running on http://localhost:${PORT}`);
+    console.log(`🔌 WebSocket server ready for real-time notifications`);
   });
 }
 

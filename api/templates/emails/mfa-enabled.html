@@ -1,0 +1,55 @@
+<h2>MFA Enabled Successfully! ✅</h2>
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<div class="alert alert-success">
+  <strong>✅ Multi-Factor Authentication is now active on your account!</strong><br>
+  Your account is now more secure.
+</div>
+
+<p>You've successfully enabled Multi-Factor Authentication (MFA) for your Pramara PMS account.</p>
+
+<p><strong>What changed:</strong></p>
+<ul>
+  <li>You'll now need both your password and a 6-digit code from your authenticator app to log in</li>
+  <li>You can choose to trust devices for up to 30 days (configurable)</li>
+  <li>Your backup codes are available in your account settings</li>
+  <li>This change has been logged in your security audit trail</li>
+</ul>
+
+<p><strong>MFA Details:</strong></p>
+<ul>
+  <li><strong>Enabled On:</strong> {{enabledDate}}</li>
+  <li><strong>Device:</strong> {{deviceInfo}}</li>
+  <li><strong>Location:</strong> {{location}}</li>
+  <li><strong>Backup Codes Generated:</strong> {{backupCodeCount}}</li>
+</ul>
+
+<div class="alert alert-warning">
+  <strong>⚠️ Important Reminders:</strong>
+  <ul>
+    <li>Keep your authenticator app secure and backed up</li>
+    <li>Store your backup codes in a safe place (you'll need them if you lose your phone)</li>
+    <li>You can regenerate backup codes anytime from your account settings</li>
+    <li>If you lose access, contact your administrator for help</li>
+  </ul>
+</div>
+
+<p style="text-align: center;">
+  <a href="{{securityUrl}}" class="button">View Security Settings</a>
+  <a href="{{backupCodesUrl}}" class="button">View Backup Codes</a>
+</p>
+
+<div class="alert alert-info">
+  <strong>💡 Pro Tips:</strong>
+  <ul>
+    <li><strong>Trust Your Devices:</strong> Enable "Trust this device" to skip MFA for 30 days on your regular devices</li>
+    <li><strong>Backup Your Authenticator:</strong> Most authenticator apps support cloud backup</li>
+    <li><strong>Print Backup Codes:</strong> Keep a physical copy in a secure location</li>
+  </ul>
+</div>
+
+<p>If you did not enable MFA, please contact your administrator immediately at <a href="mailto:{{adminEmail}}">{{adminEmail}}</a>.</p>
+
+<p>Best regards,<br>
+Pramara PMS Security Team</p>

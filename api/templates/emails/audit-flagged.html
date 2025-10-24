@@ -1,0 +1,79 @@
+<h2>Audit Log Flagged - Review Required 🚩</h2>
+
+<p>Hello <strong>{{adminName}}</strong>,</p>
+
+<div class="alert alert-danger">
+  <strong>🚩 An audit log entry has been flagged for review</strong><br>
+  This activity requires your attention and may indicate a security concern or policy violation.
+</div>
+
+<p><strong>Flagged Activity Details:</strong></p>
+<ul>
+  <li><strong>User:</strong> {{userName}} ({{userEmail}})</li>
+  <li><strong>Action:</strong> {{action}}</li>
+  <li><strong>Entity:</strong> {{entityType}} - {{entityName}}</li>
+  <li><strong>Date & Time:</strong> {{actionDateTime}}</li>
+  <li><strong>Severity:</strong> {{severity}}</li>
+  <li><strong>Flag Reason:</strong> {{flagReason}}</li>
+</ul>
+
+<p><strong>What happened?</strong></p>
+<p>{{actionDescription}}</p>
+
+{{#if changes}}
+<div class="alert alert-warning">
+  <strong>📋 Changes Made:</strong>
+  <ul>
+    {{#each changes}}
+    <li><strong>{{this.field}}:</strong> "{{this.oldValue}}" → "{{this.newValue}}"</li>
+    {{/each}}
+  </ul>
+</div>
+{{/if}}
+
+<p><strong>Context Information:</strong></p>
+<ul>
+  <li><strong>Device:</strong> {{deviceInfo}}</li>
+  <li><strong>IP Address:</strong> {{ipAddress}}</li>
+  <li><strong>Location:</strong> {{location}}</li>
+  <li><strong>Session ID:</strong> {{sessionId}}</li>
+</ul>
+
+{{#if riskFactors}}
+<div class="alert alert-danger">
+  <strong>🚨 Risk Factors Detected:</strong>
+  <ul>
+    {{#each riskFactors}}
+    <li>{{this}}</li>
+    {{/each}}
+  </ul>
+</div>
+{{/if}}
+
+<p><strong>Recommended Actions:</strong></p>
+<ol>
+  <li>Review the full audit log entry for complete context</li>
+  <li>Contact the user if the activity seems suspicious</li>
+  <li>Take corrective action if policy violations are confirmed</li>
+  <li>Update security policies if needed</li>
+  <li>Mark the entry as reviewed once investigated</li>
+</ol>
+
+<p style="text-align: center;">
+  <a href="{{auditLogUrl}}" class="button">View Full Audit Log</a>
+  <a href="{{reviewUrl}}" class="button">Mark as Reviewed</a>
+  <a href="{{escalateUrl}}" class="button" style="background-color: #dc3545;">Escalate Issue</a>
+</p>
+
+<div class="alert alert-info">
+  <strong>📊 Recent Activity Summary:</strong><br>
+  This user has performed {{recentActionCount}} actions in the past {{recentDays}} days. {{flaggedCount}} of these have been flagged for review.
+</div>
+
+<p><strong>Audit Log ID:</strong> <code>{{auditLogId}}</code><br>
+<strong>Flag ID:</strong> <code>{{flagId}}</code></p>
+
+<p>This is an automated security alert. Please review and investigate as soon as possible.</p>
+
+<p>Best regards,<br>
+Pramara PMS Security Team</p>

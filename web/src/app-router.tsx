@@ -34,6 +34,8 @@ import Account from "./pages/Account";
 import NewProject from "./pages/projects/NewProject";
 import AcceptInvite from "./pages/AcceptInvite";
 import NotFound from "./pages/NotFound";
+import InboxPage from "./features/inbox/InboxPage";
+import EmailAnalyticsDashboard from "./features/analytics/EmailAnalyticsDashboard";
 
 /****************************************************
  * [LMK-02] ROOT ROUTE (no context)
@@ -195,6 +197,18 @@ const newProjectRoute = createRoute({
   component: NewProject,
 });
 
+const inboxRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "inbox",
+  component: InboxPage,
+});
+
+const emailAnalyticsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "analytics/email",
+  component: EmailAnalyticsDashboard,
+});
+
 /****************************************************
  * [LMK-04] ROUTE TREE
  ****************************************************/
@@ -209,6 +223,8 @@ const routeTree = rootRoute.addChildren([
     reportsRoute,
     adminRoute,
     accountRoute,
+    inboxRoute,
+    emailAnalyticsRoute,
   ]),
   loginRoute,
   forgotPasswordRoute,

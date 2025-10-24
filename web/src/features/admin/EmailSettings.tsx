@@ -13,9 +13,17 @@ export default function EmailSettings() {
     emailTrainingMode: true,
     emailInboundEnabled: false,
   });
+  const [inboundStatus, setInboundStatus] = useState<{enabled:boolean; imapConfigured:boolean; connected:boolean; polling:boolean} | null>(null);
 
   useEffect(() => {
     fetchSettings();
+    // Also fetch inbound status after settings load
+    (async () => {
+      try {
+        const status = await EmailAdminAPI.getInboundStatus?.();
+        if (status) setInboundStatus(status);
+      } catch {}
+    })();
   }, []);
 
   const fetchSettings = async () => {
@@ -183,12 +191,24 @@ export default function EmailSettings() {
                 📥 Inbound Email Processing
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Enable processing of incoming emails (future feature: email-to-action automation).
+                Enable processing of incoming emails. When enabled, the server polls your IMAP inbox and stores messages and attachments in the inbox.
               </p>
+              {inboundStatus && (
+                <div className="mb-3 text-sm">
+                  <span className={`inline-block px-2 py-0.5 rounded border mr-2 ${inboundStatus.enabled ? 'border-green-300 text-green-700' : 'border-gray-300 text-gray-600'}`}>
+                    {inboundStatus.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                  <span className={`inline-block px-2 py-0.5 rounded border mr-2 ${inboundStatus.imapConfigured ? 'border-blue-300 text-blue-700' : 'border-amber-300 text-amber-700'}`}>
+                    {inboundStatus.imapConfigured ? 'IMAP configured' : 'IMAP not configured'}
+                  </span>
+                  <span className={`inline-block px-2 py-0.5 rounded border ${inboundStatus.connected ? 'border-green-300 text-green-700' : 'border-gray-300 text-gray-600'}`}>
+                    {inboundStatus.connected ? 'Connected' : 'Not connected'}
+                  </span>
+                </div>
+              )}
               <div className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 text-sm">
                 <p className="text-gray-600 dark:text-gray-400">
-                  This feature is planned for future implementation. It will allow users to create tasks, 
-                  respond to notifications, and interact with the system via email.
+                  Requires IMAP credentials (IMAP_USER, IMAP_PASSWORD, IMAP_HOST, IMAP_PORT, IMAP_TLS) to be set on the server. Status updates after Save.
                 </p>
               </div>
             </div>

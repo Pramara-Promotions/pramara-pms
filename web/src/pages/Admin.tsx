@@ -8,8 +8,10 @@ import DeviceManagement from '../features/admin/DeviceManagement';
 import AuditLogViewer from '../features/admin/AuditLogViewer';
 import PermissionRequestManagement from '../features/common/PermissionRequestManagement';
 import EmailSettings from '../features/admin/EmailSettings';
+import EmailLogs from '../features/admin/EmailLogs';
+import DocIntelJobs from '../features/admin/DocIntelJobs';
 
-type TabType = 'users' | 'roles' | 'departments' | 'requests' | 'devices' | 'audit' | 'email';
+type TabType = 'users' | 'roles' | 'departments' | 'requests' | 'devices' | 'audit' | 'email' | 'emailLogs' | 'docintel';
 
 export default function Admin() {
   const { isSuperAdmin, hasAnyPermission } = useAuth();
@@ -38,6 +40,8 @@ export default function Admin() {
     { id: 'requests', label: 'Permission Requests' },
     { id: 'devices', label: 'Devices', requireSuperAdmin: true },
     { id: 'audit', label: 'Audit Logs', permission: 'AUDIT_VIEW' },
+  { id: 'emailLogs', label: 'Email Logs', requireSuperAdmin: true },
+  { id: 'docintel', label: 'Doc Intelligence', requireSuperAdmin: true },
     { id: 'email', label: 'Email Settings', requireSuperAdmin: true },
   ];
 
@@ -57,6 +61,10 @@ export default function Admin() {
         return <AuditLogViewer />;
       case 'email':
         return <EmailSettings />;
+      case 'emailLogs':
+        return <EmailLogs />;
+      case 'docintel':
+        return <DocIntelJobs />;
       default:
         return <div>Select a tab</div>;
     }

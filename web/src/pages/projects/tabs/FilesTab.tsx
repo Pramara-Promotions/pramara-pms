@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useMemo, useRef, useState } from "react";
+import ApproveExtractionModal from "../../../features/docintel/ApproveExtractionModal";
 import { useProjectDocuments } from "../hooks/useProjectDocuments";
 import { useStations } from "../hooks/useStations";
 import { useProjectContext } from "../ProjectContext";
@@ -153,6 +154,9 @@ export default function FilesTab() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const MAX_BYTES = 20 * 1024 * 1024; // keep in sync with server
+  // Doc Intelligence approval modal state
+  const [pendingJob, setPendingJob] = useState<any | null>(null);
+  const [pendingFields, setPendingFields] = useState<any[] | null>(null);
 
   function clearSelection() {
     setSelectedFile(null);
@@ -269,7 +273,7 @@ export default function FilesTab() {
           throw new Error(t || "Failed to prepare upload");
         }
         const preJson = await pre.json();
-        const put = await fetch(preJson.putUrl, {
+        const put = await fetch(preJson.url, {
           method: "PUT",
           headers: { "Content-Type": file.type || "application/octet-stream" },
           body: file,
@@ -295,6 +299,35 @@ export default function FilesTab() {
       }
       const created = await res.json();
       newDocId = created.id;
+
+      // Trigger extraction for immediate-sized files and show approval UI
+      if (file && payload.storageKey) {
+        try {
+          const ex = await fetch(`/api/doc-intelligence/extract`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              entity: 'ProjectDocument',
+              entityId: String(newDocId),
+              filename: file.name,
+              mimeType: file.type || 'application/octet-stream',
+              sizeBytes: file.size,
+              storageKey: payload.storageKey,
+              meta: { projectId }
+            })
+          });
+          if (ex.ok) {
+            const data = await ex.json();
+            const job = data.job;
+            const fields = data?.result?.fields || [];
+            if (Array.isArray(fields) && fields.length > 0) {
+              setPendingJob(job);
+              setPendingFields(fields);
+            }
+          }
+        } catch {}
+      }
 
       // Reset form and close
       setFormData({ kind: "document", title: "", referenceUrl: "", version: "1" });
@@ -482,7 +515,7 @@ export default function FilesTab() {
           }
           const preJson = await presignRes.json();
           
-          const putRes = await fetch(preJson.putUrl, {
+          const putRes = await fetch(preJson.url, {
             method: "PUT",
             headers: { "Content-Type": editSelectedFile.type || "application/octet-stream" },
             body: editSelectedFile,
@@ -929,7 +962,7 @@ export default function FilesTab() {
           </button>
         </div>
 
-        {showAddForm && (
+  {showAddForm && (
         <form onSubmit={handleSubmit} onPaste={handlePaste} className="mb-4 p-4 border rounded-lg space-y-4">
           {/* File Upload Section */}
           <div
@@ -1008,6 +1041,14 @@ export default function FilesTab() {
           </div>
         </form>
       )}
+        {pendingJob && pendingFields && (
+          <ApproveExtractionModal
+            job={pendingJob}
+            fields={pendingFields}
+            onClose={() => { setPendingJob(null); setPendingFields(null); }}
+            onApproved={async () => { await reload?.(); }}
+          />
+        )}
 
       <div className="mt-3">
         {loading ? (

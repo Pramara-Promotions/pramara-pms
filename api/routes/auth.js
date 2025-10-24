@@ -12,6 +12,12 @@ try {
 
 const router = express.Router();
 
+// Debug route to test if router is working
+router.get('/test', (req, res) => {
+  console.log('[AUTH] Test route hit!');
+  res.json({ message: 'Auth router is working!' });
+});
+
 /**
  * POST /api/auth/login
  * Body: { email, password, totp? }
@@ -22,9 +28,11 @@ const router = express.Router();
  */
 router.post('/login', async (req, res, next) => {
   try {
+    console.log('[LOGIN] Request received:', { email: req.body?.email, hasPassword: !!req.body?.password });
     const { email = '', password = '' } = req.body || {};
 
     if (!email || !password) {
+      console.log('[LOGIN] Missing credentials');
       return res.status(400).json({ error: 'Email and password required' });
     }
 

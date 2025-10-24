@@ -7,12 +7,15 @@ import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./app-router";
 import AuthProvider from "./features/common/AuthProvider";
 import { ToastProvider } from "./ui/toast/ToastProvider";
+import NotificationsProvider from "./features/notifications/NotificationsProvider";
 
 function RootApp() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <RouterProvider router={router} />
+        <NotificationsProvider>
+          <RouterProvider router={router} />
+        </NotificationsProvider>
       </ToastProvider>
     </AuthProvider>
   );

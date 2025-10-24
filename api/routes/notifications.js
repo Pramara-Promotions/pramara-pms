@@ -1,33 +1,25 @@
 // api/routes/notifications.js
 const express = require('express');
 const authGuard = require('../middleware/authGuard');
-const { PrismaClient } = require('@prisma/client');
+const notificationService = require('../lib/notificationService');
 
-const prisma = new PrismaClient();
 const router = express.Router();
 
-// Get user's notifications
+// Get user's notifications with filtering
 router.get('/notifications', authGuard, async (req, res) => {
   try {
-    const { unreadOnly, limit = 50, offset = 0 } = req.query;
+    const { unreadOnly, priority, type, limit, offset } = req.query;
     
-    const where = { userId: req.auth.user.id };
-    if (unreadOnly === 'true') {
-      where.read = false;
-    }
-    
-    const notifications = await prisma.notification.findMany({
-      where,
-      take: parseInt(limit),
-      skip: parseInt(offset),
-      orderBy: { createdAt: 'desc' }
+    const result = await notificationService.getUserNotifications({
+      userId: req.auth.user.id,
+      unreadOnly: unreadOnly === 'true',
+      priority,
+      type,
+      limit: limit ? parseInt(limit) : 50,
+      offset: offset ? parseInt(offset) : 0
     });
     
-    const unreadCount = await prisma.notification.count({
-      where: { userId: req.auth.user.id, read: false }
-    });
-    
-    res.json({ notifications, unreadCount });
+    res.json(result);
   } catch (error) {
     console.error('Error fetching notifications:', error);
     res.status(500).json({ error: 'Failed to fetch notifications' });
@@ -37,39 +29,87 @@ router.get('/notifications', authGuard, async (req, res) => {
 // Mark notification as read
 router.patch('/notifications/:id/read', authGuard, async (req, res) => {
   try {
-    const notification = await prisma.notification.findUnique({
-      where: { id: req.params.id }
-    });
-    
-    if (!notification) {
-      return res.status(404).json({ error: 'Notification not found' });
-    }
-    
-    if (notification.userId !== req.auth.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-    
-    const updated = await prisma.notification.update({
-      where: { id: req.params.id },
-      data: { read: true }
-    });
-    
+    const updated = await notificationService.markRead(
+      req.params.id,
+      req.auth.user.id
+    );
     res.json(updated);
   } catch (error) {
     console.error('Error marking notification as read:', error);
+    if (error.message.includes('not found') || error.message.includes('denied')) {
+      return res.status(404).json({ error: error.message });
+    }
     res.status(500).json({ error: 'Failed to update notification' });
+  }
+});
+
+// Mark notification as read (POST method for compatibility)
+router.post('/notifications/:id/read', authGuard, async (req, res) => {
+  try {
+    const updated = await notificationService.markRead(
+      req.params.id,
+      req.auth.user.id
+    );
+    res.json(updated);
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    if (error.message.includes('not found') || error.message.includes('denied')) {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Failed to update notification' });
+  }
+});
+
+// Dismiss notification
+router.patch('/notifications/:id/dismiss', authGuard, async (req, res) => {
+  try {
+    const updated = await notificationService.dismiss(
+      req.params.id,
+      req.auth.user.id
+    );
+    res.json(updated);
+  } catch (error) {
+    console.error('Error dismissing notification:', error);
+    if (error.message.includes('not found') || error.message.includes('denied')) {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Failed to dismiss notification' });
+  }
+});
+
+// Dismiss notification (POST method for compatibility)
+router.post('/notifications/:id/dismiss', authGuard, async (req, res) => {
+  try {
+    const updated = await notificationService.dismiss(
+      req.params.id,
+      req.auth.user.id
+    );
+    res.json(updated);
+  } catch (error) {
+    console.error('Error dismissing notification:', error);
+    if (error.message.includes('not found') || error.message.includes('denied')) {
+      return res.status(404).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Failed to dismiss notification' });
   }
 });
 
 // Mark all notifications as read
 router.post('/notifications/read-all', authGuard, async (req, res) => {
   try {
+    const { PrismaClient } = require('@prisma/client');
+    const prisma = new PrismaClient();
+    
     const result = await prisma.notification.updateMany({
       where: {
         userId: req.auth.user.id,
-        read: false
+        read: false,
+        dismissed: false
       },
-      data: { read: true }
+      data: { 
+        read: true,
+        readAt: new Date()
+      }
     });
     
     res.json({ message: `Marked ${result.count} notifications as read` });
@@ -79,65 +119,23 @@ router.post('/notifications/read-all', authGuard, async (req, res) => {
   }
 });
 
-// Delete notification
+// Delete notification (deprecated - use dismiss instead)
 router.delete('/notifications/:id', authGuard, async (req, res) => {
   try {
-    const notification = await prisma.notification.findUnique({
-      where: { id: req.params.id }
-    });
-    
-    if (!notification) {
-      return res.status(404).json({ error: 'Notification not found' });
-    }
-    
-    if (notification.userId !== req.auth.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-    
-    await prisma.notification.delete({
-      where: { id: req.params.id }
-    });
-    
-    res.json({ message: 'Notification deleted' });
+    const dismissed = await notificationService.dismiss(
+      req.params.id,
+      req.auth.user.id
+    );
+    res.json({ message: 'Notification dismissed' });
   } catch (error) {
     console.error('Error deleting notification:', error);
+    if (error.message.includes('not found') || error.message.includes('denied')) {
+      return res.status(404).json({ error: error.message });
+    }
     res.status(500).json({ error: 'Failed to delete notification' });
   }
 });
 
-// Helper function to create a notification (for internal use)
-async function createNotification({ userId, type, title, message, link = null }) {
-  try {
-    return await prisma.notification.create({
-      data: { userId, type, title, message, link }
-    });
-  } catch (error) {
-    console.error('Error creating notification:', error);
-  }
-}
-
-// Helper function to notify multiple users
-async function notifyUsers(userIds, { type, title, message, link = null }) {
-  try {
-    const notifications = userIds.map(userId => ({
-      userId,
-      type,
-      title,
-      message,
-      link
-    }));
-    
-    return await prisma.notification.createMany({
-      data: notifications
-    });
-  } catch (error) {
-    console.error('Error notifying users:', error);
-  }
-}
-
 module.exports = { 
-  notificationsRouter: router,
-  createNotification,
-  notifyUsers
+  notificationsRouter: router
 };
-

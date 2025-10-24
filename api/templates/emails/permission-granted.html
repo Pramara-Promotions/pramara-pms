@@ -1,0 +1,51 @@
+<h2>Permission Granted ✅</h2>
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<div class="alert alert-success">
+  <strong>✅ Good news! Your permission request has been approved</strong>
+</div>
+
+<p>Your request for additional access has been reviewed and granted by <strong>{{approverName}}</strong>.</p>
+
+<p><strong>Permission Details:</strong></p>
+<ul>
+  <li><strong>Permission:</strong> {{permissionName}} ({{permissionCode}})</li>
+  <li><strong>Granted By:</strong> {{approverName}} ({{approverRole}})</li>
+  <li><strong>Granted On:</strong> {{grantedDate}}</li>
+  <li><strong>Valid Until:</strong> {{expiryDate}}</li>
+</ul>
+
+{{#if isTemporary}}
+<div class="alert alert-warning">
+  <strong>⏰ Temporary Permission</strong><br>
+  This permission is temporary and will expire on <strong>{{expiryDate}}</strong>. If you need extended access, please submit a new request before the expiry date.
+</div>
+{{/if}}
+
+<p><strong>What you can now do:</strong></p>
+<p>{{permissionDescription}}</p>
+
+<ul>
+  {{#each capabilities}}
+  <li>{{this}}</li>
+  {{/each}}
+</ul>
+
+{{#if approverNote}}
+<div class="alert alert-info">
+  <strong>📝 Note from {{approverName}}:</strong><br>
+  "{{approverNote}}"
+</div>
+{{/if}}
+
+<p style="text-align: center;">
+  <a href="{{dashboardUrl}}" class="button">Go to Dashboard</a>
+</p>
+
+<p><strong>Request ID:</strong> <code>{{requestId}}</code></p>
+
+<p>If you have any questions about your new permissions, please contact <a href="mailto:{{approverEmail}}">{{approverEmail}}</a>.</p>
+
+<p>Best regards,<br>
+Pramara PMS Administration Team</p>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QC Failure Alert</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" width="100%" cellspacing="0" cellpadding="0" border="0">
+                    <!-- Header -->
+                    <tr>
+                        <td style="padding: 32px 32px 24px; text-align: center; background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%); border-radius: 8px 8px 0 0;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">
+                                ❌ QC Failure
+                            </h1>
+                            <p style="margin: 8px 0 0; color: #fed7aa; font-size: 16px; font-weight: 600;">Quality Check Failed</p>
+                        </td>
+                    </tr>
+
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 32px;">
+                            <p style="margin: 0 0 8px; color: #666666; font-size: 14px;">
+                                Hello {{userName}},
+                            </p>
+                            
+                            <p style="margin: 8px 0 24px; color: #1a1a1a; font-size: 17px; line-height: 1.6; font-weight: 600;">
+                                Batch <strong>{{batchCode}}</strong> has failed quality verification.
+                            </p>
+
+                            <!-- Batch Details -->
+                            <div style="margin: 24px 0; padding: 20px; background-color: #fff7ed; border: 2px solid #fb923c; border-radius: 8px;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                    <tr>
+                                        <td style="padding: 0 0 12px; border-bottom: 1px solid #fb923c;">
+                                            <p style="margin: 0; color: #ea580c; font-size: 16px; font-weight: 700;">
+                                                Issue: {{issueType}}
+                                            </p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 12px 0;">
+                                            <p style="margin: 0 0 8px; color: #7c2d12; font-size: 14px;">
+                                                <strong>Location:</strong> {{location}}
+                                            </p>
+                                            <p style="margin: 0 0 8px; color: #7c2d12; font-size: 14px;">
+                                                <strong>Inspector:</strong> {{inspector}}
+                                            </p>
+                                            {{if unitsAffected}}
+                                            <p style="margin: 0 0 8px; color: #7c2d12; font-size: 14px;">
+                                                <strong>Units Affected:</strong> {{unitsAffected}}
+                                            </p>
+                                            {{endif}}
+                                            {{if failureRate}}
+                                            <p style="margin: 0; color: #ea580c; font-size: 16px; font-weight: 700;">
+                                                <strong>Failure Rate:</strong> {{failureRate}}
+                                            </p>
+                                            {{endif}}
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            {{if pantoneIssue}}
+                            <div style="margin: 24px 0; padding: 16px; background-color: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
+                                <p style="margin: 0 0 8px; color: #92400e; font-size: 14px; font-weight: 600;">
+                                    Pantone Color Mismatch:
+                                </p>
+                                <p style="margin: 0 0 4px; color: #92400e; font-size: 14px;">
+                                    <strong>Target:</strong> {{pantoneTarget}}
+                                </p>
+                                <p style="margin: 0; color: #92400e; font-size: 14px;">
+                                    <strong>Actual:</strong> {{pantoneActual}}
+                                </p>
+                            </div>
+                            {{endif}}
+
+                            <!-- Impact -->
+                            <div style="margin: 24px 0; padding: 16px; background-color: #fee; border-left: 4px solid #ef4444; border-radius: 4px;">
+                                <p style="margin: 0; color: #dc2626; font-size: 15px; font-weight: 700;">
+                                    ⚠️ Impact: {{impactDescription}}
+                                </p>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 32px 0 24px;">
+                                <tr>
+                                    <td style="text-align: center; padding-bottom: 12px;">
+                                        <a href="{{appUrl}}/qc/batch/{{batchId}}" style="display: inline-block; padding: 16px 40px; background-color: #ea580c; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 700; font-size: 16px;">
+                                            View QC Report →
+                                        </a>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align: center;">
+                                        <a href="{{appUrl}}/qc/batch/{{batchId}}/photos" style="display: inline-block; padding: 12px 24px; background-color: transparent; color: #ea580c; text-decoration: none; border: 2px solid #ea580c; border-radius: 6px; font-weight: 600; font-size: 14px; margin: 0 8px;">
+                                            View Photos
+                                        </a>
+                                        {{if supervisorId}}
+                                        <a href="{{appUrl}}/messages/{{supervisorId}}" style="display: inline-block; padding: 12px 24px; background-color: transparent; color: #ea580c; text-decoration: none; border: 2px solid #ea580c; border-radius: 6px; font-weight: 600; font-size: 14px; margin: 0 8px;">
+                                            Contact Supervisor
+                                        </a>
+                                        {{endif}}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 24px 32px; border-top: 1px solid #f0f0f0; text-align: center;">
+                            <p style="margin: 0 0 8px; color: #999999; font-size: 13px;">
+                                This is an automated alert from Pramara PMS Quality Control.
+                            </p>
+                            <p style="margin: 0; color: #ea580c; font-size: 13px; font-weight: 600;">
+                                ⚠️ Action required to resolve quality issue
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Footer Text -->
+                <table role="presentation" style="max-width: 600px; margin: 16px auto 0;" width="100%" cellspacing="0" cellpadding="0" border="0">
+                    <tr>
+                        <td style="text-align: center; padding: 0 20px;">
+                            <p style="margin: 0; color: #999999; font-size: 12px;">
+                                © 2025 Pramara Promotions. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cutoff Warning</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" width="100%" cellspacing="0" cellpadding="0" border="0">
+                    <!-- Header -->
+                    <tr>
+                        <td style="padding: 32px 32px 24px; text-align: center; background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); border-radius: 8px 8px 0 0;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">
+                                🔴 CUTOFF RISK
+                            </h1>
+                            <p style="margin: 8px 0 0; color: #fee; font-size: 16px; font-weight: 600;">Immediate Action Required</p>
+                        </td>
+                    </tr>
+
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 32px;">
+                            <p style="margin: 0 0 8px; color: #666666; font-size: 14px;">
+                                Hello {{userName}},
+                            </p>
+                            
+                            <p style="margin: 8px 0 24px; color: #1a1a1a; font-size: 17px; line-height: 1.6; font-weight: 600;">
+                                Project <strong>{{projectName}}</strong> ({{projectCode}}) is behind schedule and at risk of missing the cutoff deadline.
+                            </p>
+
+                            <!-- Alert Box -->
+                            <div style="margin: 24px 0; padding: 20px; background-color: #fee; border: 2px solid #fca5a5; border-radius: 8px;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                                    <tr>
+                                        <td style="padding: 0 0 12px; border-bottom: 1px solid #fca5a5;">
+                                            <p style="margin: 0; color: #dc2626; font-size: 16px; font-weight: 700;">
+                                                ⏰ Time Remaining: {{hoursRemaining}} hours
+                                            </p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 12px 0;">
+                                            <p style="margin: 0 0 4px; color: #7f1d1d; font-size: 14px;">
+                                                <strong>Time Needed:</strong> {{hoursNeeded}} hours
+                                            </p>
+                                            {{if deficit > 0}}
+                                            <p style="margin: 4px 0 0; color: #dc2626; font-size: 16px; font-weight: 700;">
+                                                <strong>Deficit:</strong> {{deficit}} hours behind
+                                            </p>
+                                            {{endif}}
+                                        </td>
+                                    </tr>
+                                </table>
+                            </div>
+
+                            {{if delayedStages && delayedStages.length > 0}}
+                            <div style="margin: 24px 0; padding: 16px; background-color: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px;">
+                                <p style="margin: 0 0 8px; color: #92400e; font-size: 14px; font-weight: 600;">
+                                    Delayed Stages:
+                                </p>
+                                <ul style="margin: 0; padding-left: 20px; color: #92400e; font-size: 14px;">
+                                    {{#each delayedStages}}
+                                    <li>{{this}}</li>
+                                    {{/each}}
+                                </ul>
+                            </div>
+                            {{endif}}
+
+                            <!-- Action Buttons -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 32px 0 24px;">
+                                <tr>
+                                    <td style="text-align: center; padding-bottom: 12px;">
+                                        <a href="{{appUrl}}/projects/{{projectId}}/timeline" style="display: inline-block; padding: 16px 40px; background-color: #dc2626; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 700; font-size: 16px;">
+                                            View Timeline →
+                                        </a>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="text-align: center;">
+                                        <a href="{{appUrl}}/optimize/project/{{projectId}}" style="display: inline-block; padding: 12px 24px; background-color: transparent; color: #dc2626; text-decoration: none; border: 2px solid #dc2626; border-radius: 6px; font-weight: 600; font-size: 14px; margin: 0 8px;">
+                                            Recovery Options
+                                        </a>
+                                        <a href="{{appUrl}}/projects/{{projectId}}/reallocate" style="display: inline-block; padding: 12px 24px; background-color: transparent; color: #dc2626; text-decoration: none; border: 2px solid #dc2626; border-radius: 6px; font-weight: 600; font-size: 14px; margin: 0 8px;">
+                                            Reallocate Resources
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 24px 32px; border-top: 1px solid #f0f0f0; text-align: center;">
+                            <p style="margin: 0 0 8px; color: #999999; font-size: 13px;">
+                                This is an automated alert from Pramara PMS.
+                            </p>
+                            <p style="margin: 0; color: #dc2626; font-size: 13px; font-weight: 600;">
+                                ⚠️ Requires immediate attention
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+
+                <!-- Footer Text -->
+                <table role="presentation" style="max-width: 600px; margin: 16px auto 0;" width="100%" cellspacing="0" cellpadding="0" border="0">
+                    <tr>
+                        <td style="text-align: center; padding: 0 20px;">
+                            <p style="margin: 0; color: #999999; font-size: 12px;">
+                                © 2025 Pramara Promotions. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

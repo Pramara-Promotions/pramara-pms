@@ -1,0 +1,60 @@
+<h2>New Permission Request - Action Required 📋</h2>
+
+<p>Hello <strong>{{adminName}}</strong>,</p>
+
+<div class="alert alert-warning">
+  <strong>⏰ A user has requested additional permissions</strong><br>
+  This request requires your review and approval.
+</div>
+
+<p><strong>Request Details:</strong></p>
+<ul>
+  <li><strong>Requested By:</strong> {{requesterName}} ({{requesterEmail}})</li>
+  <li><strong>Current Role:</strong> {{requesterRole}}</li>
+  <li><strong>Department:</strong> {{requesterDepartment}}</li>
+  <li><strong>Request Date:</strong> {{requestDate}}</li>
+</ul>
+
+<p><strong>Permission Requested:</strong></p>
+<ul>
+  <li><strong>Permission:</strong> {{permissionName}} ({{permissionCode}})</li>
+  <li><strong>Duration:</strong> {{duration}}</li>
+  <li><strong>Type:</strong> {{requestType}}</li>
+</ul>
+
+<div class="alert alert-info">
+  <strong>📝 Justification:</strong><br>
+  "{{requestReason}}"
+</div>
+
+{{#if urgency}}
+<div class="alert alert-danger">
+  <strong>🚨 Urgent Request</strong><br>
+  This request has been marked as urgent. The user requires access as soon as possible.
+</div>
+{{/if}}
+
+<p><strong>What this permission allows:</strong></p>
+<p>{{permissionDescription}}</p>
+
+<ul>
+  {{#each capabilities}}
+  <li>{{this}}</li>
+  {{/each}}
+</ul>
+
+<p style="text-align: center;">
+  <a href="{{approveUrl}}" class="button" style="background-color: #28a745;">✅ Approve Request</a>
+  <a href="{{rejectUrl}}" class="button" style="background-color: #dc3545;">❌ Reject Request</a>
+  <a href="{{reviewUrl}}" class="button">📋 Review in Detail</a>
+</p>
+
+<div class="alert alert-info">
+  <strong>⏰ Review Timeline:</strong><br>
+  Please review this request within {{reviewDays}} business days. The user has been notified that their request is pending.
+</div>
+
+<p><strong>Request ID:</strong> <code>{{requestId}}</code></p>
+
+<p>Best regards,<br>
+Pramara PMS System</p>

@@ -5,6 +5,8 @@
  * [LMK-01] IMPORTS
  ****************************************************/
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import ApproveExtractionModal from "../../../features/docintel/ApproveExtractionModal";
+import { DOC_INTELLIGENCE_ENABLED } from "../../../config/flags";
 import { useToast } from "../../../ui/toast/ToastProvider";
 import { useProjectContext } from "../ProjectContext";
 
@@ -94,6 +96,17 @@ export default function SkusTab() {
     imageFile: null as File | null,  // preview only
     attrs: {} as Record<string, string>,
   });
+
+  // PO PDF preview + multi-PO handling
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [detectedPos, setDetectedPos] = useState<string[]>([]);
+  const [lastUploadedPoKey, setLastUploadedPoKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      try { previewUrl && previewUrl.startsWith('blob:') && URL.revokeObjectURL(previewUrl); } catch {}
+    };
+  }, [previewUrl]);
 
   /****************************************************
  * [LMK-07A] STATE – DELETE CONFIRM
@@ -266,7 +279,7 @@ function cancelDelete() {
   /****************************************************
    * [LMK-14] UPLOAD — PO PDF (PRESIGN + CONFIRM; LEGACY FALLBACK)
    ****************************************************/
-  async function uploadPoIfNeeded(poNumber: string, poPdfFile: File | null): Promise<void> {
+  async function uploadPoIfNeeded(poNumber: string, poPdfFile: File | null): Promise<{ key?: string; fields?: any[] } | void> {
     if (poProbe.exists === true) return; // already known exists
     if (!poNumber) throw new Error("PO number is required.");
     if (poProbe.exists === false && !poPdfFile) {
@@ -304,8 +317,9 @@ function cancelDelete() {
           body: JSON.stringify({ poNumber, key: presign.key }),
         });
 
-        setLastPo(poNumber);
+  setLastPo(poNumber);
         setPoProbe({ checking: false, exists: true, url: null });
+        setLastUploadedPoKey(presign.key || null);
 
         // refresh PO list
         try {
@@ -314,7 +328,36 @@ function cancelDelete() {
           });
           setPoList(Array.isArray(pos) ? pos : []);
         } catch { /* no-op */ }
-        return;
+
+        // Trigger extraction only if feature enabled
+        if (DOC_INTELLIGENCE_ENABLED) {
+          try {
+            const exRes = await fetch(`/api/doc-intelligence/extract`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                entity: 'PurchaseOrder',
+                entityId: String(poNumber),
+                filename: poPdfFile.name,
+                mimeType: poPdfFile.type || 'application/pdf',
+                sizeBytes: poPdfFile.size || 0,
+                storageKey: presign.key,
+                meta: { projectId: project.id, poNumber }
+              })
+            });
+            if (exRes.ok) {
+              const data = await exRes.json();
+              if (Array.isArray(data?.result?.fields) && data.result.fields.length) {
+                setDiModal({ job: data.job, fields: data.result.fields, fallbackUrl: previewUrl || poProbe.url });
+                // Opportunistically pre-fill form fields
+                applyExtractedFieldsToForm(data.result.fields);
+                return { key: presign.key, fields: data.result.fields };
+              }
+            }
+          } catch {}
+        }
+        return { key: presign.key };
       }
     } catch { /* fall back */ }
 
@@ -331,6 +374,24 @@ function cancelDelete() {
       const txt = await legacy.text();
       throw new Error(txt || "PO upload failed");
     }
+    // Best-effort DI disabled by default
+    if (DOC_INTELLIGENCE_ENABLED) {
+      try {
+        await fetch(`/api/doc-intelligence/extract`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            entity: 'PurchaseOrder',
+            entityId: String(poNumber),
+            filename: poPdfFile?.name || `po-${poNumber}.pdf`,
+            mimeType: poPdfFile?.type || 'application/pdf',
+            sizeBytes: poPdfFile?.size || 0,
+            meta: { projectId: project.id, poNumber },
+          })
+        });
+      } catch {}
+    }
     setLastPo(poNumber);
     setPoProbe({ checking: false, exists: true, url: null });
     try {
@@ -339,6 +400,161 @@ function cancelDelete() {
       });
       setPoList(Array.isArray(pos) ? pos : []);
     } catch { /* no-op */ }
+  }
+
+  // Doc Intelligence modal state for PO upload
+  const [diModal, setDiModal] = useState<any | null>(null);
+
+  // Map DI fields to our form model conservatively (only fill empty fields)
+  function applyExtractedFieldsToForm(fields: Array<{ name: string; value: any }>) {
+    console.log('[DI] applyExtractedFieldsToForm called with:', fields);
+    if (!Array.isArray(fields) || fields.length === 0) {
+      console.warn('[DI] No fields to apply');
+      return;
+    }
+    // collect multi-POs
+    const poValues = Array.from(new Set(fields.filter(f => f.name === 'poNumber').map(f => String(f.value || '').trim()).filter(Boolean)));
+    console.log('[DI] Found PO values:', poValues);
+    if (poValues.length) setDetectedPos(poValues);
+
+    setForm((prev: any) => {
+      const next = { ...prev };
+      const get = (n: string) => fields.find((f) => f.name === n)?.value;
+      console.log('[DI] Current form state:', prev);
+      
+      // PO number
+      if (!String(next.poNumber || '').trim() && get('poNumber')) {
+        next.poNumber = String(get('poNumber'));
+        console.log('[DI] Set poNumber:', next.poNumber);
+      }
+      // Order quantity
+      const qty = get('quantity');
+      if (!String(next.orderQty || '').trim() && qty != null) {
+        next.orderQty = String(qty);
+        console.log('[DI] Set orderQty:', next.orderQty);
+      }
+      // Color / Pantone
+      const pantone = get('pantoneCode');
+      if (!String(next.color || '').trim() && pantone) {
+        next.color = String(pantone);
+        console.log('[DI] Set color from pantone:', next.color);
+      }
+      // SKU / Part / Item code
+      const skuLike = get('skuCode') || get('itemCode') || get('partNumber');
+      if (!String(next.code || '').trim()) {
+        if (skuLike) {
+          next.code = String(skuLike).replace(/\s+/g, '-').toUpperCase();
+          console.log('[DI] Set code from extracted:', next.code);
+        } else if (next.poNumber) {
+          next.code = suggestSkuCode(String(next.poNumber));
+          console.log('[DI] Set suggested code:', next.code);
+        }
+      }
+      // Add extra custom attributes from unknown fields
+      const known = new Set(['poNumber','quantity','pantoneCode','date','contactEmail','contactPhone','skuCode','itemCode','partNumber']);
+      const extras: Record<string,string> = {};
+      for (const f of fields) {
+        const key = String(f.name || '').trim();
+        if (!key || known.has(key)) continue;
+        const val = String(f.value ?? '').trim();
+        if (!val) continue;
+        // Don't overwrite if user already typed
+        if (!String((next.attrs || {})[key] || '').trim()) extras[key] = val;
+      }
+      console.log('[DI] Custom attributes to add:', extras);
+      next.attrs = { ...(next.attrs || {}), ...extras };
+      // Also add these to layout keys for future forms
+      const newKeys = Object.keys(extras).filter(k => !attrKeys.includes(k));
+      if (newKeys.length) {
+        const merged = [...attrKeys, ...newKeys];
+        setAttrKeys(merged);
+        console.log('[DI] Added new layout keys:', newKeys);
+        // best effort persist
+        saveLayout(merged).catch(()=>{});
+      }
+      console.log('[DI] Updated form state:', next);
+      return next;
+    });
+  }
+
+  function suggestSkuCode(po: string) {
+    const base = String(po).replace(/\s+/g, '').toUpperCase();
+    // find next serial for this PO
+    const existing = skus.filter(s => String(s.poNumber || '') === po).map(s => s.code);
+    let n = 1;
+    while (existing.includes(`${base}-${String(n).padStart(3,'0')}`)) n++;
+    return `${base}-${String(n).padStart(3,'0')}`;
+  }
+
+  async function extractInlineFromFile(file: File) {
+    if (!DOC_INTELLIGENCE_ENABLED) {
+      console.log('[DI] Disabled: skipping inline extraction');
+      return;
+    }
+    try {
+      console.log('[DI] Starting inline extraction for:', file.name, file.size, 'bytes');
+      
+      // For files larger than 500KB, skip inline extraction and use presigned upload instead
+      if (file.size > 500000) {
+        console.log('[DI] File too large for inline extraction, will upload with presigned URL');
+        showToastErr('File too large for instant preview. Please enter PO number first.');
+        return;
+      }
+      
+      const ab = await file.arrayBuffer();
+      
+      // Use chunked base64 encoding to avoid stack overflow
+      const uint8Array = new Uint8Array(ab);
+      const chunkSize = 8192;
+      let base64 = '';
+      
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.slice(i, i + chunkSize);
+        base64 += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      
+      const b64 = btoa(base64);
+      console.log('[DI] Base64 encoded, length:', b64.length);
+      
+      const res = await fetch(`/api/doc-intelligence/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          entity: 'PurchaseOrder',
+          entityId: null,
+          filename: file.name,
+          mimeType: file.type || 'application/pdf',
+          sizeBytes: file.size || 0,
+          fileBase64: b64,
+          meta: { projectId: project.id }
+        })
+      });
+      
+      console.log('[DI] Response status:', res.status);
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('[DI] Extraction failed:', errText);
+        showToastErr(`Extraction failed: ${res.status}`);
+        return;
+      }
+      
+      const data = await res.json();
+      console.log('[DI] Extraction result:', data);
+      
+      if (Array.isArray(data?.result?.fields)) {
+        console.log('[DI] Fields extracted:', data.result.fields.length);
+        setDiModal({ job: data.job, fields: data.result.fields, fallbackUrl: previewUrl || poProbe.url });
+        applyExtractedFieldsToForm(data.result.fields);
+        showToastOk(`Extracted ${data.result.fields.length} fields from PDF`);
+      } else {
+        console.warn('[DI] No fields array in response');
+        showToastErr('No data extracted from PDF');
+      }
+    } catch (err) {
+      console.error('[DI] Inline extraction error:', err);
+      showToastErr('Failed to extract data from PDF');
+    }
   }
 
   /****************************************************
@@ -586,9 +802,9 @@ async function performDeleteSku() {
           <div className="text-sm font-medium">Custom attribute fields</div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <input
-            className="flex-1 rounded border px-3 py-2"
+            className="w-72 md:w-96 rounded border px-3 py-2"
             placeholder="Attribute name (e.g., Pantone, Finish, Size)"
             value={newKey}
             onChange={(e) => setNewKey(e.target.value)}
@@ -760,7 +976,37 @@ async function performDeleteSku() {
  /****************************************************
  * [LMK-21] RENDER
  ****************************************************/
-return (
+  async function attachAllDetectedPos() {
+    if (!lastUploadedPoKey || detectedPos.length <= 1) return;
+    const primary = String(form.poNumber || '').trim();
+    const others = detectedPos.filter(p => p && p !== primary);
+    if (others.length === 0) return;
+    try {
+      setSaving(true);
+      // confirm additional POs with same uploaded file key
+      for (const po of others) {
+        await fetchJson(`${API_BASE}/api/projects/${project.id}/po/confirm`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ poNumber: po, key: lastUploadedPoKey })
+        });
+      }
+      // refresh list
+      try {
+        const pos = await fetchJson(`${API_BASE}/api/projects/${project.id}/pos`, { credentials: 'include' });
+        setPoList(Array.isArray(pos) ? pos : []);
+      } catch {}
+      showToastOk(`Attached ${others.length} additional PO${others.length>1?'s':''} to this project.`);
+    } catch (e) {
+      console.warn('Attach extra POs failed', e);
+      showToastErr('Failed to attach additional POs');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return ( 
   <div className="space-y-4">
     {/* Header + Filters */}
     <div className="flex items-center justify-between gap-3">
@@ -773,6 +1019,15 @@ return (
           onChange={(e) => setSearch(e.target.value)}
         />
         <div className="flex items-center gap-1 text-xs">
+          {diModal && (
+            <ApproveExtractionModal
+              job={diModal.job}
+              fields={diModal.fields}
+              fallbackUrl={diModal.fallbackUrl}
+              onClose={() => setDiModal(null)}
+              onApproved={() => setDiModal(null)}
+            />
+          )}
           <span className="text-gray-500">Sort:</span>
           <button
             className={`rounded border px-2 py-1 ${sortBy === "po" ? "bg-gray-100" : ""}`}
@@ -922,15 +1177,15 @@ return (
 
     {/* Add/Edit SKU Modal */}
     {open && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div className="w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-xl dark:bg-neutral-900">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4">
+        <div className="w-full max-w-6xl max-h-[95vh] flex flex-col rounded-2xl bg-white shadow-xl dark:bg-neutral-900">
           {/* Modal header */}
-          <div className="flex items-start justify-between p-6 pb-4 border-b">
-            <h3 className="text-lg font-semibold">
+          <div className="flex items-start justify-between p-4 sm:p-6 pb-3 border-b">
+            <h3 className="text-base sm:text-lg font-semibold">
               {mode === "create" ? "Add SKU" : `Edit SKU — ${editingSku?.code}`}
             </h3>
             <button
-              className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-neutral-700"
+              className="rounded-lg border px-2 sm:px-3 py-1.5 text-xs sm:text-sm hover:bg-gray-50 dark:border-neutral-700"
               onClick={() => setOpen(false)}
               disabled={saving}
             >
@@ -938,161 +1193,236 @@ return (
             </button>
           </div>
 
-          {/* Modal body - scrollable */}
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="grid grid-cols-2 gap-4">
-            {/* PO + Upload */}
-            <div className="col-span-2 grid grid-cols-2 gap-3">
-              <div className="col-span-1">
-                <label className="block text-sm text-gray-600 mb-1">
-                  PO number <span className="text-red-600">*</span>
-                </label>
-                <input
-                  className="w-full rounded border px-3 py-2"
-                  placeholder="Enter PO number"
-                  value={form.poNumber}
-                  onChange={(e) => onChange("poNumber", e.target.value)}
-                  onBlur={(e) => checkPoExists(e.target.value)}
-                />
-                {poProbe.checking && (
-                  <div className="mt-1 text-xs text-gray-500">Checking PO…</div>
-                )}
-                {poProbe.exists === true && (
-                  <div className="mt-1 text-xs text-green-600">
-                    PO found
-                    {poProbe.url ? (
-                      <>
-                        {" "}
-                        —{" "}
-                        <a
-                          className="underline"
-                          href={poProbe.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          view
-                        </a>
-                        .
-                      </>
+          {/* Modal body - scrollable with 2-column layout: form on left, preview on right */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            
+            {/* LEFT COLUMN: Form fields */}
+            <div className="space-y-4">
+              {/* PO + Upload */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    PO number <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    placeholder="Enter PO number"
+                    value={form.poNumber}
+                    onChange={(e) => onChange("poNumber", e.target.value)}
+                    onBlur={(e) => checkPoExists(e.target.value)}
+                  />
+                  {poProbe.checking && (
+                    <div className="mt-1 text-xs text-gray-500">Checking PO…</div>
+                  )}
+                  {poProbe.exists === true && (
+                    <div className="mt-1 text-xs text-green-600">
+                      PO found
+                      {poProbe.url ? (
+                        <>
+                          {" "}
+                          —{" "}
+                          <a
+                            className="underline"
+                            href={poProbe.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            view
+                          </a>
+                          .
+                        </>
+                      ) : (
+                        "."
+                      )}
+                    </div>
+                  )}
+                  {poProbe.exists === false && (
+                    <div className="mt-1 text-xs text-amber-700">
+                      PO not found — upload PDF.
+                    </div>
+                  )}
+                    {DOC_INTELLIGENCE_ENABLED && !form.poNumber?.trim() && form.poPdfFile && form.poPdfFile.size > 500000 && (
+                      <div className="mt-1 text-xs text-blue-600">
+                        💡 Enter PO number to enable auto-extraction
+                      </div>
+                    )}
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    Upload PO (PDF)
+                    {poProbe.exists === false ? (
+                      <span className="text-red-600"> *</span>
                     ) : (
-                      "."
+                      " (optional)"
+                    )}
+                  </label>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="w-full text-sm"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0] || null;
+                      onChange("poPdfFile", file);
+                      // show local preview immediately
+                      if (file) {
+                        try { previewUrl && URL.revokeObjectURL(previewUrl); } catch {}
+                        setPreviewUrl(URL.createObjectURL(file));
+                      }
+                      const po = String((form.poNumber || '').trim());
+                      if (file) {
+                        if (po) {
+                          // Upload (DI disabled by default)
+                          try { await uploadPoIfNeeded(po, file); } catch (err) { console.error('Upload failed:', err); }
+                        } else if (DOC_INTELLIGENCE_ENABLED) {
+                          // Check file size - for large files, prompt user to enter PO first
+                          if (file.size > 500000) {
+                            showToastErr('Large PDF detected. Please enter PO number first, then extraction will run automatically.');
+                          } else {
+                            // Small file: run inline extraction first to auto-fill, then attach
+                            await extractInlineFromFile(file);
+                            const detectedPo = String((form.poNumber || '').trim());
+                            if (detectedPo) {
+                              try { await uploadPoIfNeeded(detectedPo, file); } catch (err) { console.error('Upload after extract failed:', err); }
+                            }
+                          }
+                        }
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* If multiple POs detected in the PDF */}
+              {detectedPos.length > 1 && (
+                <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                  Detected multiple PO numbers: {detectedPos.join(', ')}.
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      className="rounded bg-amber-600 text-white px-3 py-1 text-xs disabled:opacity-60"
+                      onClick={attachAllDetectedPos}
+                      disabled={!lastUploadedPoKey || saving}
+                    >{saving ? 'Attaching…' : 'Attach all to project'}</button>
+                    {!lastUploadedPoKey && (
+                      <span className="text-xs text-amber-700">Upload must complete first.</span>
                     )}
                   </div>
-                )}
-                {poProbe.exists === false && (
-                  <div className="mt-1 text-xs text-amber-700">
-                    PO not found — upload PDF below.
+                </div>
+              )}
+
+              {/* Core fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    SKU code <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    placeholder="Unique code"
+                    value={form.code}
+                    onChange={(e) => onChange("code", e.target.value)}
+                    disabled={mode === "edit"}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Name</label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    value={form.name}
+                    onChange={(e) => onChange("name", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Color</label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    value={form.color}
+                    onChange={(e) => onChange("color", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Type</label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    value={form.type}
+                    onChange={(e) => onChange("type", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    Order Qty
+                  </label>
+                  <input
+                    className="w-full rounded border px-3 py-2 text-sm"
+                    inputMode="numeric"
+                    value={form.orderQty}
+                    onChange={(e) => onChange("orderQty", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    SKU Image (preview only)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="w-full text-sm"
+                    onChange={(e) =>
+                      onChange("imageFile", e.target.files?.[0] || null)
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Dynamic custom attributes */}
+              {attrKeys.length > 0 && (
+                <div>
+                  <div className="text-sm font-medium mb-2">
+                    Custom attributes
                   </div>
-                )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {attrKeys.map((k) => (
+                      <div key={k}>
+                        <label className="block text-xs text-gray-600 mb-1">
+                          {k}
+                        </label>
+                        <input
+                          className="w-full rounded border px-3 py-2 text-sm"
+                          placeholder={k}
+                          value={form.attrs[k] || ""}
+                          onChange={(e) => onAttrChange(k, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Layout editor (always on the left column) */}
+              <div>
+                <LayoutEditor />
               </div>
-              <div className="col-span-1">
-                <label className="block text-sm text-gray-600 mb-1">
-                  Upload PO (PDF)
-                  {poProbe.exists === false ? (
-                    <span className="text-red-600"> *</span>
+            </div>
+
+            {/* RIGHT COLUMN: PDF Preview (sticky on desktop) */}
+            <div className="space-y-4 md:sticky md:top-0 md:self-start">
+              <div>
+                <label className="block text-sm text-gray-600 mb-2 font-medium">PO Preview</label>
+                <div className="border rounded overflow-hidden bg-gray-50" style={{ height: 'calc(95vh - 200px)', minHeight: '400px' }}>
+                  {previewUrl || poProbe.url ? (
+                    <iframe src={previewUrl || poProbe.url || ''} className="w-full h-full" title="PO Preview" />
                   ) : (
-                    " (optional)"
-                  )}
-                </label>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={(e) =>
-                    onChange("poPdfFile", e.target.files?.[0] || null)
-                  }
-                />
-              </div>
-            </div>
-
-            {/* Core fields */}
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">
-                SKU code <span className="text-red-600">*</span>
-              </label>
-              <input
-                className="w-full rounded border px-3 py-2"
-                placeholder="Unique code"
-                value={form.code}
-                onChange={(e) => onChange("code", e.target.value)}
-                disabled={mode === "edit"}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Name</label>
-              <input
-                className="w-full rounded border px-3 py-2"
-                value={form.name}
-                onChange={(e) => onChange("name", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Color</label>
-              <input
-                className="w-full rounded border px-3 py-2"
-                value={form.color}
-                onChange={(e) => onChange("color", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Type</label>
-              <input
-                className="w-full rounded border px-3 py-2"
-                value={form.type}
-                onChange={(e) => onChange("type", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">
-                Order Qty
-              </label>
-              <input
-                className="w-full rounded border px-3 py-2"
-                inputMode="numeric"
-                value={form.orderQty}
-                onChange={(e) => onChange("orderQty", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">
-                SKU Image (preview only)
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) =>
-                  onChange("imageFile", e.target.files?.[0] || null)
-                }
-              />
-            </div>
-
-            {/* Layout editor (INSIDE the modal) */}
-            <div className="col-span-2">
-              <LayoutEditor />
-            </div>
-
-            {/* Dynamic custom attributes */}
-            {attrKeys.length > 0 && (
-              <div className="col-span-2">
-                <div className="text-sm font-medium mb-2">
-                  Custom attributes
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {attrKeys.map((k) => (
-                    <div key={k}>
-                      <label className="block text-xs text-gray-600 mb-1">
-                        {k}
-                      </label>
-                      <input
-                        className="w-full rounded border px-3 py-2"
-                        placeholder={k}
-                        value={form.attrs[k] || ""}
-                        onChange={(e) => onAttrChange(k, e.target.value)}
-                      />
+                    <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                      No preview available
+                      <br />
+                      <span className="text-xs">Upload a PDF to see preview</span>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
-            )}
+
+              {/* Layout editor moved to left column; remove duplicate here */}
+            </div>
           </div>
 
           {/* Inline modal error */}
@@ -1104,9 +1434,9 @@ return (
           </div>
 
           {/* Modal footer - fixed at bottom */}
-          <div className="p-6 pt-4 border-t flex justify-end gap-2">
+          <div className="p-4 sm:p-6 pt-3 border-t flex justify-end gap-2">
             <button
-              className="rounded-lg border px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-neutral-700"
+              className="rounded-lg border px-2 sm:px-3 py-1.5 text-xs sm:text-sm hover:bg-gray-50 dark:border-neutral-700"
               onClick={() => setOpen(false)}
               disabled={saving}
             >
@@ -1114,7 +1444,7 @@ return (
             </button>
             <button
               type="button"
-              className="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-sm hover:bg-indigo-700 disabled:opacity-60"
+              className="rounded-lg bg-indigo-600 text-white px-2 sm:px-3 py-1.5 text-xs sm:text-sm hover:bg-indigo-700 disabled:opacity-60"
               onClick={submitCreateOrEdit}
               disabled={saving}
             >

@@ -270,15 +270,57 @@ class EmailService {
     let html = template.htmlBody;
     let text = template.textBody || null;
 
+    // Add common variables
+    const allData = {
+      ...data,
+      currentYear: new Date().getFullYear(),
+      supportEmail: process.env.EMAIL_REPLY_TO || 'support@pramara.com',
+      appUrl: process.env.APP_URL || 'http://localhost:5173'
+    };
+
     // Simple variable replacement: {{variableName}}
-    for (const [key, value] of Object.entries(data)) {
+    for (const [key, value] of Object.entries(allData)) {
+      // Skip null/undefined values
+      if (value === null || value === undefined) continue;
+      
+      // Convert value to string
+      const stringValue = String(value);
+      
       const placeholder = new RegExp(`{{${key}}}`, 'g');
-      subject = subject.replace(placeholder, value);
-      html = html.replace(placeholder, value);
+      subject = subject.replace(placeholder, stringValue);
+      html = html.replace(placeholder, stringValue);
       if (text) {
-        text = text.replace(placeholder, value);
+        text = text.replace(placeholder, stringValue);
       }
     }
+    
+    // Handle array variables (for loops) - basic support
+    // {{#each items}}...{{/each}} - simplified handlebars-like syntax
+    const arrayPattern = /{{#each\s+(\w+)}}([\s\S]*?){{\/each}}/g;
+    html = html.replace(arrayPattern, (match, arrayName, template) => {
+      const array = allData[arrayName];
+      if (!Array.isArray(array)) return '';
+      
+      return array.map(item => {
+        let itemHtml = template;
+        if (typeof item === 'object') {
+          // Replace {{this.property}}
+          for (const [key, value] of Object.entries(item)) {
+            itemHtml = itemHtml.replace(new RegExp(`{{this\\.${key}}}`, 'g'), String(value));
+          }
+        } else {
+          // Replace {{this}} with item value
+          itemHtml = itemHtml.replace(/{{this}}/g, String(item));
+        }
+        return itemHtml;
+      }).join('');
+    });
+    
+    // Handle conditionals - basic {{#if variable}}...{{/if}}
+    const ifPattern = /{{#if\s+(\w+)}}([\s\S]*?){{\/if}}/g;
+    html = html.replace(ifPattern, (match, varName, content) => {
+      return allData[varName] ? content : '';
+    });
 
     return this.send({
       to,

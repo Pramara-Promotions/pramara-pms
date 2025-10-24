@@ -228,17 +228,48 @@ model RoleApproval {
 model Notification {
   id        String   @id @default(cuid())
   userId    String
-  type      String
+  type      String   // 'cutoff_warning', 'qc_failure', 'daily_plan_ready', etc.
+  priority  String   @default("medium") // 'low', 'medium', 'high', 'critical'
+  
+  // CONTEXT (what, where, who)
   title     String
   message   String
-  read      Boolean  @default(false)
-  link      String?
+  entityType String? // 'project', 'task', 'batch', 'station', 'document', etc.
+  entityId   String?
+  entityName String? // Display name: "ABC Toy Set"
+  entityCode String? // Business code: "PO-2025-123"
+  
+  // WHO & WHERE
+  assignedTo String? // Person responsible
+  location   String? // "Station 3, Room B"
+  
+  // ACTIONS (guidance for user)
+  primaryAction     String? // Label: "View Station"
+  primaryActionUrl  String? // URL or route: "/stations/123"
+  primaryActionType String? // 'navigate', 'modal', 'external', 'action'
+  secondaryActions  Json?   // Array: [{label, url, type}, ...]
+  
+  // IMPACT (why it matters)
+  impactLevel   String? // Human-readable: "Delays cutoff by 2 hours"
+  impactDetails Json?   // Structured data: {cutoffIn, ragStatus, affectedProjects}
+  
+  // STATE
+  read       Boolean  @default(false)
+  readAt     DateTime?
+  dismissed  Boolean  @default(false)
+  dismissedAt DateTime?
+  expiresAt  DateTime? // Auto-dismiss after date
+  
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, read])
+  @@index([userId, dismissed])
   @@index([createdAt])
+  @@index([type])
+  @@index([priority])
+  @@index([expiresAt])
 }
 
 model SystemSetting {
@@ -287,6 +318,17 @@ model EmailLog {
   sentAt          DateTime?
   error           String?
   
+  // Analytics tracking (Phase 7)
+  opened          Boolean  @default(false)
+  openedAt        DateTime?
+  openCount       Int      @default(0)
+  clicked         Boolean  @default(false)
+  clickedAt       DateTime?
+  clickCount      Int      @default(0)
+  bounced         Boolean  @default(false)
+  bouncedAt       DateTime?
+  bounceReason    String?
+  
   // Metadata
   userId          String?  // Who triggered this email
   notificationId  String?  // Link to notification if triggered by one
@@ -295,11 +337,135 @@ model EmailLog {
   
   @@index([status, createdAt])
   @@index([userId])
+  @@index([opened])
+  @@index([clicked])
+}
+
+model InboundEmail {
+  id              String   @id @default(cuid())
+  
+  // Email Headers
+  messageId       String   @unique // Email Message-ID header
+  from            String
+  to              String[]
+  cc              String[]
+  subject         String
+  
+  // Content
+  textBody        String?  @db.Text
+  htmlBody        String?  @db.Text
+  
+  // Attachments
+  hasAttachments  Boolean  @default(false)
+  attachmentCount Int      @default(0)
+  attachments     Json?    // [{filename, size, mimeType, key}]
+  
+  // Classification
+  classified      Boolean  @default(false)
+  classification  String?  // 'invoice', 'po', 'spec', 'artwork', 'general', etc.
+  confidence      Float?   // 0-1 classification confidence
+  
+  // Entity Association
+  linkedEntity    String?  // 'project', 'document', 'batch', etc.
+  linkedEntityId  String?
+  linkedBy        String?  // User ID who linked
+  linkedAt        DateTime?
+  
+  // Processing Status
+  status          String   @default("unread") // 'unread', 'read', 'processed', 'archived', 'deleted'
+  processed       Boolean  @default(false)
+  processedBy     String?  // User ID
+  processedAt     DateTime?
+  
+  // Metadata
+  receivedAt      DateTime @default(now())
+  rawHeaders      Json?
+  inReplyTo       String?  // Thread tracking
+  references      String[] // Email thread references
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([status, receivedAt])
+  @@index([from])
+  @@index([linkedEntity, linkedEntityId])
+  @@index([classification])
 }
 
 // ====================================================================
 // [LANDMARK C] PROJECT & EXECUTION MODELS
 // ====================================================================
+
+// ====================================================================
+// [LANDMARK B.6] DOCUMENT INTELLIGENCE
+// ====================================================================
+
+model DocumentExtractionJob {
+  id             String   @id @default(cuid())
+  entity         String
+  entityId       String?
+  filename       String
+  mimeType       String?
+  fileKey        String?
+  filePath       String?
+  fileSize       Int      @default(0)
+  sourceType     String   @default("upload") // 'upload' | 'email'
+  sourceId       String?
+  meta           Json?
+  processingMode String   @default("immediate") // immediate | delayed | background | rejected
+  status         String   @default("queued")     // queued | processing | completed | failed
+  methodSummary  String?
+  confidenceAvg  Int?
+  error          String?
+  startedAt      DateTime? @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  // Approval workflow
+  approvedFields Json?
+  approvedBy     String?
+  approvedAt     DateTime?
+  appliedAt      DateTime?
+  appliedBy      String?
+  applicationError String?
+
+  fields DocumentExtractionField[]
+  approvals DocumentExtractionApproval[]
+
+  @@index([entity, entityId])
+  @@index([status, createdAt])
+}
+
+model DocumentExtractionField {
+  id                String   @id @default(cuid())
+  jobId             String
+  name              String
+  value             String?
+  confidence        Int?
+  method            String?
+  sourcePage        Int?
+  sourceFile        String?
+  sourceCoordinates Json?
+  unit              String?
+  structured        Json?
+
+  job DocumentExtractionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, name])
+}
+
+model DocumentExtractionApproval {
+  id             String   @id @default(cuid())
+  jobId          String
+  approvedFields Json
+  approvedBy     String?
+  approvedAt     DateTime @default(now())
+  applied        Boolean  @default(false)
+  appliedAt      DateTime?
+
+  job DocumentExtractionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+}
 model Project {
   id          Int       @id @default(autoincrement())
   code        String

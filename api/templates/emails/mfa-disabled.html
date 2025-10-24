@@ -1,0 +1,71 @@
+<h2>MFA Disabled - Security Alert ⚠️</h2>
+
+<p>Hello <strong>{{userName}}</strong>,</p>
+
+<div class="alert alert-danger">
+  <strong>⚠️ Multi-Factor Authentication has been disabled on your account</strong><br>
+  Your account security level has been reduced.
+</div>
+
+<p>Multi-Factor Authentication (MFA) has been disabled for your Pramara PMS account.</p>
+
+<p><strong>Disable Details:</strong></p>
+<ul>
+  <li><strong>Disabled On:</strong> {{disabledDate}}</li>
+  <li><strong>Disabled By:</strong> {{disabledBy}}</li>
+  <li><strong>Device:</strong> {{deviceInfo}}</li>
+  <li><strong>Location:</strong> {{location}}</li>
+  <li><strong>Reason:</strong> {{reason}}</li>
+</ul>
+
+{{#if wasAdminAction}}
+<div class="alert alert-warning">
+  <strong>👤 This action was performed by an administrator</strong><br>
+  An administrator ({{adminName}}) disabled MFA on your account. If you have questions, please contact them at <a href="mailto:{{adminEmail}}">{{adminEmail}}</a>.
+</div>
+{{/if}}
+
+<p><strong>What this means:</strong></p>
+<ul>
+  <li>You'll only need your password to log in (less secure)</li>
+  <li>Your backup codes have been invalidated</li>
+  <li>Your trusted devices have been reset</li>
+  <li>This change has been logged in your security audit trail</li>
+</ul>
+
+<div class="alert alert-success">
+  <strong>✅ Was this you?</strong><br>
+  If you disabled MFA yourself, no action is needed. However, we strongly recommend keeping MFA enabled for maximum security.
+</div>
+
+<div class="alert alert-danger">
+  <strong>🚨 This wasn't you?</strong><br>
+  If you did NOT disable MFA, your account may be compromised. Take immediate action:
+  <ol>
+    <li>Change your password immediately</li>
+    <li>Re-enable Multi-Factor Authentication</li>
+    <li>Review your active sessions and revoke any you don't recognize</li>
+    <li>Contact your administrator at <a href="mailto:{{adminEmail}}">{{adminEmail}}</a></li>
+  </ol>
+</div>
+
+<p style="text-align: center;">
+  <a href="{{resetPasswordUrl}}" class="button" style="background-color: #dc3545;">Change Password</a>
+  <a href="{{reenableMfaUrl}}" class="button" style="background-color: #28a745;">Re-enable MFA</a>
+  <a href="{{securityUrl}}" class="button">Security Settings</a>
+</p>
+
+<div class="alert alert-info">
+  <strong>🔒 Security Recommendation:</strong><br>
+  We strongly recommend keeping MFA enabled. It provides critical protection against:
+  <ul>
+    <li>Password theft and phishing attacks</li>
+    <li>Unauthorized access attempts</li>
+    <li>Account takeover</li>
+  </ul>
+</div>
+
+<p><strong>Change ID:</strong> <code>{{changeId}}</code></p>
+
+<p>Best regards,<br>
+Pramara PMS Security Team</p>

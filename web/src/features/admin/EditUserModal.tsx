@@ -401,29 +401,28 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
                       <button
                         type="button"
                         onClick={async () => {
-                          if (confirm('Reset MFA for this user? They will need to set it up again on next login.')) {
+                          if (confirm('Disable MFA for this user? They will NOT be required to use 2FA on next login.')) {
                             try {
-                              const res = await http(`/api/admin/users/${user?.id}/mfa`, {
-                                method: 'PUT',
+                              const res = await http(`/api/admin/users/${user?.id}/disable-mfa`, {
+                                method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ enabled: false }),
                               });
                               if (res.ok) {
-                                alert('MFA reset successfully. User will need to set it up again.');
+                                alert('MFA disabled successfully. User can now login without 2FA.');
                                 onSuccess(); // Refresh parent list
                                 onClose();   // Close modal so it refreshes when reopened
                               } else {
                                 const data = await res.json();
-                                throw new Error(data.error || 'Failed to reset MFA');
+                                throw new Error(data.error || 'Failed to disable MFA');
                               }
                             } catch (err: any) {
-                              alert(err.message || 'Failed to reset MFA');
+                              alert(err.message || 'Failed to disable MFA');
                             }
                           }
                         }}
-                        className="px-3 py-1 text-xs bg-orange-600 hover:bg-orange-700 text-white rounded"
+                        className="px-3 py-1 text-xs bg-red-600 hover:bg-red-700 text-white rounded"
                       >
-                        Reset MFA
+                        Disable MFA
                       </button>
                     )}
                   </div>

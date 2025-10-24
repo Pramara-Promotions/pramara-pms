@@ -59,8 +59,10 @@ npm run sync:pull
 2. ✅ Fetches from GitHub
 3. ✅ Detects conflicts BEFORE pulling
 4. ✅ Pulls code + chat context
-5. ✅ **Loads chat context automatically**
-6. ✅ Shows ready-to-paste prompt for Copilot
+5. ✅ **Auto-installs dependencies** (if package.json changed)
+6. ✅ **Auto-regenerates Prisma Client** (if schema changed)
+7. ✅ **Loads chat context automatically**
+8. ✅ Shows ready-to-paste prompt for Copilot
 
 **If you have uncommitted changes:**
 ```

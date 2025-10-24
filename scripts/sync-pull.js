@@ -8,8 +8,10 @@
  * 2. Fetches latest from GitHub
  * 3. Detects conflicts before pulling
  * 4. Pulls code + chat context
- * 5. Loads chat context automatically
- * 6. Shows what's ready to work on
+ * 5. Auto-installs new dependencies (package.json changes)
+ * 6. Auto-regenerates Prisma Client (schema changes)
+ * 7. Loads chat context automatically
+ * 8. Shows what's ready to work on
  * 
  * Usage: npm run sync:pull
  */
@@ -199,7 +201,82 @@ async function main() {
     process.exit(1);
   }
 
-  // Step 7: Load chat context
+  // Step 7: Install dependencies (if package.json changed)
+  console.log('📦 Checking for dependency updates...\n');
+  
+  try {
+    // Check if root package.json or api/package.json changed
+    const changedFiles = execSilent('git diff --name-only HEAD@{1} HEAD').trim();
+    const needsInstall = changedFiles.includes('package.json') || 
+                        changedFiles.includes('api/package.json') || 
+                        changedFiles.includes('web/package.json');
+    
+    if (needsInstall) {
+      console.log('🔄 Detected package.json changes. Installing dependencies...\n');
+      
+      // Root dependencies
+      if (changedFiles.includes('package.json')) {
+        console.log('   Installing root dependencies...');
+        try {
+          execSilent('npm install');
+          console.log('   ✅ Root dependencies installed\n');
+        } catch (e) {
+          console.log('   ⚠️  Root npm install failed (non-critical)\n');
+        }
+      }
+      
+      // API dependencies
+      if (changedFiles.includes('api/package.json')) {
+        console.log('   Installing API dependencies...');
+        try {
+          execSilent('cd api && npm install && cd ..');
+          console.log('   ✅ API dependencies installed\n');
+        } catch (e) {
+          console.log('   ⚠️  API npm install failed (non-critical)\n');
+        }
+      }
+      
+      // Web dependencies
+      if (changedFiles.includes('web/package.json')) {
+        console.log('   Installing web dependencies...');
+        try {
+          execSilent('cd web && npm install && cd ..');
+          console.log('   ✅ Web dependencies installed\n');
+        } catch (e) {
+          console.log('   ⚠️  Web npm install failed (non-critical)\n');
+        }
+      }
+    } else {
+      console.log('   ✅ No dependency updates needed\n');
+    }
+  } catch (error) {
+    console.log('   ⚠️  Could not check for dependency changes\n');
+  }
+
+  // Step 8: Regenerate Prisma Client (if schema changed)
+  console.log('🔧 Checking Prisma schema...\n');
+  
+  try {
+    const changedFiles = execSilent('git diff --name-only HEAD@{1} HEAD').trim();
+    const schemaChanged = changedFiles.includes('prisma/schema.prisma') || 
+                         changedFiles.includes('prisma/migrations');
+    
+    if (schemaChanged) {
+      console.log('🔄 Detected Prisma schema changes. Regenerating client...\n');
+      try {
+        execSilent('npx prisma generate');
+        console.log('   ✅ Prisma Client regenerated\n');
+      } catch (e) {
+        console.log('   ⚠️  Prisma generate failed. Run manually: npx prisma generate\n');
+      }
+    } else {
+      console.log('   ✅ No schema changes detected\n');
+    }
+  } catch (error) {
+    console.log('   ⚠️  Could not check Prisma schema changes\n');
+  }
+
+  // Step 9: Load chat context
   console.log('📖 Loading chat context from remote...\n');
   console.log('='.repeat(80) + '\n');
   
@@ -210,7 +287,7 @@ async function main() {
     console.log('   Check: docs/chat-context/latest.md\n');
   }
 
-  // Step 8: Success summary
+  // Step 10: Success summary
   console.log('\n' + '='.repeat(80));
   console.log('🎉 ALL SYNCED FROM GITHUB!');
   console.log('='.repeat(80));

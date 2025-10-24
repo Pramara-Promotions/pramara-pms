@@ -242,9 +242,15 @@ router.post('/verify-login', async (req, res) => {
       select: {
         id: true,
         email: true,
-          name: true,
+        name: true,
         mfaSecret: true,
-        role: { select: { code: true } },
+        roles: { 
+          select: { 
+            role: {
+              select: { name: true }
+            }
+          } 
+        },
         department: { select: { name: true } }
       }
     });
@@ -278,7 +284,7 @@ router.post('/verify-login', async (req, res) => {
       {
         sub: userId,
         email: user.email,
-        role: user.role?.code || 'User',
+        roles: user.roles?.map(ur => ur.role.name) || [],
         department: user.department?.name
       },
       process.env.JWT_SECRET || 'dev-secret',
@@ -356,8 +362,8 @@ router.post('/verify-login', async (req, res) => {
       user: {
         id: user.id,
         email: user.email,
-          name: user.name,
-        role: user.role?.code,
+        name: user.name,
+        roles: user.roles?.map(ur => ur.role.name) || [],
         department: user.department?.name
       }
     });

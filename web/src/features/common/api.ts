@@ -149,6 +149,20 @@ export const EmailAdminAPI = {
     }>("/admin/email-settings");
   },
 
+  // Email Accounts (Inbound) — UI-managed
+  listAccounts() {
+    return apiFetch<any[]>("/admin/email-accounts");
+  },
+  createAccount(payload: any) {
+    return apiFetch<{ ok: boolean; id: string }>("/admin/email-accounts", { method: "POST", json: payload });
+  },
+  updateAccount(id: string, payload: any) {
+    return apiFetch<{ ok: boolean }>(`/admin/email-accounts/${id}`, { method: "PUT", json: payload });
+  },
+  deleteAccount(id: string) {
+    return apiFetch<{ ok: boolean }>(`/admin/email-accounts/${id}`, { method: "DELETE" });
+  },
+
   // PUT /api/admin/email-settings
   updateSettings(payload: {
     emailOutboundEnabled?: boolean;

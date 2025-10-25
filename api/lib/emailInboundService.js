@@ -5,6 +5,7 @@
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
 const { PrismaClient } = require('@prisma/client');
+const { decrypt } = require('./secrets');
 const { s3Service } = require('./storage');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -45,33 +46,68 @@ class EmailInboundService {
         return false;
       }
 
-      // Get IMAP configuration from environment
-      const config = {
-        user: process.env.IMAP_USER,
-        password: process.env.IMAP_PASSWORD,
-        host: process.env.IMAP_HOST || 'imap.gmail.com',
-        port: parseInt(process.env.IMAP_PORT || '993'),
-        tls: process.env.IMAP_TLS !== 'false',
-        tlsOptions: { rejectUnauthorized: false }
-      };
+      // Prefer UI-configured EmailAccount over environment variables
+      let account = await prisma.emailAccount.findFirst({
+        where: { enabled: true, protocol: 'imap' },
+        orderBy: { updatedAt: 'desc' }
+      });
+
+      let config;
+      if (account) {
+        const password = decrypt(account.passwordEnc);
+        config = {
+          user: account.username,
+          password,
+          host: account.host || process.env.IMAP_HOST || 'outlook.office365.com',
+          port: account.port || parseInt(process.env.IMAP_PORT || '993'),
+          tls: typeof account.tls === 'boolean' ? account.tls : process.env.IMAP_TLS !== 'false',
+          tlsOptions: { rejectUnauthorized: false }
+        };
+      } else {
+        // Fallback to environment
+        config = {
+          user: process.env.IMAP_USER,
+          password: process.env.IMAP_PASSWORD,
+          host: process.env.IMAP_HOST || 'imap.gmail.com',
+          port: parseInt(process.env.IMAP_PORT || '993'),
+          tls: process.env.IMAP_TLS !== 'false',
+          tlsOptions: { rejectUnauthorized: false }
+        };
+      }
 
       if (!config.user || !config.password) {
-        console.log('⚠️  [Inbound Email] IMAP credentials not configured');
+        console.log('⚠️  [Inbound Email] IMAP credentials not configured (no EmailAccount found and no env creds)');
         return false;
       }
 
       this.imap = new Imap(config);
 
       return new Promise((resolve, reject) => {
-        this.imap.once('ready', () => {
+        this.imap.once('ready', async () => {
           console.log('✅ [Inbound Email] IMAP connection established');
           this.isConnected = true;
+          // Best-effort status update on the account
+          try {
+            if (account) {
+              await prisma.emailAccount.update({
+                where: { id: account.id },
+                data: { status: 'connected', lastSyncAt: new Date() }
+              });
+            }
+          } catch {}
           resolve(true);
         });
 
         this.imap.once('error', (err) => {
           console.error('❌ [Inbound Email] IMAP connection error:', err);
           this.isConnected = false;
+          // Mark account error if present
+          try {
+            if (account) {
+              const msg = (err && err.source) ? `error:${err.source}` : `error:${err?.message || 'unknown'}`;
+              prisma.emailAccount.update({ where: { id: account.id }, data: { status: msg } }).catch(()=>{});
+            }
+          } catch {}
           reject(err);
         });
 

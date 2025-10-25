@@ -14,6 +14,17 @@ export default function EmailSettings() {
     emailInboundEnabled: false,
   });
   const [inboundStatus, setInboundStatus] = useState<{enabled:boolean; imapConfigured:boolean; connected:boolean; polling:boolean} | null>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [acctForm, setAcctForm] = useState({
+    id: '',
+    label: 'Primary Inbound',
+    username: '',
+    host: 'outlook.office365.com',
+    port: 993,
+    tls: true,
+    password: '',
+    enabled: true,
+  });
 
   useEffect(() => {
     fetchSettings();
@@ -22,6 +33,25 @@ export default function EmailSettings() {
       try {
         const status = await EmailAdminAPI.getInboundStatus?.();
         if (status) setInboundStatus(status);
+      } catch {}
+      try {
+        const list = await EmailAdminAPI.listAccounts?.();
+        if (Array.isArray(list)) {
+          setAccounts(list);
+          if (list.length > 0) {
+            const a = list[0];
+            setAcctForm({
+              id: a.id,
+              label: a.label || 'Primary Inbound',
+              username: a.username || '',
+              host: a.host || 'outlook.office365.com',
+              port: a.port || 993,
+              tls: a.tls ?? true,
+              password: '', // never prefill
+              enabled: !!a.enabled,
+            });
+          }
+        }
       } catch {}
     })();
   }, []);
@@ -44,6 +74,30 @@ export default function EmailSettings() {
     try {
       await EmailAdminAPI.updateSettings(settings);
       showToastOk('Email settings updated successfully');
+      // Save or create account (basic IMAP)
+      const payload = {
+        label: acctForm.label,
+        provider: 'exchange',
+        protocol: 'imap',
+        authMethod: 'basic',
+        username: acctForm.username,
+        password: acctForm.password || undefined, // if blank, don't overwrite
+        host: acctForm.host,
+        port: Number(acctForm.port) || 993,
+        tls: !!acctForm.tls,
+        enabled: !!acctForm.enabled,
+      };
+      if (acctForm.id) {
+        await EmailAdminAPI.updateAccount(acctForm.id, payload);
+      } else if (acctForm.username) {
+        const res = await EmailAdminAPI.createAccount(payload);
+        if (res?.id) setAcctForm(prev => ({ ...prev, id: res.id }));
+      }
+      // Refresh status
+      try {
+        const status = await EmailAdminAPI.getInboundStatus?.();
+        if (status) setInboundStatus(status);
+      } catch {}
     } catch (err: any) {
       showToastErr(err.message || 'Failed to update email settings');
     } finally {
@@ -206,10 +260,38 @@ export default function EmailSettings() {
                   </span>
                 </div>
               )}
-              <div className="bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-3 text-sm">
-                <p className="text-gray-600 dark:text-gray-400">
-                  Requires IMAP credentials (IMAP_USER, IMAP_PASSWORD, IMAP_HOST, IMAP_PORT, IMAP_TLS) to be set on the server. Status updates after Save.
-                </p>
+              {/* Account form (basic IMAP) */}
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Label</label>
+                  <input value={acctForm.label} onChange={e=>setAcctForm({...acctForm, label: e.target.value})} className="w-full border rounded px-3 py-2" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Username (mailbox)</label>
+                  <input value={acctForm.username} onChange={e=>setAcctForm({...acctForm, username: e.target.value})} className="w-full border rounded px-3 py-2" placeholder="user@domain.com" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Host</label>
+                  <input value={acctForm.host} onChange={e=>setAcctForm({...acctForm, host: e.target.value})} className="w-full border rounded px-3 py-2" />
+                </div>
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium mb-1">Port</label>
+                    <input type="number" value={acctForm.port} onChange={e=>setAcctForm({...acctForm, port: Number(e.target.value)})} className="w-full border rounded px-3 py-2" />
+                  </div>
+                  <div className="flex items-center mt-6">
+                    <input id="acctTls" type="checkbox" checked={acctForm.tls} onChange={e=>setAcctForm({...acctForm, tls: e.target.checked})} className="mr-2" />
+                    <label htmlFor="acctTls" className="text-sm">Use TLS</label>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Password / App Password</label>
+                  <input type="password" value={acctForm.password} onChange={e=>setAcctForm({...acctForm, password: e.target.value})} className="w-full border rounded px-3 py-2" placeholder={accounts[0]?.hasPassword ? '•••••• (unchanged)' : ''} />
+                </div>
+                <div className="flex items-center mt-6">
+                  <input id="acctEnabled" type="checkbox" checked={acctForm.enabled} onChange={e=>setAcctForm({...acctForm, enabled: e.target.checked})} className="mr-2" />
+                  <label htmlFor="acctEnabled" className="text-sm">Enable this account</label>
+                </div>
               </div>
             </div>
             <button

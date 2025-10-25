@@ -27,6 +27,7 @@ const { permissionGuard } = require("../middleware/permissionGuard");
 // Import audit logger
 const { logAudit } = require("../middleware/auditLogger");
 const { emailService } = require("../lib/emailService");
+const { encrypt, decrypt } = require("../lib/secrets");
 let emailInboundService = null;
 try { emailInboundService = require("../lib/emailInboundService"); } catch {}
 
@@ -137,7 +138,12 @@ router.put("/admin/email-settings", authGuard, permissionGuard.role('Super Admin
 router.get('/admin/email-inbound/status', authGuard, permissionGuard.role('Super Admin'), async (_req, res) => {
   try {
     const enabled = !!(await emailService.getSystemSetting('emailInboundEnabled', false));
-    const imapConfigured = !!(process.env.IMAP_USER && process.env.IMAP_PASSWORD);
+    // Check if a UI-configured EmailAccount exists or env credentials exist
+    let imapConfigured = !!(process.env.IMAP_USER && process.env.IMAP_PASSWORD);
+    try {
+      const acct = await prisma.emailAccount.findFirst({ where: { enabled: true, protocol: 'imap' } });
+      if (acct) imapConfigured = true;
+    } catch {}
     const status = {
       enabled,
       imapConfigured,
@@ -147,6 +153,119 @@ router.get('/admin/email-inbound/status', authGuard, permissionGuard.role('Super
     res.json(status);
   } catch (e) {
     res.status(200).json({ enabled: false, imapConfigured: false, connected: false, polling: false });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────
+   Email Accounts (Inbound) — UI-based configuration
+   ──────────────────────────────────────────────────────────── */
+
+// GET /api/admin/email-accounts
+router.get('/admin/email-accounts', authGuard, permissionGuard.role('Super Admin'), async (_req, res) => {
+  try {
+    const rows = await prisma.emailAccount.findMany({ orderBy: { createdAt: 'desc' } });
+    // Do not leak secrets; mask
+    const sanitized = rows.map(r => ({
+      id: r.id,
+      label: r.label,
+      provider: r.provider,
+      protocol: r.protocol,
+      authMethod: r.authMethod,
+      username: r.username,
+      host: r.host,
+      port: r.port,
+      tls: r.tls,
+      tenantId: r.tenantId,
+      clientId: r.clientId,
+      mailbox: r.mailbox,
+      enabled: r.enabled,
+      status: r.status,
+      lastSyncAt: r.lastSyncAt,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      hasPassword: !!r.passwordEnc,
+      hasClientSecret: !!r.clientSecretEnc,
+      hasRefreshToken: !!r.refreshTokenEnc,
+    }));
+    res.json(sanitized);
+  } catch (e) {
+    console.error('[admin] list email-accounts failed:', e);
+    res.status(500).json({ error: 'Failed to list email accounts' });
+  }
+});
+
+// POST /api/admin/email-accounts
+router.post('/admin/email-accounts', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  try {
+    const { label, provider = 'exchange', protocol = 'imap', authMethod = 'basic', username, password, host, port = 993, tls = true, tenantId, clientId, clientSecret, mailbox, enabled = true } = req.body || {};
+    if (!label) return res.status(400).json({ error: 'label is required' });
+    if (protocol === 'imap' && (!username)) return res.status(400).json({ error: 'username is required for IMAP' });
+
+    const row = await prisma.emailAccount.create({
+      data: {
+        label,
+        provider,
+        protocol,
+        authMethod,
+        username: username || mailbox || '',
+        passwordEnc: password ? encrypt(password) : null,
+        host: host || (provider === 'exchange' ? 'outlook.office365.com' : host),
+        port: Number(port) || 993,
+        tls: !!tls,
+        tenantId: tenantId || null,
+        clientId: clientId || null,
+        clientSecretEnc: clientSecret ? encrypt(clientSecret) : null,
+        mailbox: mailbox || username || null,
+        enabled: !!enabled,
+        status: 'created'
+      }
+    });
+    res.json({ ok: true, id: row.id });
+  } catch (e) {
+    console.error('[admin] create email-account failed:', e);
+    res.status(500).json({ error: 'Failed to create email account' });
+  }
+});
+
+// PUT /api/admin/email-accounts/:id
+router.put('/admin/email-accounts/:id', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { label, provider, protocol, authMethod, username, password, host, port, tls, tenantId, clientId, clientSecret, mailbox, enabled, status } = req.body || {};
+    const data = {};
+    if (label !== undefined) data.label = label;
+    if (provider !== undefined) data.provider = provider;
+    if (protocol !== undefined) data.protocol = protocol;
+    if (authMethod !== undefined) data.authMethod = authMethod;
+    if (username !== undefined) data.username = username;
+    if (password !== undefined) data.passwordEnc = password ? encrypt(password) : null;
+    if (host !== undefined) data.host = host;
+    if (port !== undefined) data.port = Number(port);
+    if (tls !== undefined) data.tls = !!tls;
+    if (tenantId !== undefined) data.tenantId = tenantId;
+    if (clientId !== undefined) data.clientId = clientId;
+    if (clientSecret !== undefined) data.clientSecretEnc = clientSecret ? encrypt(clientSecret) : null;
+    if (mailbox !== undefined) data.mailbox = mailbox;
+    if (enabled !== undefined) data.enabled = !!enabled;
+    if (status !== undefined) data.status = status;
+
+    await prisma.emailAccount.update({ where: { id }, data });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[admin] update email-account failed:', e);
+    res.status(500).json({ error: 'Failed to update email account' });
+  }
+});
+
+// DELETE /api/admin/email-accounts/:id
+router.delete('/admin/email-accounts/:id', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.emailAccount.delete({ where: { id } });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[admin] delete email-account failed:', e);
+    res.status(500).json({ error: 'Failed to delete email account' });
   }
 });
 

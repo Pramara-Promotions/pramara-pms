@@ -395,6 +395,39 @@ model InboundEmail {
 // [LANDMARK C] PROJECT & EXECUTION MODELS
 // ====================================================================
 
+// Email account configuration for inbound processing (UI-managed)
+model EmailAccount {
+  id           String   @id @default(cuid())
+  label        String
+  provider     String   @default("exchange") // 'exchange', 'generic'
+  protocol     String   @default("imap")     // 'imap', 'graph'
+  authMethod   String   @default("basic")    // 'basic', 'oauth2', 'client_credentials'
+
+  // IMAP/basic fields
+  username     String
+  passwordEnc  String?  // encrypted at rest (AES-GCM)
+  host         String?
+  port         Int?     @default(993)
+  tls          Boolean? @default(true)
+
+  // OAuth/Graph fields
+  tenantId     String?
+  clientId     String?
+  clientSecretEnc String?
+  refreshTokenEnc  String?
+  mailbox      String? // mailbox email for Graph or delegated account
+
+  enabled      Boolean  @default(true)
+  status       String?  // 'connected', 'error:<msg>' etc. (best-effort)
+  lastSyncAt   DateTime?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([enabled])
+  @@index([protocol, authMethod])
+}
+
 // ====================================================================
 // [LANDMARK B.6] DOCUMENT INTELLIGENCE
 // ====================================================================

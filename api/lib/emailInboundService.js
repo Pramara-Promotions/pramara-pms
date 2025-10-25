@@ -18,6 +18,7 @@ class EmailInboundService {
     this.isConnected = false;
     this.isPolling = false;
     this.pollingInterval = null;
+    this.graphAuthCache = null; // { accessToken, expiresAt }
     
     // Classification keywords (simple rules, can be enhanced with AI later)
     this.classificationRules = {
@@ -48,12 +49,25 @@ class EmailInboundService {
 
       // Prefer UI-configured EmailAccount over environment variables
       let account = await prisma.emailAccount.findFirst({
-        where: { enabled: true, protocol: 'imap' },
+        where: { enabled: true },
         orderBy: { updatedAt: 'desc' }
       });
 
+      // If configured for Microsoft Graph with application permissions, set connected and return
+      if (account && account.protocol === 'graph' && account.authMethod === 'client_credentials') {
+        const ok = await this._testGraphConnection(account);
+        this.isConnected = !!ok;
+        if (!ok) return false;
+        // Mark status
+        try {
+          await prisma.emailAccount.update({ where: { id: account.id }, data: { status: 'connected', lastSyncAt: new Date() } });
+        } catch {}
+        return true;
+      }
+
+      // Otherwise IMAP path
       let config;
-      if (account) {
+      if (account && account.protocol === 'imap') {
         const password = decrypt(account.passwordEnc);
         config = {
           user: account.username,
@@ -64,7 +78,7 @@ class EmailInboundService {
           tlsOptions: { rejectUnauthorized: false }
         };
       } else {
-        // Fallback to environment
+        // Fallback to environment (imap)
         config = {
           user: process.env.IMAP_USER,
           password: process.env.IMAP_PASSWORD,
@@ -88,7 +102,7 @@ class EmailInboundService {
           this.isConnected = true;
           // Best-effort status update on the account
           try {
-            if (account) {
+            if (account && account.protocol === 'imap') {
               await prisma.emailAccount.update({
                 where: { id: account.id },
                 data: { status: 'connected', lastSyncAt: new Date() }
@@ -103,7 +117,7 @@ class EmailInboundService {
           this.isConnected = false;
           // Mark account error if present
           try {
-            if (account) {
+            if (account && account.protocol === 'imap') {
               const msg = (err && err.source) ? `error:${err.source}` : `error:${err?.message || 'unknown'}`;
               prisma.emailAccount.update({ where: { id: account.id }, data: { status: msg } }).catch(()=>{});
             }
@@ -183,6 +197,18 @@ class EmailInboundService {
       return;
     }
 
+    // Determine active account and path
+    const account = await prisma.emailAccount.findFirst({ where: { enabled: true }, orderBy: { updatedAt: 'desc' } });
+    if (account && account.protocol === 'graph' && account.authMethod === 'client_credentials') {
+      try {
+        const n = await this._fetchGraphEmails(account);
+        return n;
+      } catch (e) {
+        console.error('❌ [Inbound Email] Graph fetch error:', e);
+        return 0;
+      }
+    }
+
     return new Promise((resolve, reject) => {
       this.imap.openBox('INBOX', false, async (err, box) => {
         if (err) {
@@ -231,6 +257,141 @@ class EmailInboundService {
         });
       });
     });
+  }
+
+  /**
+   * GRAPH: Test connection by acquiring a token and listing 1 message
+   */
+  async _testGraphConnection(account) {
+    try {
+      const token = await this._getGraphToken(account);
+      if (!token) return false;
+      const mailbox = account.mailbox || account.username;
+      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/mailFolders('Inbox')/messages?$top=1`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      return res.ok;
+    } catch (e) {
+      console.error('❌ [Inbound Email] Graph test failed:', e?.message || e);
+      try { await prisma.emailAccount.update({ where: { id: account.id }, data: { status: `error:${e?.message || 'graph'}` } }); } catch {}
+      return false;
+    }
+  }
+
+  /**
+   * GRAPH: Acquire application token (client credentials)
+   */
+  async _getGraphToken(account) {
+    const tenant = account.tenantId;
+    const clientId = account.clientId;
+    const clientSecret = decrypt(account.clientSecretEnc);
+    if (!tenant || !clientId || !clientSecret) throw new Error('Missing Azure app credentials');
+
+    const now = Date.now();
+    if (this.graphAuthCache && this.graphAuthCache.expiresAt > now + 30000) {
+      return this.graphAuthCache.accessToken;
+    }
+
+    const body = new URLSearchParams();
+    body.append('client_id', clientId);
+    body.append('client_secret', clientSecret);
+    body.append('grant_type', 'client_credentials');
+    body.append('scope', 'https://graph.microsoft.com/.default');
+
+    const tokenUrl = `https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`;
+    const res = await fetch(tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Token error: ${res.status} ${txt}`);
+    }
+    const data = await res.json();
+    const accessToken = data.access_token;
+    const expiresIn = data.expires_in || 3600;
+    this.graphAuthCache = { accessToken, expiresAt: Date.now() + (expiresIn * 1000) };
+    return accessToken;
+  }
+
+  /**
+   * GRAPH: Fetch unread messages, save to DB, download attachments to S3
+   */
+  async _fetchGraphEmails(account) {
+    const token = await this._getGraphToken(account);
+    const mailbox = account.mailbox || account.username;
+    const listUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/mailFolders('Inbox')/messages?$filter=isRead%20eq%20false&$top=25`;
+    const res = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Graph list error: ${res.status} ${txt}`);
+    }
+    const json = await res.json();
+    const messages = Array.isArray(json.value) ? json.value : [];
+
+    let processed = 0;
+    for (const m of messages) {
+      try {
+        // Use InternetMessageId as our unique messageId
+        const messageId = m.internetMessageId || m.id;
+        const exists = await prisma.inboundEmail.findUnique({ where: { messageId } });
+        if (exists) {
+          // Optionally mark read in mailbox to avoid reprocessing
+          await this._graphMarkRead(token, mailbox, m.id).catch(()=>{});
+          continue;
+        }
+
+        // Fetch attachments
+        const attachments = await this._graphFetchAttachments(token, mailbox, m.id);
+        const savedAttachments = [];
+        for (const att of attachments) {
+          if (att.oDataType === '#microsoft.graph.fileAttachment' || att['@odata.type'] === '#microsoft.graph.fileAttachment') {
+            const buffer = Buffer.from(att.contentBytes, 'base64');
+            const key = `inbound-emails/${new Date().toISOString().split('T')[0]}/${uuidv4()}-${att.name}`;
+            await s3Service.uploadBuffer(buffer, key, att.contentType || 'application/octet-stream');
+            savedAttachments.push({ filename: att.name, size: buffer.length, mimeType: att.contentType, key });
+          }
+        }
+
+        // Build parsed-like object
+        const parsed = {
+          messageId,
+          from: { text: m.from?.emailAddress ? `${m.from.emailAddress.name || ''} <${m.from.emailAddress.address}>` : '' },
+          to: (m.toRecipients || []).map(r => ({ text: `${r.emailAddress.name || ''} <${r.emailAddress.address}>` })),
+          cc: (m.ccRecipients || []).map(r => ({ text: `${r.emailAddress.name || ''} <${r.emailAddress.address}>` })),
+          subject: m.subject || '(No Subject)',
+          text: m.bodyPreview || null,
+          html: (m.body && m.body.contentType === 'html') ? m.body.content : null,
+          date: m.receivedDateTime ? new Date(m.receivedDateTime) : new Date(),
+          headers: null,
+          inReplyTo: m.inReplyTo || null,
+          references: [],
+          attachments: savedAttachments.map(a => ({ filename: a.filename, size: a.size, contentType: a.mimeType, content: null }))
+        };
+
+        // Save email using existing pipeline
+        await this.processEmail(parsed);
+        processed++;
+
+        // Mark as read
+        await this._graphMarkRead(token, mailbox, m.id).catch(()=>{});
+      } catch (e) {
+        console.error('❌ [Inbound Email] Graph message error:', e?.message || e);
+      }
+    }
+
+    console.log(`✅ [Inbound Email] Processed ${processed} emails via Graph`);
+    try { await prisma.emailAccount.update({ where: { id: account.id }, data: { lastSyncAt: new Date(), status: 'connected' } }); } catch {}
+    return processed;
+  }
+
+  async _graphFetchAttachments(token, mailbox, messageId) {
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}/attachments`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.value) ? data.value : [];
+  }
+
+  async _graphMarkRead(token, mailbox, messageId) {
+    const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}`;
+    await fetch(url, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ isRead: true }) });
   }
 
   /**

@@ -184,4 +184,6 @@ async function authGuard(req, res, next) {
   }
 }
 
+// Support both default export and named { authGuard } usage
 module.exports = authGuard;
+module.exports.authGuard = authGuard;

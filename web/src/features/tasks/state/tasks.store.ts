@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { TasksAPI } from "../../common/api";
 
 export type RAG = "green"|"amber"|"red"
 export type Priority = "Low"|"Med"|"High"
@@ -39,10 +40,11 @@ type State = {
 
 type Actions = {
   addTask: (t: Task) => void;
-  updateTask: (id: string, patch: Partial<Task>) => void;
-  deleteTasks: (ids: string[]) => void;
+  setTasks: (list: Task[]) => void;
+  updateTask: (id: string, patch: Partial<Task>) => Promise<void>;
+  deleteTasks: (ids: string[]) => Promise<void>;
   moveTaskToSection: (id: string, section: Section) => void;
-  reorderWithinSection: (idsInOrder: string[], section: Section) => void;
+  reorderWithinSection: (idsInOrder: string[], section: Section) => Promise<void>;
 
   clearSelection: () => void;
   toggleSelect: (id: string) => void;
@@ -52,6 +54,8 @@ type Actions = {
 
   setFilters: (patch: Partial<TaskFilters>) => void;
   resetFilters: () => void;
+
+  loadFromServer: (projectId?: number) => Promise<void>;
 }
 
 const initialTasks: Task[] = [
@@ -70,13 +74,45 @@ export const useTasks = create<State & Actions>()(persist(
     filters: { section:'All', assignee:'All', status:'All', tag:'All' },
 
     addTask: (t) => set({ tasks: [t, ...get().tasks] }),
-    updateTask: (id, patch) => set({ tasks: get().tasks.map(x => x.id===id ? { ...x, ...patch, updatedAt: new Date().toISOString().slice(0,10) } : x) }),
-    deleteTasks: (ids) => set({ tasks: get().tasks.filter(x => !ids.includes(x.id)) }),
+    setTasks: (list) => set({ tasks: list }),
+    updateTask: async (id, patch) => {
+      // Map local Task fields to API patch shape
+      const apiPatch: any = { ...patch };
+      if (patch.section) apiPatch.section = patch.section;
+      if (patch.status) apiPatch.status = patch.status;
+      if (patch.priority) apiPatch.priority = patch.priority;
+      if (patch.assignee !== undefined) apiPatch.assignee = patch.assignee ?? null;
+      if (patch.due !== undefined) apiPatch.due = patch.due ?? null;
+      if (patch.tags) apiPatch.tags = patch.tags;
+      try {
+        await TasksAPI.update(id, apiPatch);
+        set({ tasks: get().tasks.map(x => x.id===id ? { ...x, ...patch, updatedAt: new Date().toISOString().slice(0,10) } : x) });
+      } catch (e) {
+        console.error('updateTask failed', e);
+      }
+    },
+    deleteTasks: async (ids) => {
+      try {
+        for (const id of ids) {
+          await TasksAPI.delete(id);
+        }
+      } finally {
+        set({ tasks: get().tasks.filter(x => !ids.includes(x.id)) });
+      }
+    },
     moveTaskToSection: (id, section) => set({ tasks: get().tasks.map(x => x.id===id ? { ...x, section } : x) }),
-    reorderWithinSection: (idsInOrder, section) => {
-      const inCol = get().tasks.filter(t => t.section===section).sort((a,b)=>idsInOrder.indexOf(a.id)-idsInOrder.indexOf(b.id))
-      const others = get().tasks.filter(t => t.section!==section)
-      set({ tasks: [...others, ...inCol] })
+    reorderWithinSection: async (idsInOrder, section) => {
+      try {
+        await TasksAPI.reorder(section, idsInOrder);
+      } catch (e) {
+        console.error('reorder failed', e);
+      } finally {
+        const inCol = get().tasks
+          .filter(t => t.section===section)
+          .sort((a,b)=>idsInOrder.indexOf(a.id)-idsInOrder.indexOf(b.id));
+        const others = get().tasks.filter(t => t.section!==section);
+        set({ tasks: [...others, ...inCol] });
+      }
     },
 
     clearSelection: () => set({ selection: [] }),
@@ -95,6 +131,15 @@ export const useTasks = create<State & Actions>()(persist(
 
     setFilters: (patch) => set({ filters: { ...get().filters, ...patch } }),
     resetFilters: () => set({ filters: { section:'All', assignee:'All', status:'All', tag:'All', projectId: undefined, from: undefined, to: undefined, q: '' } }),
+    loadFromServer: async (projectId?: number) => {
+      try {
+        const rows = await TasksAPI.list(projectId ? { projectId } : undefined);
+        // Server returns fields aligned with Task type already
+        set({ tasks: rows as Task[] });
+      } catch (e) {
+        console.error('load tasks failed', e);
+      }
+    },
   }),
   { 
     name: "pms-tasks",

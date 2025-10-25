@@ -199,3 +199,93 @@ export const EmailAdminAPI = {
 };
 
 export default apiFetch;
+
+/* ------------ Tasks API ------------- */
+
+export const TasksAPI = {
+  list(params?: { projectId?: number }) {
+    const qs = params?.projectId ? `?projectId=${params.projectId}` : '';
+    return apiFetch<any[]>(`/tasks${qs}`);
+  },
+  create(payload: {
+    projectId?: number;
+    name: string;
+    section?: 'Pre-Prod'|'Production'|'QC'|'Dispatch';
+    status?: 'green'|'amber'|'red';
+    assignee?: string;
+    due?: string; // YYYY-MM-DD
+    priority?: 'Low'|'Med'|'High';
+    tags?: string[];
+  }) {
+    return apiFetch<any>(`/tasks`, { method: 'POST', json: payload });
+  },
+  update(id: string, patch: Partial<{
+    name: string;
+    section: 'Pre-Prod'|'Production'|'QC'|'Dispatch';
+    status: 'green'|'amber'|'red';
+    assignee: string|null;
+    due: string|null;
+    priority: 'Low'|'Med'|'High';
+    tags: string[];
+    attachments: number;
+  }>) {
+    return apiFetch<any>(`/tasks/${id}`, { method: 'PATCH', json: patch });
+  },
+  delete(id: string) {
+    return apiFetch<{ ok: boolean }>(`/tasks/${id}`, { method: 'DELETE' });
+  },
+  reorder(section: 'Pre-Prod'|'Production'|'QC'|'Dispatch', idsInOrder: string[]) {
+    return apiFetch<{ ok: boolean }>(`/tasks/reorder`, { method: 'POST', json: { section, idsInOrder } });
+  }
+};
+
+/* ------------ QC API ------------- */
+
+export const QCAPI = {
+  // Templates
+  listTemplates(params?: { projectId?: number; stationId?: number; projectSkuId?: number }) {
+    const q = new URLSearchParams();
+    if (params?.projectId) q.set('projectId', String(params.projectId));
+    if (params?.stationId) q.set('stationId', String(params.stationId));
+    if (params?.projectSkuId) q.set('projectSkuId', String(params.projectSkuId));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return apiFetch<any[]>(`/qc/templates${qs}`);
+  },
+  createTemplate(payload: any) {
+    return apiFetch<any>(`/qc/templates`, { method: 'POST', json: payload });
+  },
+  updateTemplate(id: string, patch: any) {
+    return apiFetch<any>(`/qc/templates/${id}`, { method: 'PUT', json: patch });
+  },
+  addTemplateItem(id: string, item: any) {
+    return apiFetch<any>(`/qc/templates/${id}/items`, { method: 'POST', json: item });
+  },
+  updateItem(id: string, patch: any) {
+    return apiFetch<any>(`/qc/items/${id}`, { method: 'PATCH', json: patch });
+  },
+  deleteItem(id: string) {
+    return apiFetch<{ ok: boolean }>(`/qc/items/${id}`, { method: 'DELETE' });
+  },
+
+  // Presign for photo upload
+  presignPhoto(payload: { projectId: number; filename: string; contentType?: string; sizeBytes?: number }) {
+    return apiFetch<{ putUrl: string; key: string }>(`/qc/presign`, { method: 'POST', json: payload });
+  },
+
+  // Submissions
+  submit(payload: any) {
+    return apiFetch<any>(`/qc/submissions`, { method: 'POST', json: payload });
+  },
+  listSubmissions(params?: { projectId?: number; stationId?: number; from?: string; to?: string }) {
+    const q = new URLSearchParams();
+    if (params?.projectId) q.set('projectId', String(params.projectId));
+    if (params?.stationId) q.set('stationId', String(params.stationId));
+    if (params?.from) q.set('from', params.from);
+    if (params?.to) q.set('to', params.to);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return apiFetch<any[]>(`/qc/submissions${qs}`);
+  },
+  getSubmission(id: string) {
+    return apiFetch<any>(`/qc/submissions/${id}`);
+  },
+};

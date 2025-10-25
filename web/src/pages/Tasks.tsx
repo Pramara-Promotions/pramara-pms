@@ -1,12 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import TaskListView from "../features/tasks/TaskListView";
 import TaskBoardView from "../features/tasks/TaskBoardView";
 import FilterBar from "../features/common/FilterBar";
 import { useSavedViews } from "../features/tasks/state/savedViews.store";
+import { useTasks } from "../features/tasks/state/tasks.store";
 
 export default function TasksPage() {
   const [mode, setMode] = useState<"list" | "board">("list");
   const { views, applyView } = useSavedViews();
+  const { loadFromServer } = useTasks()
+
+  // Load tasks on first mount (global list for now)
+  useEffect(() => {
+    loadFromServer().catch(()=>{})
+  }, [])
 
   return (
     <div className="space-y-3">

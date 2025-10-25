@@ -522,9 +522,24 @@ model Project {
   variances       VarianceItem[]
 
   stations        Station[]
+  tasks           Task[]
+  qcTemplates     QCChecklistTemplate[]
+  qcSubmissions   QCSubmission[]
 
   pref           ProjectPref?
   purchaseOrders PurchaseOrder[]
+  
+  // Phase 2 Relations
+  workflowStages  WorkflowStage[]
+  processConfigs  ProcessConfig[]
+  productionCalculations ProductionCalculation[]
+  productionEntries ProductionEntry[]
+  materialConsumption MaterialConsumption[]
+  shiftHandovers  ShiftHandover[]
+  workerPerformance WorkerPerformance[]
+  dailyPlanStations DailyPlanStation[]
+  batches         Batch[]
+  approvalRequests ApprovalRequest[]
 }
 
 // [LMK: PRISMA — CASCADE CHILDREN WHEN PROJECT DELETES]
@@ -564,6 +579,14 @@ model ProjectSku {
   attributes Json?
   // [LMK] cascade when a project is deleted
   project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  qcTemplates   QCChecklistTemplate[]
+  qcSubmissions QCSubmission[]
+  
+  // Phase 2 Relations
+  processConfigs ProcessConfig[]
+  dailyPlanStations DailyPlanStation[]
+  batches        Batch[]
 
   @@index([projectId])
   @@unique([projectId, code])
@@ -671,11 +694,54 @@ model ProjectDocument {
 // Station model (if not already present)
 model Station {
   id        Int      @id @default(autoincrement())
-  projectId Int
+  projectId Int?     // Made optional for Phase 2 hierarchy
+  
+  // Phase 2 Hierarchy
+  roomId          Int?
+  stationTypeId   Int?
+  code            String?   @unique
+  description     String?
+  capacity        Int?     @default(1)
+  status          String   @default("operational") // operational, maintenance, down
+  active          Boolean  @default(true)
+  
+  // Learning data
+  avgOutputRate   Float?
+  avgQualityRate  Float?
+  totalJobsCompleted Int   @default(0)
+  
   name      String
-  // ... add more fields as needed
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relations
   documents DocumentStation[]
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  qcTemplates QCChecklistTemplate[]
+  qcSubmissions QCSubmission[]
+  
+  // Phase 2 Relations
+  Room            Room?     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  StationType     StationType? @relation(fields: [stationTypeId], references: [id], onDelete: SetNull)
+  
+  maintenanceLogs MaintenanceLog[]
+  processConfigs  ProcessConfig[]
+  productionCalculations ProductionCalculation[]
+  productionEntries ProductionEntry[]
+  shiftPlans      ShiftPlan[]
+  workerPerformance WorkerPerformance[]
+  dailyPlanStations DailyPlanStation[]
+  batchesHere     Batch[]
+  batchMovementsFrom BatchMovement[] @relation("BatchMovementFrom")
+  batchMovementsTo   BatchMovement[] @relation("BatchMovementTo")
+  materialConsumption MaterialConsumption[]
+  
+  @@index([projectId])
+  @@index([roomId])
+  @@index([stationTypeId])
+  @@index([code])
+  @@index([status])
 }
 
 // Join table for many-to-many between ProjectDocument and Station
@@ -722,6 +788,134 @@ model QCRecord {
   Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+}
+
+// ====================================================================
+// [LANDMARK C.2] QC CHECKLISTS (Generic, station-aware)
+// ====================================================================
+
+// Generic item types for QC
+enum QCItemType {
+  boolean   // pass/fail checkbox
+  number    // measured value (with min/max/tolerance)
+  text      // free text note
+  enum      // pick one from options
+  photo     // photo evidence only
+  color     // color code or swatch text
+}
+
+// Severity for alert mapping when an item fails
+enum QCSeverity {
+  INFO
+  MINOR
+  MAJOR
+  CRITICAL
+}
+
+model QCChecklistTemplate {
+  id           String   @id @default(cuid())
+  name         String
+  projectId    Int?
+  stationId    Int?     // bind to a specific station when needed
+  projectSkuId Int?
+  version      Int      @default(1)
+  active       Boolean  @default(true)
+  notes        String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items        QCItemTemplate[]
+  submissions  QCSubmission[]
+
+  Project      Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  Station      Station?        @relation(fields: [stationId], references: [id], onDelete: SetNull)
+  Sku          ProjectSku?     @relation(fields: [projectSkuId], references: [id], onDelete: SetNull)
+  
+  // Phase 2 Relations
+  workflowStages WorkflowStage[]
+
+  @@index([projectId])
+  @@index([stationId])
+  @@index([projectSkuId])
+}
+
+model QCItemTemplate {
+  id         String        @id @default(cuid())
+  templateId String
+  code       String        // e.g., PANTONE_MATCH, DIM_A, SURFACE_DEFECT
+  label      String
+  type       QCItemType
+  required   Boolean       @default(false)
+  unit       String?
+  min        Float?
+  max        Float?
+  tolerance  Float?
+  options    String[]
+  severity   QCSeverity    @default(MINOR)
+  photoRequired Boolean    @default(false)
+  order      Int           @default(0)
+  condition  Json?         // conditional visibility rules
+  alertKey   String?       // maps to alert rules if configured
+  helpText   String?
+
+  template   QCChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  results    QCItemResult[]
+
+  @@index([templateId])
+  @@index([code])
+}
+
+model QCSubmission {
+  id           String     @id @default(cuid())
+  templateId   String
+  projectId    Int
+  stationId    Int
+  projectSkuId Int?
+  batchCode    String?
+  shift        String?
+  operatorId   String?
+  notes        String?
+  overallPass  Boolean    @default(true)
+  photos       String[]   // extra photos unrelated to a specific item
+  submittedBy  String?
+  submittedAt  DateTime   @default(now())
+
+  Project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Station      Station    @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  Sku          ProjectSku? @relation(fields: [projectSkuId], references: [id], onDelete: SetNull)
+  template     QCChecklistTemplate @relation(fields: [templateId], references: [id])
+  items        QCItemResult[]
+  
+  // Phase 2 Relations
+  Batch        Batch?     @relation(fields: [batchCode], references: [batchCode])
+
+  @@index([projectId])
+  @@index([stationId])
+  @@index([projectSkuId])
+  @@index([submittedAt])
+  @@index([batchCode])
+}
+
+model QCItemResult {
+  id            String      @id @default(cuid())
+  submissionId  String
+  itemTemplateId String?
+  code          String
+  type          QCItemType
+  valueString   String?
+  valueNumber   Float?
+  valueBool     Boolean?
+  valueEnum     String?
+  valueJson     Json?
+  pass          Boolean     @default(true)
+  photoKeys     String[]
+
+  submission    QCSubmission   @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  itemTemplate  QCItemTemplate? @relation(fields: [itemTemplateId], references: [id], onDelete: SetNull)
+
+  @@index([submissionId])
+  @@index([code])
 }
 
 model InventoryNeed {
@@ -795,4 +989,907 @@ model PreProdStep {
   createdAt DateTime  @default(now())
 
   Project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+// ====================================================================
+// [LANDMARK C.1] EXECUTION CONTROL — TASKS (Phase 2)
+// ====================================================================
+
+enum TaskSection {
+  Pre_Prod
+  Production
+  QC
+  Dispatch
+}
+
+enum TaskStatus {
+  green
+  amber
+  red
+}
+
+enum TaskPriority {
+  Low
+  Med
+  High
+}
+
+model Task {
+  id         String       @id @default(cuid())
+  projectId  Int?
+  name       String
+  section    TaskSection  @default(Pre_Prod)
+  status     TaskStatus   @default(green)
+  assignee   String?
+  dueDate    DateTime?
+  priority   TaskPriority @default(Med)
+  tags       String[]
+  attachments Int         @default(0)
+  position   Int          @default(0) // Order within a section
+
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  Project    Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([section, position])
+}
+
+// ====================================================================
+// [PHASE 2] EXECUTION CONTROL MODELS
+// ====================================================================
+
+// --------------------------------------------------------------------
+// STATION HIERARCHY
+// --------------------------------------------------------------------
+model Factory {
+  id              Int      @id @default(autoincrement())
+  name            String
+  code            String   @unique
+  location        String?
+  address         String?
+  contactPerson   String?
+  contactPhone    String?
+  active          Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  floors          Floor[]
+  dailyPlans      DailyPlan[]
+  
+  @@index([code])
+}
+
+model Floor {
+  id              Int      @id @default(autoincrement())
+  factoryId       Int
+  name            String
+  floorNumber     Int
+  active          Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Factory         Factory  @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+  sections        Section[]
+  
+  @@index([factoryId])
+}
+
+model Section {
+  id              Int      @id @default(autoincrement())
+  floorId         Int
+  name            String
+  description     String?
+  active          Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Floor           Floor    @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  rooms           Room[]
+  
+  @@index([floorId])
+}
+
+model Room {
+  id              Int      @id @default(autoincrement())
+  sectionId       Int
+  name            String
+  roomNumber      String?
+  description     String?
+  active          Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Section         Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  stations        Station[]
+  
+  @@index([sectionId])
+}
+
+model StationType {
+  id              Int      @id @default(autoincrement())
+  name            String   @unique
+  code            String   @unique // molding, spray_painting, pad_printing, assembly, qc, packing
+  description     String?
+  defaultSkills   String[] // Required skills for this type
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  stations        Station[]
+  
+  @@index([code])
+}
+
+model MaintenanceLog {
+  id              String   @id @default(cuid())
+  stationId       Int
+  
+  maintenanceType String   // scheduled, breakdown, repair, inspection
+  description     String
+  performedBy     String?
+  
+  startTime       DateTime
+  endTime         DateTime?
+  duration        Int?     // minutes
+  
+  cost            Float?
+  notes           String?
+  
+  createdAt       DateTime @default(now())
+  
+  Station         Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  
+  @@index([stationId])
+  @@index([startTime])
+}
+
+// --------------------------------------------------------------------
+// WORKFLOW MANAGEMENT
+// --------------------------------------------------------------------
+model WorkflowStage {
+  id              String   @id @default(cuid())
+  projectId       Int
+  
+  name            String
+  description     String?
+  sequence        Int
+  status          String   @default("pending") // pending, in_progress, completed, blocked
+  
+  estimatedDays   Int?
+  actualDays      Int?
+  
+  requiresQC      Boolean  @default(false)
+  qcTemplateId    String?
+  
+  requiresApproval Boolean  @default(false)
+  approvalType     String?
+  
+  startDate       DateTime?
+  endDate         DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  QCTemplate      QCChecklistTemplate? @relation(fields: [qcTemplateId], references: [id], onDelete: SetNull)
+  
+  tasks           WorkflowTask[]
+  documents       StageDocument[]
+  dependenciesFrom WorkflowDependency[] @relation("DependencyFrom")
+  dependenciesTo   WorkflowDependency[] @relation("DependencyTo")
+  approvalRequests ApprovalRequest[]
+  
+  @@index([projectId])
+  @@index([sequence])
+  @@index([status])
+}
+
+model WorkflowTask {
+  id              String   @id @default(cuid())
+  stageId         String
+  
+  name            String
+  description     String?
+  assignedTo      String?
+  
+  status          String   @default("pending") // pending, in_progress, completed
+  priority        String   @default("medium") // low, medium, high, critical
+  
+  dueDate         DateTime?
+  completedAt     DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Stage           WorkflowStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  
+  @@index([stageId])
+  @@index([status])
+}
+
+model WorkflowDependency {
+  id              String   @id @default(cuid())
+  fromStageId     String
+  toStageId       String
+  
+  dependencyType  String   @default("finish_to_start") // finish_to_start, start_to_start
+  lagDays         Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+  
+  FromStage       WorkflowStage @relation("DependencyFrom", fields: [fromStageId], references: [id], onDelete: Cascade)
+  ToStage         WorkflowStage @relation("DependencyTo", fields: [toStageId], references: [id], onDelete: Cascade)
+  
+  @@index([fromStageId])
+  @@index([toStageId])
+}
+
+model StageDocument {
+  id              String   @id @default(cuid())
+  stageId         String
+  
+  documentName    String
+  documentUrl     String
+  documentType    String?  // drawing, specification, approval, photo
+  
+  uploadedBy      String
+  uploadedAt      DateTime @default(now())
+  
+  Stage           WorkflowStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  
+  @@index([stageId])
+}
+
+// --------------------------------------------------------------------
+// PRODUCTION OUTPUT & MATERIALS
+// --------------------------------------------------------------------
+model ProcessConfig {
+  id              String   @id @default(cuid())
+  stationId       Int
+  stationType     String   // molding, spray_painting, pad_printing, assembly
+  projectId       Int?
+  projectSkuId    Int?
+  
+  // Molding
+  cycleTimeSec    Int?
+  cavities        Int?
+  itemWeightGrams Float?
+  runnerWeightGrams Float?
+  setupTimeMins   Int?
+  
+  // Painting/Printing
+  paintPerUnitMl  Float?
+  thinnerPerUnitMl Float?
+  dryingTimeSec   Int?
+  maskingSteps    Int?
+  
+  // Assembly
+  partsPerUnit    Int?
+  assemblyTimeSec Int?
+  
+  // General
+  scrapRate       Float?   @default(0.02)
+  machineCapacity Int?     @default(1)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Station         Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  Project         Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  Sku             ProjectSku? @relation(fields: [projectSkuId], references: [id], onDelete: SetNull)
+  calculations    ProductionCalculation[]
+  
+  @@index([stationId])
+  @@index([projectId])
+}
+
+model ProductionCalculation {
+  id                  String   @id @default(cuid())
+  projectId           Int
+  stationId           Int
+  processConfigId     String
+  
+  targetQty           Int
+  outputPerHour       Float
+  outputPerShift      Float
+  outputPerDay        Float
+  
+  totalTimeRequired   Float    // hours
+  machinesRequired    Int
+  shiftsRequired      Int
+  
+  materialConsumption Json     // { material: qty }
+  
+  calculatedAt        DateTime @default(now())
+  
+  Project             Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Station             Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  ProcessConfig       ProcessConfig @relation(fields: [processConfigId], references: [id])
+  
+  @@index([projectId])
+  @@index([stationId])
+}
+
+model ProductionEntry {
+  id                  String   @id @default(cuid())
+  projectId           Int
+  stationId           Int
+  shiftId             String
+  batchCode           String?
+  
+  startTime           DateTime
+  endTime             DateTime?
+  
+  targetQty           Int
+  actualQty           Int
+  rejectedQty         Int      @default(0)
+  
+  materialUsed        Json     // { material: actualQty }
+  materialVariance    Json?    // { material: variance }
+  outputVariance      Float    // actualQty - targetQty
+  
+  operatorId          String?
+  notes               String?
+  
+  createdAt           DateTime @default(now())
+  
+  Project             Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Station             Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  Shift               Shift    @relation(fields: [shiftId], references: [id])
+  consumptions        MaterialConsumption[]
+  
+  @@index([projectId])
+  @@index([stationId])
+  @@index([shiftId])
+}
+
+model Material {
+  id              String   @id @default(cuid())
+  name            String
+  type            String   // resin, paint, thinner, masterbatch
+  unit            String   // kg, liters, grams, ml
+  costPerUnit     Float?
+  stockQty        Float    @default(0)
+  reservedQty     Float    @default(0)
+  minStock        Float?
+  reorderPoint    Float?
+  leadTimeDays    Int?
+  expiryTracking  Boolean  @default(false)
+  supplier        String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  consumptions    MaterialConsumption[]
+  lots            MaterialLot[]
+  reservations    MaterialReservation[]
+  forecasts       MaterialForecast[]
+  movements       StockMovement[]
+  
+  @@index([type])
+  @@index([stockQty])
+}
+
+model MaterialConsumption {
+  id                  String   @id @default(cuid())
+  materialId          String
+  projectId           Int
+  stationId           Int
+  productionEntryId   String?
+  
+  plannedQty          Float
+  actualQty           Float
+  variance            Float    // actualQty - plannedQty
+  
+  consumedAt          DateTime @default(now())
+  
+  Material            Material @relation(fields: [materialId], references: [id])
+  Project             Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Station             Station  @relation(fields: [stationId], references: [id])
+  ProductionEntry     ProductionEntry? @relation(fields: [productionEntryId], references: [id])
+  
+  @@index([materialId])
+  @@index([projectId])
+  @@index([stationId])
+}
+
+model MaterialLot {
+  id              String   @id @default(cuid())
+  materialId      String
+  lotNumber       String   @unique
+  
+  supplier        String?
+  receivedDate    DateTime
+  expiryDate      DateTime?
+  
+  initialQty      Float
+  currentQty      Float
+  
+  status          String   @default("active") // active, depleted, recalled
+  
+  qcStatus        String?  // passed, failed, pending
+  qcNotes         String?
+  
+  createdAt       DateTime @default(now())
+  
+  Material        Material @relation(fields: [materialId], references: [id])
+  usedInBatches   String[] // batch IDs for quick lookup
+  
+  @@index([lotNumber])
+  @@index([materialId])
+  @@index([status])
+}
+
+model StockMovement {
+  id              String   @id @default(cuid())
+  materialId      String
+  lotNumber       String?
+  
+  movementType    String   // receipt, consumption, adjustment, return
+  qty             Float
+  
+  referenceType   String?  // PO, batch, production_entry
+  referenceId     String?
+  
+  notes           String?
+  performedBy     String
+  
+  timestamp       DateTime @default(now())
+  
+  Material        Material @relation(fields: [materialId], references: [id])
+  
+  @@index([materialId])
+  @@index([movementType])
+  @@index([timestamp])
+}
+
+model MaterialReservation {
+  id              String   @id @default(cuid())
+  materialId      String
+  dailyPlanId     String?
+  stationId       Int?
+  
+  reservedQty     Float
+  
+  reservedBy      String
+  reservedAt      DateTime @default(now())
+  releasedAt      DateTime?
+  
+  status          String   @default("active") // active, released, consumed
+  
+  Material        Material @relation(fields: [materialId], references: [id])
+  DailyPlan       DailyPlan? @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
+  
+  @@index([materialId])
+  @@index([dailyPlanId])
+  @@index([status])
+}
+
+model MaterialForecast {
+  id              String   @id @default(cuid())
+  materialId      String
+  
+  forecastDate    DateTime
+  forecastPeriod  String   // daily, weekly, monthly
+  
+  plannedConsumption Float
+  bufferStock     Float
+  expectedStock   Float    // current + incoming - planned
+  
+  reorderNeeded   Boolean  @default(false)
+  reorderQty      Float?
+  
+  generatedAt     DateTime @default(now())
+  
+  Material        Material @relation(fields: [materialId], references: [id])
+  
+  @@index([materialId])
+  @@index([forecastDate])
+}
+
+// --------------------------------------------------------------------
+// WORKFORCE MANAGEMENT
+// --------------------------------------------------------------------
+model Worker {
+  id              String   @id @default(cuid())
+  name            String
+  workerType      String   // company, third_party
+  providerId      String?
+  
+  skills          String[] // molding, painting, assembly, qc_inspector
+  certifications  Json?    // { skill: level }
+  shiftPreference String?  // day, night, any
+  
+  hireDate        DateTime?
+  contractEnd     DateTime?
+  hourlyRate      Float?
+  
+  status          String   @default("active") // active, on_leave, inactive
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  Provider        ThirdPartyProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  shiftPlans      ShiftPlan[]
+  performance     WorkerPerformance[]
+  
+  @@index([workerType])
+  @@index([providerId])
+  @@index([status])
+}
+
+model ThirdPartyProvider {
+  id              String   @id @default(cuid())
+  name            String
+  contactPerson   String?
+  phone           String?
+  email           String?
+  location        String?
+  
+  contractStart   DateTime?
+  contractEnd     DateTime?
+  rateStructure   String?  // hourly, daily, monthly
+  
+  turnoverRate    Float?   @default(0)
+  attendanceRate  Float?   @default(100)
+  performanceScore Float?  @default(0)
+  consistencyRating Float? @default(0)
+  stabilityScore  Float?   @default(0) // calculated from above
+  
+  active          Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  workers         Worker[]
+  
+  @@index([stabilityScore])
+}
+
+model Shift {
+  id              String   @id @default(cuid())
+  name            String
+  startTime       String   // HH:mm
+  endTime         String   // HH:mm
+  breakDuration   Int      // minutes
+  
+  active          Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  plans           ShiftPlan[]
+  productionEntries ProductionEntry[]
+}
+
+model ShiftPlan {
+  id              String   @id @default(cuid())
+  dailyPlanId     String
+  shiftId         String
+  workerId        String
+  stationId       Int
+  
+  date            DateTime
+  assignedBy      String?
+  assignmentReason String? // auto_suggested, override_training, etc.
+  
+  createdAt       DateTime @default(now())
+  
+  DailyPlan       DailyPlan @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
+  Shift           Shift     @relation(fields: [shiftId], references: [id])
+  Worker          Worker    @relation(fields: [workerId], references: [id])
+  Station         Station   @relation(fields: [stationId], references: [id])
+  handovers       ShiftHandover[]
+  
+  @@index([dailyPlanId])
+  @@index([workerId])
+  @@index([stationId])
+  @@index([date])
+}
+
+model ShiftHandover {
+  id              String   @id @default(cuid())
+  shiftPlanId     String
+  projectId       Int
+  
+  outgoingWorker  String
+  incomingWorker  String
+  
+  completedQty    Int
+  remainingQty    Int
+  issuesNoted     String?
+  photos          String[] // S3 keys
+  
+  handoverTime    DateTime @default(now())
+  
+  ShiftPlan       ShiftPlan @relation(fields: [shiftPlanId], references: [id], onDelete: Cascade)
+  Project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@index([shiftPlanId])
+  @@index([projectId])
+}
+
+model WorkerPerformance {
+  id              String   @id @default(cuid())
+  workerId        String
+  projectId       Int
+  stationId       Int
+  
+  date            DateTime
+  shiftId         String
+  
+  targetQty       Int
+  actualQty       Int
+  rejectedQty     Int
+  
+  efficiency      Float    // actualQty / targetQty * 100
+  qualityRate     Float    // (actualQty - rejectedQty) / actualQty * 100
+  
+  completionTime  Int?     // minutes
+  
+  createdAt       DateTime @default(now())
+  
+  Worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Station         Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  
+  @@index([workerId])
+  @@index([projectId])
+  @@index([date])
+}
+
+// --------------------------------------------------------------------
+// DAILY PLANNING & OPTIMIZATION
+// --------------------------------------------------------------------
+model DailyPlan {
+  id              String   @id @default(cuid())
+  date            DateTime
+  factoryId       Int?
+  
+  scenario        String   // fastest, cheapest, balanced
+  generatedBy     String   // system, user_id
+  
+  status          String   @default("draft") // draft, active, completed
+  
+  totalTargetQty  Int
+  totalExpectedOutput Int
+  estimatedCost   Float?
+  
+  reasoning       Json?    // { why_this_scenario, key_decisions }
+  riskFactors     String[] // tight_timeline, material_shortage, etc.
+  
+  createdAt       DateTime @default(now())
+  approvedAt      DateTime?
+  approvedBy      String?
+  
+  Factory         Factory? @relation(fields: [factoryId], references: [id])
+  stations        DailyPlanStation[]
+  shiftPlans      ShiftPlan[]
+  adaptations     PlanAdaptation[]
+  materialReservations MaterialReservation[]
+  
+  @@index([date])
+  @@index([factoryId])
+}
+
+model DailyPlanStation {
+  id              String   @id @default(cuid())
+  dailyPlanId     String
+  stationId       Int
+  projectId       Int
+  projectSkuId    Int?
+  
+  targetQty       Int
+  shiftId         String?
+  
+  assignedWorkers String[] // worker IDs
+  workerAssignmentReason Json? // { workerId: reason }
+  
+  materialsRequired Json   // { materialId: qty }
+  materialsReserved Boolean @default(false)
+  
+  equipmentStatus String   @default("operational") // operational, maintenance, down
+  
+  dependencies    String[] // upstream station IDs that must complete first
+  dependenciesMet Boolean  @default(false)
+  
+  blockingApprovalId String?
+  
+  status          String   @default("pending") // pending, in_progress, completed, delayed
+  
+  actualQty       Int?
+  completedAt     DateTime?
+  
+  createdAt       DateTime @default(now())
+  
+  DailyPlan       DailyPlan @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
+  Station         Station   @relation(fields: [stationId], references: [id])
+  Project         Project   @relation(fields: [projectId], references: [id])
+  Sku             ProjectSku? @relation(fields: [projectSkuId], references: [id])
+  
+  @@index([dailyPlanId])
+  @@index([stationId])
+  @@index([projectId])
+}
+
+model PlanAdaptation {
+  id              String   @id @default(cuid())
+  dailyPlanId     String
+  
+  trigger         String   // behind_schedule, ahead_schedule, material_shortage, equipment_down
+  affectedStationId Int?
+  
+  systemSuggestion Json    // { action, details, reasoning }
+  plannerDecision  String?  // approved, modified, rejected
+  plannerReason    String?
+  
+  outcome         String?  // improved, neutral, worsened
+  
+  createdAt       DateTime @default(now())
+  resolvedAt      DateTime?
+  
+  DailyPlan       DailyPlan @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
+  
+  @@index([dailyPlanId])
+  @@index([trigger])
+}
+
+model PlannerPreference {
+  id              String   @id @default(cuid())
+  plannerId       String
+  
+  preferenceType  String   // worker_assignment, scenario_choice, material_strategy
+  context         Json     // { stationId, projectType, etc. }
+  
+  systemSuggestion String
+  plannerChoice    String
+  
+  frequency       Int      @default(1)
+  successRate     Float?
+  
+  createdAt       DateTime @default(now())
+  lastUsed        DateTime @default(now())
+  
+  @@index([plannerId])
+  @@index([preferenceType])
+}
+
+// --------------------------------------------------------------------
+// BATCH TRACKING & TRACEABILITY
+// --------------------------------------------------------------------
+model Batch {
+  id              String   @id @default(cuid())
+  batchCode       String   @unique
+  
+  projectId       Int
+  poNumber        String?
+  projectSkuId    Int
+  
+  targetQty       Int
+  currentQty      Int
+  rejectedQty     Int      @default(0)
+  
+  currentStationId Int?
+  status          String   @default("in_progress") // in_progress, completed, on_hold, rejected
+  
+  materialLots    Json     // { materialId: lotNumber }
+  machineId       String?
+  
+  createdBy       String
+  createdAt       DateTime @default(now())
+  completedAt     DateTime?
+  
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Sku             ProjectSku @relation(fields: [projectSkuId], references: [id])
+  CurrentStation  Station? @relation(fields: [currentStationId], references: [id])
+  
+  movements       BatchMovement[]
+  qcRecords       QCSubmission[]
+  
+  @@index([batchCode])
+  @@index([projectId])
+  @@index([status])
+  @@index([currentStationId])
+}
+
+model BatchMovement {
+  id              String   @id @default(cuid())
+  batchId         String
+  
+  fromStationId   Int?
+  toStationId     Int
+  
+  qty             Int
+  operatorId      String?
+  
+  condition       String?  // good, damaged, requires_rework
+  photos          String[] // S3 keys
+  notes           String?
+  
+  timestamp       DateTime @default(now())
+  
+  Batch           Batch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  FromStation     Station? @relation("BatchMovementFrom", fields: [fromStationId], references: [id])
+  ToStation       Station  @relation("BatchMovementTo", fields: [toStationId], references: [id])
+  
+  @@index([batchId])
+  @@index([toStationId])
+  @@index([timestamp])
+}
+
+// --------------------------------------------------------------------
+// APPROVAL TRACKING & EXTERNAL DEPENDENCIES
+// --------------------------------------------------------------------
+model ApprovalRequest {
+  id              String   @id @default(cuid())
+  projectId       Int
+  workflowStageId String?
+  
+  approvalType    String   // customer_signoff, vendor_delivery, certification, internal
+  description     String
+  
+  requiredFrom    String   // person/org name
+  requiredFromContact String? // email/phone
+  
+  requestedBy     String
+  requestedAt     DateTime @default(now())
+  
+  expectedDate    DateTime
+  cutoffDate      DateTime
+  bufferDays      Int      // cutoff - expected
+  
+  status          String   @default("pending") // pending, approved, rejected, delayed, overridden
+  
+  approvedAt      DateTime?
+  approvedBy      String?
+  
+  rejectedAt      DateTime?
+  rejectionReason String?
+  requestedChanges String?
+  
+  delayedNewDate  DateTime?
+  delayReason     String?
+  
+  overrideBy      String?
+  overrideReason  String?
+  overrideRisk    String?
+  overrideAt      DateTime?
+  
+  attachments     String[] // S3 keys
+  
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  WorkflowStage   WorkflowStage? @relation(fields: [workflowStageId], references: [id])
+  
+  reminders       ApprovalReminder[]
+  
+  @@index([projectId])
+  @@index([status])
+  @@index([cutoffDate])
+}
+
+model ApprovalReminder {
+  id              String   @id @default(cuid())
+  approvalRequestId String
+  
+  reminderType    String   // scheduled, escalation
+  reminderDate    DateTime
+  
+  sentAt          DateTime?
+  sentTo          String[] // email addresses
+  
+  channel         String   // email, sms, whatsapp, in_app
+  
+  status          String   @default("pending") // pending, sent, failed
+  
+  ApprovalRequest ApprovalRequest @relation(fields: [approvalRequestId], references: [id], onDelete: Cascade)
+  
+  @@index([approvalRequestId])
+  @@index([reminderDate])
+  @@index([status])
 }

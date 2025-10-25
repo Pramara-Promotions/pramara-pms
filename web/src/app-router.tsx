@@ -37,6 +37,16 @@ import NotFound from "./pages/NotFound";
 import InboxPage from "./features/inbox/InboxPage";
 import EmailAnalyticsDashboard from "./features/analytics/EmailAnalyticsDashboard";
 
+// Phase 2 pages
+import WorkflowsPage from "./pages/Workflows";
+import ProductionPage from "./pages/Production";
+import DailyPlansPage from "./pages/DailyPlans";
+import BatchesPage from "./pages/Batches";
+import ApprovalsPage from "./pages/Approvals";
+import StationsPage from "./pages/Stations";
+import MaterialsPage from "./pages/Materials";
+import WorkersPage from "./pages/Workers";
+
 /****************************************************
  * [LMK-02] ROOT ROUTE (no context)
  ****************************************************/
@@ -209,6 +219,54 @@ const emailAnalyticsRoute = createRoute({
   component: EmailAnalyticsDashboard,
 });
 
+const workflowsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "workflows",
+  component: WorkflowsPage,
+});
+
+const productionRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "production",
+  component: ProductionPage,
+});
+
+const dailyPlansRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "daily-plans",
+  component: DailyPlansPage,
+});
+
+const batchesRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "batches",
+  component: BatchesPage,
+});
+
+const approvalsRoutePhase2 = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "approvals",
+  component: ApprovalsPage,
+});
+
+const stationsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "stations",
+  component: StationsPage,
+});
+
+const materialsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "materials",
+  component: MaterialsPage,
+});
+
+const workersRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "workers",
+  component: WorkersPage,
+});
+
 /****************************************************
  * [LMK-04] ROUTE TREE
  ****************************************************/
@@ -225,6 +283,14 @@ const routeTree = rootRoute.addChildren([
     accountRoute,
     inboxRoute,
     emailAnalyticsRoute,
+    workflowsRoute,
+    productionRoute,
+    dailyPlansRoute,
+    batchesRoute,
+    approvalsRoutePhase2,
+    stationsRoute,
+    materialsRoute,
+    workersRoute,
   ]),
   loginRoute,
   forgotPasswordRoute,

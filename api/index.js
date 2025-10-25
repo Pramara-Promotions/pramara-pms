@@ -53,10 +53,18 @@ const { invitationsRouter } = require('./routes/invitations');
 const { emailLogsRouter } = require('./routes/emailLogs');
 const { inboxRouter } = require('./routes/inbox');
 const { emailAnalyticsRouter } = require('./routes/emailAnalytics');
+const { tasksRouter } = require('./routes/tasks');
+const { qcRouter } = require('./routes/qc');
 const meRouter = require('./routes/me');
 const authRouter = require('./routes/auth');
 const inviteRouter = require('./routes/invite');
 const { docIntelligenceRouter } = require('./routes/docIntelligence');
+
+// Phase 2: Execution Control Routes
+const stationsRouter = require('./routes/stations');
+const materialsRouter = require('./routes/materials');
+const workersRouter = require('./routes/workers');
+
 const app = express();
 
 app.set('trust proxy', 1);
@@ -107,9 +115,29 @@ app.use('/api', invitationsRouter);
 app.use('/api', emailLogsRouter);
 app.use('/api', inboxRouter);
 app.use('/api', emailAnalyticsRouter);
+app.use('/api', tasksRouter);
+app.use('/api', qcRouter);
 app.use('/api', meRouter);
 app.use('/api', inviteRouter);
 app.use('/api', docIntelligenceRouter);
+
+// Phase 2: Execution Control Routes
+app.use('/api', stationsRouter);
+app.use('/api/materials', materialsRouter);
+app.use('/api/workers', workersRouter);
+
+// Phase 2: Remaining Execution Control Routes
+const workflowsRouter = require('./routes/workflows');
+const productionRouter = require('./routes/production');
+const dailyPlansRouter = require('./routes/daily-plans');
+const batchesRouter = require('./routes/batches');
+const approvalsRouter = require('./routes/approvals');
+
+app.use('/api/workflows', workflowsRouter);
+app.use('/api/production', productionRouter);
+app.use('/api/daily-plans', dailyPlansRouter);
+app.use('/api/batches', batchesRouter);
+app.use('/api/approvals', approvalsRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

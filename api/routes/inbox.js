@@ -11,6 +11,69 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const router = express.Router();
 
+// Public webhook to ingest emails from external systems (e.g., Power Automate, Postmark, SES)
+// Security: requires X-Ingest-Token header matching INBOUND_WEBHOOK_TOKEN env var
+router.post('/inbox/ingest-webhook', async (req, res) => {
+  try {
+    const token = req.headers['x-ingest-token'] || req.query.token;
+    const expected = process.env.INBOUND_WEBHOOK_TOKEN;
+    if (!expected || token !== expected) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const payload = req.body || {};
+    const { messageId, from, to, cc, subject, textBody, htmlBody, attachments = [], receivedAt } = payload;
+
+    // Dedup by messageId if provided
+    if (messageId) {
+      const exists = await prisma.inboundEmail.findUnique({ where: { messageId } });
+      if (exists) return res.json({ ok: true, id: exists.id, deduped: true });
+    }
+
+    // Save attachments (base64)
+    const saved = [];
+    if (Array.isArray(attachments) && attachments.length) {
+      const { s3Service } = require('../lib/storage');
+      for (const a of attachments) {
+        try {
+          const contentB64 = a.contentBase64 || a.content || null;
+          if (!contentB64) continue;
+          const buf = Buffer.from(contentB64, 'base64');
+          const key = `inbound-emails/${new Date().toISOString().split('T')[0]}/${Date.now()}-${a.filename || 'attachment'}`;
+          await s3Service.uploadBuffer(buf, key, a.contentType || 'application/octet-stream');
+          saved.push({ filename: a.filename || 'attachment', size: buf.length, mimeType: a.contentType || 'application/octet-stream', key });
+        } catch (e) {
+          console.warn('[inbox] webhook attachment failed:', e?.message);
+        }
+      }
+    }
+
+    const row = await prisma.inboundEmail.create({
+      data: {
+        messageId: messageId || `webhook-${Date.now()}`,
+        from: from || '',
+        to: Array.isArray(to) ? to : (to ? [to] : []),
+        cc: Array.isArray(cc) ? cc : (cc ? [cc] : []),
+        subject: subject || '(No Subject) ',
+        textBody: textBody || null,
+        htmlBody: htmlBody || null,
+        hasAttachments: saved.length > 0,
+        attachmentCount: saved.length,
+        attachments: saved.length ? saved : null,
+        classified: false,
+        classification: 'general',
+        confidence: 0.5,
+        receivedAt: receivedAt ? new Date(receivedAt) : new Date(),
+      }
+    });
+
+    res.json({ ok: true, id: row.id });
+  } catch (e) {
+    console.error('[inbox] ingest-webhook failed:', e);
+    res.status(500).json({ error: 'Failed to ingest' });
+  }
+});
+
 // Dev/Test: Inject a test email into the inbox (Super Admin only)
 router.post('/inbox/test-ingest', authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
   try {

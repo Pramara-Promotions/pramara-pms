@@ -601,6 +601,9 @@ app.get('/api/project-skus', async (req, res) => {
       where: { projectId },
       orderBy: [{ poNumber: 'asc' }, { id: 'asc' }],
     });
+    try {
+      console.log(`[sku:list] projectId=${projectId} -> ${rows.length} rows`);
+    } catch {}
     res.json(rows);
   } catch (e) {
     console.error('sku:list', e);
@@ -1599,14 +1602,18 @@ if (require.main === module) {
   });
 
   // Start Email Inbound Service (IMAP polling)
-  try {
-    const emailInboundService = require('./lib/emailInboundService');
-    if (emailInboundService && emailInboundService.startPolling) {
-      emailInboundService.startPolling(5);
-      console.log('✅ Email inbound service started (polling every 5 minutes)');
+  if (process.env.ENABLE_INBOUND_EMAIL !== 'false') {
+    try {
+      const emailInboundService = require('./lib/emailInboundService');
+      if (emailInboundService && emailInboundService.startPolling) {
+        emailInboundService.startPolling(5);
+        console.log('✅ Email inbound service started (polling every 5 minutes)');
+      }
+    } catch (err) {
+      console.error('❌ Failed to start email inbound service:', err.message);
     }
-  } catch (err) {
-    console.error('❌ Failed to start email inbound service:', err.message);
+  } else {
+    console.log('📧 Email inbound service disabled (ENABLE_INBOUND_EMAIL=false)');
   }
 
   // Start Email Digest Service (cron jobs)
@@ -1624,6 +1631,28 @@ if (require.main === module) {
     console.log(`🚀 API running on http://localhost:${PORT}`);
     console.log(`🔌 WebSocket server ready for real-time notifications`);
   });
+
+  // Development debug endpoint: surface safe DB info
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const url = new URL(process.env.DATABASE_URL || '');
+      const safeDbInfo = {
+        host: url.host || 'unknown',
+        database: (url.pathname || '').replace('/', '') || 'unknown',
+        vendor: url.protocol ? url.protocol.replace(':','') : 'unknown',
+      };
+      app.get('/api/debug/env', (req, res) => {
+        res.json({
+          nodeEnv: process.env.NODE_ENV,
+          db: safeDbInfo,
+          inboundEmailEnabled: process.env.ENABLE_INBOUND_EMAIL !== 'false',
+        });
+      });
+      console.log(`🩺 DB -> ${safeDbInfo.vendor}://${safeDbInfo.host}/${safeDbInfo.database}`);
+    } catch (e) {
+      console.log('🩺 DB info unavailable');
+    }
+  }
 }
 
 module.exports = app;

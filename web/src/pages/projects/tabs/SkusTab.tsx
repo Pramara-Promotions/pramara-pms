@@ -153,7 +153,13 @@ function cancelDelete() {
         ]);
         if (!alive) return;
         setSkus(Array.isArray(rows) ? rows : []);
-        setAttrKeys(Array.isArray(layout?.keys) ? layout.keys : []);
+        // Sanitize layout keys (trim, dedupe, drop empties)
+        const rawKeys: string[] = Array.isArray(layout?.keys) ? layout.keys : [];
+        const seen = new Set<string>();
+        const cleanKeys = rawKeys
+          .map((k: any) => String(k ?? "").trim())
+          .filter((k: string) => k.length > 0 && !seen.has(k) && (seen.add(k), true));
+        setAttrKeys(cleanKeys);
         setLastPo(layout?.lastPo || null);
       } catch (e: any) {
         if (alive) setErr(e?.error || e?.message || "Failed to load");
@@ -221,7 +227,12 @@ function cancelDelete() {
    * [LMK-12] SAVE LAYOUT
    ****************************************************/
   async function saveLayout(keys: string[]) {
-    setAttrKeys(keys);
+    // Trim + dedupe to avoid duplicate React keys
+    const seen = new Set<string>();
+    const clean = (keys || [])
+      .map((k) => String(k ?? "").trim())
+      .filter((k) => k.length > 0 && !seen.has(k) && (seen.add(k), true));
+    setAttrKeys(clean);
     try {
       await fetchJson(
         `${API_BASE}/api/projects/${project.id}/sku-attribute-layout`,
@@ -229,7 +240,7 @@ function cancelDelete() {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ keys }),
+          body: JSON.stringify({ keys: clean }),
         }
       );
     } catch { /* optimistic */ }
@@ -723,16 +734,23 @@ async function performDeleteSku() {
    * [LMK-18] TABLE — attrColumns + FILTERED/SORTED LIST
    ****************************************************/
   const attrColumns = useMemo(() => {
-    const ordered = [...attrKeys];
-    const dataKeys = new Set<string>();
+    // Start with sanitized, unique layout keys
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of attrKeys) {
+      const k = String(raw ?? "").trim();
+      if (!k || seen.has(k)) continue;
+      ordered.push(k); seen.add(k);
+    }
+    // Add any data-backed keys that have actual values, avoiding dupes
     for (const s of skus) {
-      const attrs = s?.attributes || {};
-      for (const [k, v] of Object.entries(attrs)) {
+      const attrs = (s?.attributes || {}) as Record<string, any>;
+      for (const [rk, v] of Object.entries(attrs)) {
+        const k = String(rk ?? "").trim();
         const hasValue = v !== null && v !== undefined && String(v).trim() !== "";
-        if (hasValue) dataKeys.add(k);
+        if (k && hasValue && !seen.has(k)) { ordered.push(k); seen.add(k); }
       }
     }
-    for (const k of dataKeys) if (!ordered.includes(k)) ordered.push(k);
     return ordered;
   }, [attrKeys, skus]);
 
@@ -827,9 +845,9 @@ async function performDeleteSku() {
 
         {localKeys.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
-            {localKeys.map((k) => (
+            {localKeys.map((k, i) => (
               <span
-                key={k}
+                key={`lk:${String(k)}:${i}`}
                 className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs"
               >
                 <button title="Move up" onClick={() => move(k, -1)} className="opacity-60 hover:opacity-100">↑</button>
@@ -906,8 +924,8 @@ async function performDeleteSku() {
           {poList.length === 0 ? (
             <div className="text-sm text-gray-500">No POs yet.</div>
           ) : (
-            poList.map((po) => (
-              <div key={po.poNumber} className="flex items-center justify-between text-sm">
+            poList.map((po, i) => (
+              <div key={`po:${po.poNumber}:${i}`} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{po.poNumber}</span>
                   {po.url ? (
@@ -1085,9 +1103,9 @@ async function performDeleteSku() {
                   ...attrColumns,
                   "Image",
                   "Actions",
-                ].map((h) => (
+                ].map((h, i) => (
                   <th
-                    key={h}
+                    key={`h:${String(h)}:${i}`}
                     className="px-4 py-2 text-left text-xs font-medium text-gray-500"
                   >
                     {h}
@@ -1125,8 +1143,8 @@ async function performDeleteSku() {
                     <td className="px-4 py-2 text-sm">{sku.type || "—"}</td>
                     <td className="px-4 py-2 text-sm">{sku.orderQty ?? "—"}</td>
 
-                    {attrColumns.map((k) => (
-                      <td key={k} className="px-4 py-2 text-sm">
+                    {attrColumns.map((k, idx) => (
+                      <td key={`a:${String(k)}:${idx}`} className="px-4 py-2 text-sm">
                         {sku.attributes?.[k] ? String(sku.attributes[k]) : "—"}
                       </td>
                     ))}
@@ -1381,8 +1399,8 @@ async function performDeleteSku() {
                     Custom attributes
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {attrKeys.map((k) => (
-                      <div key={k}>
+                    {attrKeys.map((k, i) => (
+                      <div key={`ak:${String(k)}:${i}`}>
                         <label className="block text-xs text-gray-600 mb-1">
                           {k}
                         </label>

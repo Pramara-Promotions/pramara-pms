@@ -1,10 +1,17 @@
 # Chat Context Checkpoint
-**Timestamp:** 25/10/2025, 2:17:16 am  
-**Description:** Checkpoint
+**Timestamp:** 26/10/2025, 5:45 pm  
+**Description:** Office laptop sync + dependency fixes + SKUs debug
 
 ---
 
 ## Current State Summary
+
+### Session Update — October 26, 2025
+- New checkpoint: `docs/chat-context/2025-10-26T17-45-00.md`
+- Added `docs/DEPENDENCY_SYNC.md` and `scripts/pull-and-setup.ps1`
+- Dev stability: Inbound Email gated by `ENABLE_INBOUND_EMAIL=false`, notifications list fails-soft in dev
+- SKUs page: layout key sanitization and unique React keys; added `[sku:list]` server log + `/api/debug/env`
+
 # Cloud Setup Context - October 22, 2025
 
 ## Current State
@@ -84,14 +91,21 @@ If DB connection fails:
 Copy and paste this to Copilot when you switch devices:
 
 ```
-I'm continuing from another device. Please read:
-1. docs/CLOUD_SETUP_CONTEXT.md (current project state)
-2. docs/chat-context/2025-10-24T20-47-16.md (last conversation checkpoint)
+I'm continuing from another device. Please:
+1. Pull data and chat
+2. Check for new dependencies and install them
 
-Quick summary: Checkpoint
-
-What's our next step?
+(Copilot will automatically read docs/chat-context/latest.md and docs/DEPENDENCY_SYNC.md)
 ```
+
+### Auto-Pull Protocol for Copilot:
+When user says "pull data and chat", execute:
+1. `git pull origin phase2-execution-control`
+2. Read `docs/chat-context/latest.md`
+3. Read `docs/DEPENDENCY_SYNC.md`
+4. Check if package.json was modified in the pull
+5. If yes, remind user to run: `cd api && npm install && cd ../web && npm install && cd ..`
+6. Remind user to copy `.env.cloud` if needed: `Copy-Item -Force .env.cloud .env`
 
 ---
 

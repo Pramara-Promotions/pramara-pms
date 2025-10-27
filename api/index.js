@@ -357,8 +357,14 @@ app.get('/api/projects/:id/pos', async (req, res) => {
  **************************************/
 app.get('/api/projects/:id/po/:poNumber', async (req, res) => {
   try {
+    // Disable caching to ensure fresh PO status
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    
     const projectId = Number(req.params.id);
     const poNumber = String(req.params.poNumber || '').trim();
+    console.log(`[PO CHECK] projectId=${projectId}, poNumber="${poNumber}"`);
     if (!projectId || !poNumber) {
       return res.status(200).json({ exists: false, poNumber });
     }
@@ -366,6 +372,8 @@ app.get('/api/projects/:id/po/:poNumber', async (req, res) => {
     const po = await prisma.purchaseOrder.findUnique({
       where: { projectId_poNumber: { projectId, poNumber } },
     });
+    
+    console.log(`[PO CHECK] PO found:`, po ? 'YES' : 'NO');
 
     if (!po) {
       return res.status(200).json({ exists: false, poNumber });
@@ -594,6 +602,11 @@ app.post('/api/projects/:id/sku-image', upload.single('file'), async (req, res) 
 // ====================================================================
 app.get('/api/project-skus', async (req, res) => {
   try {
+    // Disable caching to ensure fresh data
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    
     const projectId = Number(req.query.projectId);
     if (!projectId) return res.status(400).json({ error: 'projectId required' });
 

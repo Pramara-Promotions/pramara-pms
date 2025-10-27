@@ -54,6 +54,8 @@ function fetchJson(url: string, init?: RequestInit) {
 export default function SkusTab() {
   const project = useProjectContext();
   const { showToastOk, showToastErr } = useToast();
+  console.log('🔍 SkusTab: project from context =', project);
+  console.log('🔍 SkusTab: project?.id =', project?.id);
   if (!project) return <div className="text-sm text-gray-500">Loading project…</div>;
 
   /****************************************************
@@ -152,6 +154,7 @@ function cancelDelete() {
           }),
         ]);
         if (!alive) return;
+        console.log('[SKUs] Fetched rows:', rows);
         setSkus(Array.isArray(rows) ? rows : []);
         // Sanitize layout keys (trim, dedupe, drop empties)
         const rawKeys: string[] = Array.isArray(layout?.keys) ? layout.keys : [];
@@ -214,8 +217,13 @@ function cancelDelete() {
       try {
         const js = await fetchJson(
           `${API_BASE}/api/projects/${project.id}/po/${encodeURIComponent(val)}`,
-          { credentials: "include" }
+          { 
+            credentials: "include",
+            cache: "no-store",
+            headers: { "Cache-Control": "no-cache" }
+          }
         );
+        console.log(`[PO CHECK RESPONSE] po="${val}", exists=${js?.exists}, url=${js?.url}`);
         setPoProbe({ checking: false, exists: !!js?.exists, url: js?.url || null });
       } catch {
         setPoProbe({ checking: false, exists: null, url: null });
@@ -291,14 +299,40 @@ function cancelDelete() {
    * [LMK-14] UPLOAD — PO PDF (PRESIGN + CONFIRM; LEGACY FALLBACK)
    ****************************************************/
   async function uploadPoIfNeeded(poNumber: string, poPdfFile: File | null): Promise<{ key?: string; fields?: any[] } | void> {
-    if (poProbe.exists === true) return; // already known exists
     if (!poNumber) throw new Error("PO number is required.");
-    if (poProbe.exists === false && !poPdfFile) {
+    
+    // CRITICAL: Always verify PO existence with fresh check, don't trust cached state
+    let poExists = false;
+    try {
+      const js = await fetchJson(
+        `${API_BASE}/api/projects/${project.id}/po/${encodeURIComponent(poNumber)}`,
+        { 
+          credentials: "include",
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" }
+        }
+      );
+      console.log('[PO CHECK] Existence check result:', js);
+      poExists = !!js?.exists;
+      if (poExists) {
+        setPoProbe({ checking: false, exists: true, url: js?.url || null });
+        setLastPo(poNumber); // ensure lastPo is updated if PO exists
+        console.log(`✅ PO "${poNumber}" already exists in database`);
+        return; // PO exists, no need to upload
+      }
+    } catch (err) {
+      console.warn(`⚠️ Could not verify PO existence, will attempt upload`, err);
+    }
+    
+    // PO doesn't exist - must upload
+    if (!poPdfFile) {
       throw new Error("Upload the PO PDF to register this PO number.");
     }
-    if (!poPdfFile) return;
+
+    console.log(`📤 Uploading new PO: ${poNumber}`);
 
     try {
+      console.log(`📤 Step 1: Requesting presigned URL...`);
       const presign = await fetchJson(
         `${API_BASE}/api/projects/${project.id}/po/presign`,
         {
@@ -314,19 +348,29 @@ function cancelDelete() {
         }
       );
 
+      console.log(`✅ Presign received:`, presign);
+
       if (presign?.putUrl && presign?.key) {
-        await fetch(presign.putUrl, {
+        console.log(`📤 Step 2: Uploading PO file to storage...`);
+        const uploadRes = await fetch(presign.putUrl, {
           method: "PUT",
           headers: { "Content-Type": poPdfFile.type || "application/pdf" },
           body: poPdfFile,
         });
 
+        if (!uploadRes.ok) {
+          throw new Error(`Storage upload failed: ${uploadRes.status} ${uploadRes.statusText}`);
+        }
+
+        console.log(`✅ PO file uploaded to storage, Step 3: Confirming in database...`);
         await fetchJson(`${API_BASE}/api/projects/${project.id}/po/confirm`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ poNumber, key: presign.key }),
         });
+
+        console.log(`✅ PO "${poNumber}" confirmed in database`);
 
   setLastPo(poNumber);
         setPoProbe({ checking: false, exists: true, url: null });
@@ -370,9 +414,13 @@ function cancelDelete() {
         }
         return { key: presign.key };
       }
-    } catch { /* fall back */ }
+    } catch (uploadErr: any) {
+      console.error('❌ PO upload/confirm failed:', uploadErr);
+      throw new Error(`Failed to upload PO: ${uploadErr?.message || 'Unknown error'}`);
+    }
 
-    // Legacy multipart
+    // Legacy multipart (fallback - should not be reached with new flow)
+    console.log(`⚠️ Using legacy PO upload (this should not happen with new flow)`);
     const fd = new FormData();
     fd.append("poNumber", poNumber);
     fd.append("file", poPdfFile, poPdfFile.name);
@@ -385,6 +433,8 @@ function cancelDelete() {
       const txt = await legacy.text();
       throw new Error(txt || "PO upload failed");
     }
+    console.log(`✅ [LEGACY] PO uploaded successfully`);
+    
     // Best-effort DI disabled by default
     if (DOC_INTELLIGENCE_ENABLED) {
       try {
@@ -624,6 +674,18 @@ function cancelDelete() {
     return null;
   }
 
+  async function refreshSkusSilent() {
+    try {
+      const rows = await fetchJson(
+        `${API_BASE}/api/project-skus?projectId=${project.id}`,
+        { credentials: "include" }
+      );
+      setSkus(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      console.warn("Refresh SKUs failed:", err);
+    }
+  }
+
   async function submitCreateOrEdit() {
     if (!open) return;
     setModalError(null);
@@ -639,8 +701,20 @@ function cancelDelete() {
       setSaving(true);
       const po = String(form.poNumber ?? "").trim();
 
+      console.log(`[SUBMIT] mode=${mode}, po="${po}", poPdfFile=`, form.poPdfFile);
+
+      // CRITICAL: Upload and confirm PO BEFORE creating SKU (server now enforces PO existence)
       if (mode === "create" || poChanged) {
-        await uploadPoIfNeeded(po, form.poPdfFile);
+        try {
+          await uploadPoIfNeeded(po, form.poPdfFile);
+          // Add small delay to ensure DB transaction completes
+          await new Promise((r) => setTimeout(r, 100));
+        } catch (uploadErr: any) {
+          console.error('[SUBMIT] PO upload failed:', uploadErr);
+          setModalError(uploadErr?.message || 'PO upload failed');
+          setSaving(false);
+          return; // Stop here, don't try to create SKU
+        }
       }
 
       const imageUrl = await uploadImageIfAny(); // preview only
@@ -662,6 +736,8 @@ function cancelDelete() {
         attributesJson: JSON.stringify(cleanAttrs),
       };
 
+      console.log(`📤 Creating SKU with payload:`, payload);
+
       if (mode === "create") {
         const res = await fetch(`${API_BASE}/api/project-skus`, {
           method: "POST",
@@ -671,14 +747,17 @@ function cancelDelete() {
         });
         if (!res.ok) {
           const js = await res.json().catch(() => ({}));
-          if (js?.needsPO) { setModalError("PO not found. Please upload the PO PDF."); return; }
+          if (js?.needsPO) { 
+            setModalError("PO not found in database. The upload may have failed—please try again or contact support."); 
+            return; 
+          }
           throw new Error(js?.error || "Create SKU failed");
         }
         const sku = await res.json();
-        setSkus((rows) => [...rows, sku]);
+        await refreshSkusSilent();
         setLastPo(po);
         setOpen(false);
-        showToastOk(`SKU “${sku.code}” created.`);
+        showToastOk(`SKU “${sku?.code || form.code.trim()}” created.`);
       } else {
         const res = await fetch(`${API_BASE}/api/project-skus/${editingSku!.id}`, {
           method: "PUT",
@@ -688,14 +767,17 @@ function cancelDelete() {
         });
         if (!res.ok) {
           const js = await res.json().catch(() => ({}));
-          if (js?.needsPO) { setModalError("PO not found. Please upload the PO PDF."); return; }
+          if (js?.needsPO) { 
+            setModalError("PO not found in database. The upload may have failed—please try again."); 
+            return; 
+          }
           throw new Error(js?.error || "Update SKU failed");
         }
         const sku = await res.json();
-        setSkus((rows) => rows.map((r) => (r.id === sku.id ? sku : r)));
+        await refreshSkusSilent();
         setLastPo(po);
         setOpen(false);
-        showToastOk(`SKU “${sku.code}” updated.`);
+        showToastOk(`SKU “${sku?.code || form.code.trim()}” updated.`);
       }
     } catch (e: any) {
       setModalError(e?.message || "Save failed");
@@ -1130,7 +1212,7 @@ async function performDeleteSku() {
                     className="px-4 py-3 text-sm text-gray-500"
                     colSpan={6 + attrColumns.length + 2}
                   >
-                    No SKUs.
+                    —
                   </td>
                 </tr>
               ) : (

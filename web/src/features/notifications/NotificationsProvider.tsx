@@ -167,7 +167,10 @@ export default function NotificationsProvider({ children }: { children: React.Re
 }
 
 function getSocketUrl(): string {
-  const host = window.location.host;
-  if (host.includes(':5173')) return 'http://localhost:4000';
-  return `${window.location.protocol}//${host}`;
+  // Prefer configured API base in dev/prod
+  const env: any = (import.meta as any)?.env || {};
+  const base = (env.VITE_API_BASE || env.VITE_API_URL || '').toString().replace(/\/$/, '');
+  if (base) return base; // e.g., http://localhost:4000 or https://api.example.com[/api]
+  // Fallback: same origin
+  return `${window.location.protocol}//${window.location.host}`;
 }

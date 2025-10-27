@@ -15,6 +15,32 @@ type Project = {
 // Resolve API base; falls back to localhost for direct dev calls
 // http helper resolves base and credentials
 
+function normalizeProjectPayload(raw: any, fallbackId?: number): Project | null {
+  if (Array.isArray(raw)) {
+    for (const candidate of raw) {
+      const normalized = normalizeProjectPayload(candidate, fallbackId);
+      if (normalized) return normalized;
+    }
+    return null;
+  }
+  if (!raw || typeof raw !== "object") return null;
+
+  let projectData: Record<string, any> = raw;
+  if ("data" in projectData && projectData.data && typeof projectData.data === "object") {
+    projectData = projectData.data as Record<string, any>;
+  }
+  if ("project" in projectData && projectData.project && typeof projectData.project === "object") {
+    const { project: innerProject, ...rest } = projectData as Record<string, any>;
+    projectData = { ...rest, ...innerProject };
+  }
+
+  const idCandidate = projectData.id ?? projectData.projectId ?? fallbackId;
+  const id = Number(idCandidate);
+  if (!Number.isFinite(id)) return null;
+
+  return { ...projectData, id } as Project;
+}
+
 function normalizePath(path: string) {
   if (path.length > 1 && path.endsWith("/")) {
     return path.slice(0, -1);
@@ -72,8 +98,16 @@ export default function ProjectShell() {
         const text = await res.text();
         if (!res.ok) throw new Error(`Load failed (${res.status})`);
         if (text.trim().startsWith("<")) throw new Error("Got HTML instead of JSON (check API URL / proxy).");
-        const data = JSON.parse(text) as Project;
-        if (alive) setProject(data);
+        const parsed = JSON.parse(text || "{}");
+        if (parsed?.error) throw new Error(parsed.error);
+        const normalized = normalizeProjectPayload(parsed, projectId);
+        console.log('dY"? ProjectShell: Fetched project data:', parsed);
+        console.log('dY"? ProjectShell: normalized project id =', normalized?.id);
+        if (!normalized) throw new Error("Project payload missing id");
+        if (alive) {
+          setProject(normalized);
+          setError(null);
+        }
       } catch (e: any) {
         if (alive) setError(e?.message || "Failed to load project");
       } finally {

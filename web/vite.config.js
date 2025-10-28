@@ -11,32 +11,25 @@ export default defineConfig({
     },
   },
   server: {
+    port: 5173,
     proxy: {
-      "/api": {
+      "^/api/.*": {
         target: "http://localhost:4000",
         changeOrigin: true,
         secure: false,
         ws: true,
-        rewrite: (path) => path,  // Don't rewrite path
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
-            console.log('[proxy] error:', err);
+            console.log('[proxy] ERROR:', err.message);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('[proxy] Request:', req.method, req.url);
-            // Explicitly forward cookies
+            console.log('[proxy] >>> Forwarding:', req.method, req.url, 'to http://localhost:4000');
             if (req.headers.cookie) {
-              console.log('[proxy] Forwarding cookies:', req.headers.cookie);
               proxyReq.setHeader('Cookie', req.headers.cookie);
-            } else {
-              console.log('[proxy] NO COOKIES in request');
             }
           });
           proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('[proxy] Response:', proxyRes.statusCode, 'for', req.url);
-            if (proxyRes.headers['set-cookie']) {
-              console.log('[proxy] Backend sent Set-Cookie:', proxyRes.headers['set-cookie']);
-            }
+            console.log('[proxy] <<< Response:', proxyRes.statusCode, 'from', req.method, req.url);
           });
         },
       },

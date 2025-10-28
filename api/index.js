@@ -12,7 +12,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 
-// [LMK: UPLOADS — DISK STORAGE]
+// [LMK: UPLOADS ΓÇö DISK STORAGE]
 const fs = require('fs');
 const multer = require('multer');
 
@@ -164,7 +164,7 @@ app.get('/api/debug', (req, res) => {
 });
 
 app.get('/', (_req, res) => {
-  res.send('✅ API is running');
+  res.send('Γ£à API is running');
 });
 
 // ====================================================================
@@ -244,7 +244,7 @@ app.delete('/api/projects/:id', async (req, res) => {
 });
 
 // ====================================================================
-// [LANDMARK 3] PROJECT SETTINGS — SKU ATTR LAYOUT + LAST PO
+// [LANDMARK 3] PROJECT SETTINGS ΓÇö SKU ATTR LAYOUT + LAST PO
 //   Uses ProjectPref (projectId, skuAttrKeys, lastPo)
 // ====================================================================
 app.get('/api/projects/:id/sku-attribute-layout', async (req, res) => {
@@ -351,20 +351,14 @@ app.get('/api/projects/:id/pos', async (req, res) => {
 });
 
 /**************************************
- * [LANDMARK: PO LOOKUP – GET /po/:poNumber]
+ * [LANDMARK: PO LOOKUP ΓÇô GET /po/:poNumber]
  * Purpose: Allow UI to check if a PO already exists
  * Returns 200 always with {exists:boolean, poNumber, url?}
  **************************************/
 app.get('/api/projects/:id/po/:poNumber', async (req, res) => {
   try {
-    // Disable caching to ensure fresh PO status
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-    
     const projectId = Number(req.params.id);
     const poNumber = String(req.params.poNumber || '').trim();
-    console.log(`[PO CHECK] projectId=${projectId}, poNumber="${poNumber}"`);
     if (!projectId || !poNumber) {
       return res.status(200).json({ exists: false, poNumber });
     }
@@ -372,8 +366,6 @@ app.get('/api/projects/:id/po/:poNumber', async (req, res) => {
     const po = await prisma.purchaseOrder.findUnique({
       where: { projectId_poNumber: { projectId, poNumber } },
     });
-    
-    console.log(`[PO CHECK] PO found:`, po ? 'YES' : 'NO');
 
     if (!po) {
       return res.status(200).json({ exists: false, poNumber });
@@ -429,7 +421,7 @@ app.post('/api/projects/:id/po', upload.single('file'), async (req, res) => {
   }
 });
 
-// [LMK: LANDMARK 4 — DELETE PO FILE]
+// [LMK: LANDMARK 4 ΓÇö DELETE PO FILE]
 app.delete('/api/projects/:id/po/:poNumber', async (req, res) => {
   try {
     const projectId = Number(req.params.id);
@@ -598,15 +590,10 @@ app.post('/api/projects/:id/sku-image', upload.single('file'), async (req, res) 
 // ====================================================================
 // [LANDMARK 6] PROJECT SKUs (CRUD)
 //   Enforces: If poNumber is provided, PurchaseOrder must exist.
-//   NOTE: ProjectSku has no imageUrl field in your schema — not stored.
+//   NOTE: ProjectSku has no imageUrl field in your schema ΓÇö not stored.
 // ====================================================================
 app.get('/api/project-skus', async (req, res) => {
   try {
-    // Disable caching to ensure fresh data
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-    
     const projectId = Number(req.query.projectId);
     if (!projectId) return res.status(400).json({ error: 'projectId required' });
 
@@ -614,9 +601,6 @@ app.get('/api/project-skus', async (req, res) => {
       where: { projectId },
       orderBy: [{ poNumber: 'asc' }, { id: 'asc' }],
     });
-    try {
-      console.log(`[sku:list] projectId=${projectId} -> ${rows.length} rows`);
-    } catch {}
     res.json(rows);
   } catch (e) {
     console.error('sku:list', e);
@@ -711,7 +695,7 @@ app.delete('/api/project-skus/:id', async (req, res) => {
   }
 });
 
-// [LMK: LANDMARK 6 — HELPERS]
+// [LMK: LANDMARK 6 ΓÇö HELPERS]
 function ensurePoExistsOr400({ projectId, poNumber }) {
   return prisma.purchaseOrder.findUnique({
     where: { projectId_poNumber: { projectId, poNumber: String(poNumber) } },
@@ -900,7 +884,7 @@ app.post('/api/projects/:id/qc', async (req, res) => {
       const pRules = await prisma.alertRule.findMany({ where: { projectId, key: 'Pantone.mismatch', enabled: true } });
       for (const rule of pRules) {
         await prisma.alert.create({
-          data: { projectId, level: rule.level, message: `Pantone mismatch — expected ${expected}.` },
+          data: { projectId, level: rule.level, message: `Pantone mismatch ΓÇö expected ${expected}.` },
         });
       }
     }
@@ -1172,7 +1156,7 @@ app.put('/api/changes/:changeId/approve', async (req, res) => {
       data: {
         projectId: existing.projectId,
         level: approvalStatus === 'REJECTED' ? 'RED' : 'GREEN',
-        message: `Change ${approvalStatus}: ${existing.type}${approvalProof ? ` — proof: ${approvalProof}` : ''}`,
+        message: `Change ${approvalStatus}: ${existing.type}${approvalProof ? ` ΓÇö proof: ${approvalProof}` : ''}`,
       },
     });
 
@@ -1417,7 +1401,7 @@ app.post('/api/projects/:id/variances', async (req, res) => {
       data: {
         projectId,
         level: 'RED',
-        message: `Variance: ${item.category}/${item.field} — expected "${item.expected}", got "${item.actual}".`,
+        message: `Variance: ${item.category}/${item.field} ΓÇö expected "${item.expected}", got "${item.actual}".`,
       },
     });
 
@@ -1574,7 +1558,7 @@ if (require.main === module) {
 
   // Socket.IO authentication and room joining
   io.on('connection', async (socket) => {
-    console.log(`🔌 Client connected: ${socket.id}`);
+    console.log(`≡ƒöî Client connected: ${socket.id}`);
 
     // Try to authenticate from cookie
     try {
@@ -1599,34 +1583,30 @@ if (require.main === module) {
           socket.join(userRoom);
           socket.userId = decoded.sub;
           
-          console.log(`✅ Socket ${socket.id} authenticated as user ${decoded.sub}`);
+          console.log(`Γ£à Socket ${socket.id} authenticated as user ${decoded.sub}`);
           socket.emit('authenticated', { userId: decoded.sub });
         } else {
-          console.log(`⚠️ Socket ${socket.id} connected without auth token`);
+          console.log(`ΓÜá∩╕Å Socket ${socket.id} connected without auth token`);
         }
       }
     } catch (error) {
-      console.error('❌ Socket authentication failed:', error.message);
+      console.error('Γ¥î Socket authentication failed:', error.message);
     }
 
     socket.on('disconnect', () => {
-      console.log(`🔌 Client disconnected: ${socket.id}`);
+      console.log(`≡ƒöî Client disconnected: ${socket.id}`);
     });
   });
 
   // Start Email Inbound Service (IMAP polling)
-  if (process.env.ENABLE_INBOUND_EMAIL !== 'false') {
-    try {
-      const emailInboundService = require('./lib/emailInboundService');
-      if (emailInboundService && emailInboundService.startPolling) {
-        emailInboundService.startPolling(5);
-        console.log('✅ Email inbound service started (polling every 5 minutes)');
-      }
-    } catch (err) {
-      console.error('❌ Failed to start email inbound service:', err.message);
+  try {
+    const emailInboundService = require('./lib/emailInboundService');
+    if (emailInboundService && emailInboundService.startPolling) {
+      emailInboundService.startPolling(5);
+      console.log('Γ£à Email inbound service started (polling every 5 minutes)');
     }
-  } else {
-    console.log('📧 Email inbound service disabled (ENABLE_INBOUND_EMAIL=false)');
+  } catch (err) {
+    console.error('Γ¥î Failed to start email inbound service:', err.message);
   }
 
   // Start Email Digest Service (cron jobs)
@@ -1637,35 +1617,13 @@ if (require.main === module) {
       // Don't log here since the service already logs
     }
   } catch (err) {
-    console.error('❌ Failed to start email digest service:', err.message);
+    console.error('Γ¥î Failed to start email digest service:', err.message);
   }
 
   server.listen(PORT, () => {
-    console.log(`🚀 API running on http://localhost:${PORT}`);
-    console.log(`🔌 WebSocket server ready for real-time notifications`);
+    console.log(`≡ƒÜÇ API running on http://localhost:${PORT}`);
+    console.log(`≡ƒöî WebSocket server ready for real-time notifications`);
   });
-
-  // Development debug endpoint: surface safe DB info
-  if (process.env.NODE_ENV !== 'production') {
-    try {
-      const url = new URL(process.env.DATABASE_URL || '');
-      const safeDbInfo = {
-        host: url.host || 'unknown',
-        database: (url.pathname || '').replace('/', '') || 'unknown',
-        vendor: url.protocol ? url.protocol.replace(':','') : 'unknown',
-      };
-      app.get('/api/debug/env', (req, res) => {
-        res.json({
-          nodeEnv: process.env.NODE_ENV,
-          db: safeDbInfo,
-          inboundEmailEnabled: process.env.ENABLE_INBOUND_EMAIL !== 'false',
-        });
-      });
-      console.log(`🩺 DB -> ${safeDbInfo.vendor}://${safeDbInfo.host}/${safeDbInfo.database}`);
-    } catch (e) {
-      console.log('🩺 DB info unavailable');
-    }
-  }
 }
 
 module.exports = app;

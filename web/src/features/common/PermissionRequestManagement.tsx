@@ -1,5 +1,5 @@
 // web/src/features/common/PermissionRequestManagement.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from './AuthProvider';
 import PermissionGate from '../../components/auth/PermissionGate';
 import { http } from '../../lib/http';
@@ -80,9 +80,74 @@ export default function PermissionRequestManagement() {
       const res = await http('/api/permissions');
       if (!res.ok) throw new Error('Failed to fetch permissions');
       const data = await res.json();
-      setAllPermissions(data);
+
+      // Normalize various backend shapes into a flat Permission[]
+      // Possible shapes:
+      // - { all: Permission[], byModule: Record<string,{code,label}[]> }
+      // - Permission[]
+      // - { permissions: Permission[] }
+
+      const guessModule = (code: string) => {
+        if (code.startsWith('USER_')) return 'Users';
+        if (code.startsWith('ROLE_')) return 'Roles';
+        if (code.startsWith('PROJECT_')) return 'Projects';
+        if (code.startsWith('DOC_')) return 'Documents';
+        if (code.startsWith('QC_')) return 'QC';
+        if (code.startsWith('ALERT_') || code.startsWith('RULE_')) return 'Alerts';
+        if (code.startsWith('COMPLIANCE_')) return 'Compliance';
+        if (code.startsWith('CHANGE_')) return 'Changes';
+        if (code.startsWith('INVENTORY_')) return 'Inventory';
+        if (code.startsWith('VARIANCE_')) return 'Variance';
+        if (code.startsWith('SKU_')) return 'SKU';
+        if (code.startsWith('AUDIT_') || code.startsWith('SYSTEM_')) return 'Admin';
+        return 'Other';
+      };
+
+      let perms: Permission[] = [];
+
+      if (data && Array.isArray(data.all)) {
+        perms = data.all.map((p: any) => ({
+          code: p.code,
+          name: p.label || p.name || p.code,
+          description: p.description ?? null,
+          module: p.module || guessModule(String(p.code || '')),
+        }));
+      } else if (data && data.byModule && typeof data.byModule === 'object') {
+        // Flatten byModule map
+        const flat: Permission[] = [];
+        for (const [module, arr] of Object.entries<any>(data.byModule)) {
+          if (Array.isArray(arr)) {
+            for (const p of arr) {
+              flat.push({
+                code: p.code,
+                name: p.label || p.name || p.code,
+                description: p.description ?? null,
+                module,
+              });
+            }
+          }
+        }
+        perms = flat;
+      } else if (Array.isArray(data)) {
+        perms = data.map((p: any) => ({
+          code: p.code,
+          name: p.label || p.name || p.code,
+          description: p.description ?? null,
+          module: p.module || guessModule(String(p.code || '')),
+        }));
+      } else if (data && Array.isArray(data.permissions)) {
+        perms = data.permissions.map((p: any) => ({
+          code: p.code,
+          name: p.label || p.name || p.code,
+          description: p.description ?? null,
+          module: p.module || guessModule(String(p.code || '')),
+        }));
+      }
+
+      setAllPermissions(perms);
     } catch (err: any) {
       console.error('Error fetching permissions:', err);
+      setAllPermissions([]);
     }
   };
 
@@ -179,12 +244,17 @@ export default function PermissionRequestManagement() {
     );
   };
 
-  // Group permissions by module
-  const permissionsByModule = allPermissions.reduce((acc, perm) => {
-    if (!acc[perm.module]) acc[perm.module] = [];
-    acc[perm.module].push(perm);
+  // Group permissions by module (safe even if empty)
+  const permissionsByModule = useMemo(() => {
+    const acc: Record<string, Permission[]> = {};
+    const arr = Array.isArray(allPermissions) ? allPermissions : [];
+    for (const perm of arr) {
+      const key = perm.module || 'Other';
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(perm);
+    }
     return acc;
-  }, {} as Record<string, Permission[]>);
+  }, [allPermissions]);
 
   if (loading && requests.length === 0) {
     return (

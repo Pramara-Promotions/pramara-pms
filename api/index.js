@@ -36,6 +36,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 const { getPresignedPutUrl, getPresignedGetUrl } = require('./lib/storage');
+const { verifyTransport, sendEmail } = require('./lib/emailService');
 
 const projectsRouter = require('./routes/projects');
 let uploadRouter = null;
@@ -50,7 +51,28 @@ const { temporaryPermissionsRouter } = require('./routes/temporaryPermissions');
 const { permissionRequestsRouter } = require('./routes/permissionRequests');
 const { notificationsRouter } = require('./routes/notifications');
 const { invitationsRouter } = require('./routes/invitations');
+const { emailRouter } = require('./routes/email');
+const emailDigestRouter = require('./routes/email-digest');
+const analyticsRouter = require('./routes/analytics');
 const meRouter = require('./routes/me');
+const preProductionRouter = require('./routes/pre-production');
+const complianceRouter = require('./routes/compliance');
+const projectPoliciesRouter = require('./routes/project-policies');
+const processFlowsRouter = require('./routes/process-flows');
+const shiftEntriesRouter = require('./routes/shift-entries');
+const wipLedgerRouter = require('./routes/wip-ledger');
+const stationsRouter = require('./routes/stations');
+const tasksRouter = require('./routes/tasks');
+const qcSubmissionsRouter = require('./routes/qc-submissions');
+const productionEntriesRouter = require('./routes/production-entries');
+const batchesRouter = require('./routes/batches');
+const workflowStagesRouter = require('./routes/workflow-stages');
+const processConfigRouter = require('./routes/process-config');
+const workersRouter = require('./routes/workers');
+const dailyPlanningRouter = require('./routes/daily-planning');
+const approvalRequestsRouter = require('./routes/approval-requests');
+const mrpRouter = require('./routes/mrp');
+const materialsRouter = require('./routes/materials');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -75,6 +97,51 @@ app.use(express.json({ limit: process.env.MAX_UPLOAD_BYTES || '20mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.resolve(__dirname, 'public', 'uploads')));
 
+// ====================================================================
+// Fallback audit logger: capture all write operations (POST/PUT/PATCH/DELETE)
+// Even if specific routes forget to call logAudit, this will record an entry.
+// Note: This runs before route handlers; actorId may be null if auth runs later.
+// ====================================================================
+app.use((req, res, next) => {
+  const method = req.method.toUpperCase();
+  const isWrite = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+  const isAuditRoute = req.path.startsWith('/api/audit-logs');
+  if (!isWrite || isAuditRoute) return next();
+
+  const startedAt = Date.now();
+  const pathStr = req.originalUrl || req.url || req.path;
+  const userAgent = req.headers['user-agent'];
+
+  res.once('finish', async () => {
+    try {
+      const durationMs = Date.now() - startedAt;
+      const status = res.statusCode;
+      const result = status >= 200 && status < 300 ? 'SUCCESS' : 'FAILURE';
+      const actorId = req.auth?.user?.id || null;
+      if (!actorId) return; // Skip audit if no authenticated user
+
+      await prisma.auditLog.create({
+        data: {
+          actorId,
+          action: `${method} ${pathStr}`,
+          entity: 'HTTP',
+          entityId: null,
+          meta: { status, durationMs },
+          ip: req.ip || null,
+          userAgent: userAgent || null,
+          deviceId: req.deviceId || null,
+          result,
+          flagged: false,
+        }
+      });
+    } catch (e) {
+      console.error('[audit-fallback] failed to write audit log:', e?.message || e);
+    }
+  });
+
+  next();
+});
+
 // Register routers for /api/* endpoints
 app.use('/api', projectsRouter);
 if (uploadRouter) app.use('/api', uploadRouter);
@@ -88,7 +155,28 @@ app.use('/api', temporaryPermissionsRouter);
 app.use('/api', permissionRequestsRouter);
 app.use('/api', notificationsRouter);
 app.use('/api', invitationsRouter);
+app.use('/api', emailRouter);
+app.use('/api/email-digest', emailDigestRouter);
+app.use('/api/analytics', analyticsRouter);
 app.use('/api', meRouter);
+app.use('/api/pre-production', preProductionRouter);
+app.use('/api/compliance', complianceRouter);
+app.use('/api/project-policies', projectPoliciesRouter);
+app.use('/api/process-flows', processFlowsRouter);
+app.use('/api/shift-entries', shiftEntriesRouter);
+app.use('/api/wip-ledger', wipLedgerRouter);
+app.use('/api/stations', stationsRouter);
+app.use('/api/tasks', tasksRouter);
+app.use('/api/qc-submissions', qcSubmissionsRouter);
+app.use('/api/production-entries', productionEntriesRouter);
+app.use('/api/batches', batchesRouter);
+app.use('/api/workflow', workflowStagesRouter);
+app.use('/api/process-config', processConfigRouter);
+app.use('/api/workers', workersRouter);
+app.use('/api/daily-plans', dailyPlanningRouter);
+app.use('/api/approvals', approvalRequestsRouter);
+app.use('/api/mrp', mrpRouter);
+app.use('/api/materials', materialsRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

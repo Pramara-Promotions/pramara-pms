@@ -13,7 +13,6 @@ export default function Login() {
 
   const [email, setEmail] = useState('admin@pramara.local');
   const [password, setPassword] = useState('ChangeMe@123');
-  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -25,15 +24,36 @@ export default function Login() {
       const res = await http('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, code: code || undefined }),
+        body: JSON.stringify({ email, password }),
       });
       if (!res.ok) {
         const t = await res.text();
         throw new Error(t || `Login failed (${res.status})`);
       }
+      
+      const loginData = await res.json();
+      
+      // Check if MFA is required
+      if (loginData.requireMfa) {
+        nav({ 
+          to: '/auth/mfa-verify', 
+          search: { 
+            tempToken: loginData.tempToken,
+            email: loginData.email 
+          }
+        });
+        return;
+      }
+      
+      // Check if user must change password
+      if (loginData.mustChangePassword) {
+        nav({ to: '/change-password', replace: true });
+        return;
+      }
+      
       await refresh();
-  const from = (routerState.location.state as any)?.from?.pathname || '/';
-  nav({ to: from, replace: true });
+      const from = (routerState.location.state as any)?.from?.pathname || '/';
+      nav({ to: from, replace: true });
     } catch (e: any) {
       setErr(e?.message || 'Login failed');
     } finally {
@@ -80,17 +100,6 @@ export default function Login() {
               onChange={(e) => setPassword(e.target.value)}
               type='password'
               autoComplete='current-password'
-            />
-          </div>
-
-          <div>
-            <label className='mb-1 block text-sm font-medium text-slate-600'>Authenticator code (optional)</label>
-            <input
-              className='w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200'
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              inputMode='numeric'
-              autoComplete='one-time-code'
             />
           </div>
 

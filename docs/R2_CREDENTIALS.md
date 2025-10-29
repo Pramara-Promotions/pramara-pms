@@ -16,7 +16,7 @@
 
 ## S3 Credentials (for .env file)
 ```env
-S3_ACCESS_KEY_ID="e42f2d95dd853b7737416939a3a2edcf"
+S3_ACCESS_KEY_ID="c42f2d95dd853b7737416939a3a2edcf"
 S3_SECRET_ACCESS_KEY="5f0c2adf2c1f3c50201568fb409580d47e72507c56a533b343dcff33e9a81210"
 S3_ENDPOINT="https://2566e6fe84a59272502bdae9e2ceff41.r2.cloudflarestorage.com"
 S3_BUCKET="pramara-dev"

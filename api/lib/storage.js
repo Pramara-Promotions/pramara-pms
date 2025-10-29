@@ -35,6 +35,8 @@ if (USE_S3) {
       accessKeyId: process.env.S3_ACCESS_KEY_ID,
       secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
     },
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
 } else {
   // MinIO (local dev)
@@ -49,6 +51,8 @@ if (USE_S3) {
       accessKeyId: process.env.MINIO_ACCESS_KEY,
       secretAccessKey: process.env.MINIO_SECRET_KEY,
     },
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
 }
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 20 * 1024 * 1024); // 20MB

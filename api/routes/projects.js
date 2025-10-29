@@ -59,6 +59,20 @@ router.post('/projects', authGuard, permissionGuard('PROJECT_CREATE'), async (re
         pantoneCode: pantoneCode || null,
       },
     });
+    // Audit log
+    try {
+      const { logAudit } = require('../middleware/auditLogger');
+      await logAudit({
+        actorId: req.user?.id || null,
+        action: 'PROJECT_CREATE',
+        entity: 'PROJECT',
+        entityId: created.id,
+        changes: { after: created },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    } catch (e) { console.error('Audit log failed:', e); }
     console.log('POST /projects created:', created);
     res.json(created);
   } catch (e) {
@@ -71,6 +85,7 @@ router.put('/projects/:id', authGuard, permissionGuard('PROJECT_EDIT'), async (r
   try {
     const id = toInt(req.params.id);
     const { code, name, sku, quantity, cutoffDate, pantoneCode } = req.body || {};
+    const before = await prisma.project.findUnique({ where: { id } });
     const updated = await prisma.project.update({
       where: { id },
       data: {
@@ -82,6 +97,20 @@ router.put('/projects/:id', authGuard, permissionGuard('PROJECT_EDIT'), async (r
         ...(pantoneCode !== undefined ? { pantoneCode: pantoneCode || null } : {}),
       },
     });
+    // Audit log
+    try {
+      const { logAudit } = require('../middleware/auditLogger');
+      await logAudit({
+        actorId: req.user?.id || null,
+        action: 'PROJECT_EDIT',
+        entity: 'PROJECT',
+        entityId: updated.id,
+        changes: { before, after: updated },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    } catch (e) { console.error('Audit log failed:', e); }
     res.json(updated);
   } catch (e) {
     console.error('PUT /projects/:id failed:', e);
@@ -103,7 +132,22 @@ router.delete('/projects/:id', authGuard, permissionGuard('PROJECT_DELETE'), asy
     try { if (hasModel('inventoryNeed')) await prisma.inventoryNeed.deleteMany({ where: { projectId: id } }); } catch {}
     try { if (hasModel('changeLog')) await prisma.changeLog.deleteMany({ where: { projectId: id } }); } catch {}
 
+    const before = await prisma.project.findUnique({ where: { id } });
     const out = await prisma.project.delete({ where: { id } });
+    // Audit log
+    try {
+      const { logAudit } = require('../middleware/auditLogger');
+      await logAudit({
+        actorId: req.user?.id || null,
+        action: 'PROJECT_DELETE',
+        entity: 'PROJECT',
+        entityId: out.id,
+        changes: { before },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    } catch (e) { console.error('Audit log failed:', e); }
     res.json({ ok: true, project: out });
   } catch (e) {
     console.error('DELETE /projects/:id failed:', e);
@@ -519,7 +563,8 @@ router.get('/projects/:id/skus', authGuard, async (req, res) => {
     const projectId = Number(req.params.id);
     const rows = await prisma.projectSku.findMany({
       where: { projectId },
-      orderBy: { createdAt: 'desc' },
+      // ProjectSku model doesn't have createdAt; sort by id desc for recency
+      orderBy: { id: 'desc' },
     });
     res.json(rows);
   } catch (e) {

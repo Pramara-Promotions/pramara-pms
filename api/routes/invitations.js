@@ -24,7 +24,23 @@ router.get('/invite/:token', async (req, res) => {
         id: true,
         email: true,
         name: true,
-        status: true
+        status: true,
+        createdById: true,
+        User: {
+          select: {
+            name: true,
+            email: true
+          }
+        },
+        roles: {
+          select: {
+            role: {
+              select: {
+                name: true
+              }
+            }
+          }
+        }
       }
     });
     
@@ -35,7 +51,9 @@ router.get('/invite/:token', async (req, res) => {
     res.json({ 
       valid: true,
       email: user.email,
-      name: user.name
+      name: user.name,
+      inviterName: user.User?.name || user.User?.email || 'Admin',
+      roles: user.roles.map(ur => ur.role.name)
     });
   } catch (error) {
     console.error('Error validating invite:', error);

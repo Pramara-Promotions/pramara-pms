@@ -41,6 +41,7 @@
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "prisma": "^5.18.0"
   },
   "engines": {

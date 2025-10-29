@@ -155,6 +155,20 @@ router.post("/documents", authGuard, permissionGuard('DOC_UPLOAD'), async (req, 
         notificationEmails: notificationEmails || null,
       },
     });
+    // Audit log
+    try {
+      const { logAudit } = require('../middleware/auditLogger');
+      await logAudit({
+        actorId: req.user?.id || null,
+        action: 'DOC_UPLOAD',
+        entity: 'DOCUMENT',
+        entityId: row.id,
+        changes: { after: row },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    } catch (e) { console.error('Audit log failed:', e); }
     res.status(201).json(row);
   } catch (e) {
     console.error("POST /documents failed:", e);
@@ -219,10 +233,25 @@ router.put("/documents/:id", authGuard, permissionGuard('DOC_EDIT'), async (req,
     if (isStandard !== undefined) updateData.isStandard = Boolean(isStandard);
     if (sourceChangeId !== undefined) updateData.sourceChangeId = sourceChangeId;
 
+    const before = await prisma.projectDocument.findUnique({ where: { id } });
     const row = await prisma.projectDocument.update({
       where: { id },
       data: updateData,
     });
+    // Audit log
+    try {
+      const { logAudit } = require('../middleware/auditLogger');
+      await logAudit({
+        actorId: req.user?.id || null,
+        action: 'DOC_EDIT',
+        entity: 'DOCUMENT',
+        entityId: row.id,
+        changes: { before, after: row },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    } catch (e) { console.error('Audit log failed:', e); }
     res.json(row);
   } catch (e) {
     console.error("PUT /documents/:id failed:", e);
@@ -257,7 +286,22 @@ router.delete("/documents/:id", authGuard, permissionGuard('DOC_DELETE'), async 
         }
       }
     }
+    const before = await prisma.projectDocument.findUnique({ where: { id } });
     await prisma.projectDocument.delete({ where: { id } });
+    // Audit log
+    try {
+      const { logAudit } = require('../middleware/auditLogger');
+      await logAudit({
+        actorId: req.user?.id || null,
+        action: 'DOC_DELETE',
+        entity: 'DOCUMENT',
+        entityId: before?.id,
+        changes: { before },
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        result: 'SUCCESS'
+      });
+    } catch (e) { console.error('Audit log failed:', e); }
     res.json({ ok: true });
   } catch (e) {
     console.error("DELETE /documents/:id failed:", e);

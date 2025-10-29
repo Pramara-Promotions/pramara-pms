@@ -4,6 +4,51 @@ const { getClientIP } = require('../lib/deviceFingerprint');
 
 const prisma = new PrismaClient();
 
+// ============================================================================
+// AUDIT RETENTION POLICY (IMMUTABLE - Security Requirement)
+// ============================================================================
+const AUDIT_CONFIG = Object.freeze({
+  MINIMUM_RETENTION_DAYS: 15,     // System-wide minimum (immutable)
+  DEFAULT_USER_RETENTION_DAYS: 30, // Default per-user retention
+  MAXIMUM_USER_RETENTION_DAYS: 365, // Maximum per-user retention
+  SUPERADMIN_PERPETUAL: true,      // Super Admin sees all logs forever
+  ALLOW_DELETE: false,             // NEVER allow log deletion
+  ALLOW_UPDATE: false,             // Logs are immutable
+});
+
+// Redaction: scrub sensitive keys from objects before persisting
+const DEFAULT_REDACT_KEYS = [
+  'password', 'passwordHash', 'token', 'inviteToken', 'secret', 'apiKey',
+  'accessKey', 'secretAccessKey', 'authorization', 'auth', 'jwt', 'mfaSecret'
+];
+
+function redact(value, keys = DEFAULT_REDACT_KEYS) {
+  try {
+    if (!value || typeof value !== 'object') return value;
+    const seen = new WeakSet();
+    const walk = (v) => {
+      if (!v || typeof v !== 'object') return v;
+      if (seen.has(v)) return v;
+      seen.add(v);
+      if (Array.isArray(v)) return v.map(walk);
+      const out = {};
+      for (const [k, val] of Object.entries(v)) {
+        if (keys.includes(k)) {
+          out[k] = '[REDACTED]';
+        } else if (typeof val === 'object' && val !== null) {
+          out[k] = walk(val);
+        } else {
+          out[k] = val;
+        }
+      }
+      return out;
+    };
+    return walk(value);
+  } catch {
+    return value;
+  }
+}
+
 // Actions that should be flagged for Super Admin review
 const FLAGGED_ACTIONS = [
   'USER_CREATE_WITH_ADMIN_PERMS',
@@ -43,15 +88,30 @@ async function logAudit({
 }) {
   try {
     const flagged = FLAGGED_ACTIONS.includes(action);
-    
+    // Debug trace: lightweight, avoid dumping large payloads
+    if (process.env.NODE_ENV !== 'production') {
+      try {
+        console.log('[audit] write', {
+          action,
+          entity,
+          entityId,
+          actorId: actorId ? String(actorId) : null,
+          result
+        });
+      } catch {}
+    }
+
+    const safeChanges = redact(changes);
+    const safeMeta = redact(meta);
+
     await prisma.auditLog.create({
       data: {
         actorId,
         action,
         entity,
         entityId,
-        changes,
-        meta,
+        changes: safeChanges,
+        meta: safeMeta,
         ip,
         userAgent,
         deviceId,
@@ -119,9 +179,15 @@ function auditMiddleware(action, entity) {
 }
 
 /**
- * Get audit logs with filtering
+ * Get audit logs with filtering and per-user retention enforcement
+ * @param {Object} options - Query options
+ * @param {string} options.viewerId - User requesting the logs (for retention check)
+ * @param {boolean} options.isSuperAdmin - Whether viewer is Super Admin
+ * @param {string} options.actorId - Filter by actor (null = viewer's own logs unless Super Admin)
  */
 async function getAuditLogs({
+  viewerId = null,
+  isSuperAdmin = false,
   actorId = null,
   action = null,
   entity = null,
@@ -133,15 +199,42 @@ async function getAuditLogs({
 }) {
   const where = {};
   
-  if (actorId) where.actorId = actorId;
+  // RETENTION ENFORCEMENT
+  if (!isSuperAdmin) {
+    // Non-Super Admin: only see their own logs
+    const effectiveActorId = actorId || viewerId;
+    where.actorId = effectiveActorId;
+    
+    // Get user's retention setting
+    const user = await prisma.user.findUnique({
+      where: { id: effectiveActorId },
+      select: { auditRetentionDays: true }
+    });
+    
+    const retentionDays = user?.auditRetentionDays || AUDIT_CONFIG.DEFAULT_USER_RETENTION_DAYS;
+    
+    // Apply retention window: only show logs within retention period
+    const retentionDate = new Date();
+    retentionDate.setDate(retentionDate.getDate() - retentionDays);
+    
+    where.createdAt = {
+      gte: retentionDate,
+      ...(startDate ? { gte: new Date(Math.max(new Date(startDate), retentionDate)) } : {}),
+      ...(endDate ? { lte: new Date(endDate) } : {})
+    };
+  } else {
+    // Super Admin: see all logs perpetually
+    if (actorId) where.actorId = actorId;
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
+    }
+  }
+  
   if (action) where.action = action;
   if (entity) where.entity = entity;
   if (flaggedOnly) where.flagged = true;
-  if (startDate || endDate) {
-    where.createdAt = {};
-    if (startDate) where.createdAt.gte = new Date(startDate);
-    if (endDate) where.createdAt.lte = new Date(endDate);
-  }
   
   const logs = await prisma.auditLog.findMany({
     where,
@@ -168,12 +261,13 @@ async function getAuditLogs({
   
   const total = await prisma.auditLog.count({ where });
   
-  return { logs, total };
+  return { logs, total, config: AUDIT_CONFIG };
 }
 
 module.exports = {
   logAudit,
   auditMiddleware,
   getAuditLogs,
-  FLAGGED_ACTIONS
+  FLAGGED_ACTIONS,
+  AUDIT_CONFIG
 };

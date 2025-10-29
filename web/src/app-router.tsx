@@ -29,10 +29,39 @@ import Login from "./pages/Login";
 import Account from "./pages/Account";
 import NewProject from "./pages/projects/NewProject";
 import NotFound from "./pages/NotFound";
+import ChangePassword from "./pages/ChangePassword";
+import MfaVerify from "./pages/auth/MfaVerify";
+import AcceptInvite from "./pages/auth/AcceptInvite";
+import EmailAnalytics from "./pages/admin/EmailAnalytics";
+import MoldsPage from "./pages/preprod/MoldsPage";
+import TrialsPage from "./pages/preprod/TrialsPage";
+import PackagingPage from "./pages/preprod/PackagingPage";
+import PPSPage from "./pages/preprod/PPSPage";
+import ComplianceDashboard from "./pages/compliance/ComplianceDashboard";
+import CertificationsPage from "./pages/compliance/CertificationsPage";
+import ProjectCompliancePage from "./pages/compliance/ProjectCompliancePage";
+import MaterialCompliancePage from "./pages/compliance/MaterialCompliancePage";
+import LabTestsPage from "./pages/compliance/LabTestsPage";
+import ProjectPoliciesPage from "./pages/preprod/ProjectPoliciesPage";
+import ProcessFlowsPage from "./pages/preprod/ProcessFlowsPage";
+import ShiftEntriesPage from "./pages/execution/ShiftEntriesPage";
+import WIPLedgerPage from "./pages/execution/WIPLedgerPage";
+import StationsPage from "./pages/execution/StationsPage";
+import WorkflowPage from "./pages/execution/WorkflowPage";
+import QCManagementPage from "./pages/execution/QCManagementPage";
+import ProductionEntryPage from "./pages/execution/ProductionEntryPage";
+import BatchTrackingPage from "./pages/execution/BatchTrackingPage";
+import ProcessConfigurationPage from "./pages/ProcessConfigurationPage";
+import WorkflowBuilderPage from "./pages/WorkflowBuilderPage";
+import MaterialDashboardPage from "./pages/MaterialDashboardPage";
+import WorkforceManagementPage from "./pages/WorkforceManagementPage";
+import DailyPlanningPage from "./pages/DailyPlanningPage";
+import ApprovalTrackerPage from "./pages/ApprovalTrackerPage";
+import MRPCalculatorPage from "./pages/MRPCalculatorPage";
 
 /****************************************************
  * [LMK-02] ROOT ROUTE (no context)
- ****************************************************/
+ *****************************************************/
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
   notFoundComponent: NotFound,
@@ -142,10 +171,184 @@ const adminRoute = createRoute({
   component: Admin,
 });
 
+const emailAnalyticsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "admin/email-analytics",
+  component: EmailAnalytics,
+});
+
+const moldsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "preprod/molds",
+  component: MoldsPage,
+});
+
+const trialsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "preprod/trials",
+  component: TrialsPage,
+});
+
+const packagingRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "preprod/packaging",
+  component: PackagingPage,
+});
+
+const ppsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "preprod/pps",
+  component: PPSPage,
+});
+
+const complianceDashboardRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "compliance",
+  component: ComplianceDashboard,
+});
+
+const certificationsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "compliance/certifications",
+  component: CertificationsPage,
+});
+
+const projectComplianceRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "compliance/projects",
+  component: ProjectCompliancePage,
+});
+
+const materialComplianceRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "compliance/materials",
+  component: MaterialCompliancePage,
+});
+
+const labTestsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "compliance/lab-tests",
+  component: LabTestsPage,
+});
+
+const projectPoliciesRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "preprod/policies",
+  component: ProjectPoliciesPage,
+});
+
+const processFlowsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "preprod/process-flows",
+  component: ProcessFlowsPage,
+});
+
+const shiftEntriesRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/shift-entries",
+  component: ShiftEntriesPage,
+});
+
+const wipLedgerRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/wip-ledger",
+  component: WIPLedgerPage,
+});
+
+const stationsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/stations",
+  component: StationsPage,
+});
+
+const workflowRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/workflow",
+  component: WorkflowPage,
+});
+
+const qcManagementRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/qc",
+  component: QCManagementPage,
+});
+
+const productionEntryRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/production",
+  component: ProductionEntryPage,
+});
+
+const batchTrackingRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/batches",
+  component: BatchTrackingPage,
+});
+
+const processConfigurationRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/process-config",
+  component: ProcessConfigurationPage,
+});
+
+const workflowBuilderRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/workflow-builder",
+  component: WorkflowBuilderPage,
+});
+
+const materialDashboardRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/materials",
+  component: MaterialDashboardPage,
+});
+
+const workforceManagementRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/workforce",
+  component: WorkforceManagementPage,
+});
+
+const dailyPlanningRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/daily",
+  component: DailyPlanningPage,
+});
+
+const approvalTrackerRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/approvals",
+  component: ApprovalTrackerPage,
+});
+
+const mrpCalculatorRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/mrp",
+  component: MRPCalculatorPage,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "login",
   component: Login,
+});
+
+const changePasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "change-password",
+  component: ChangePassword,
+});
+
+const mfaVerifyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "auth/mfa-verify",
+  component: MfaVerify,
+});
+
+const acceptInviteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "invite/$token",
+  component: AcceptInvite,
 });
 
 const accountRoute = createRoute({
@@ -173,9 +376,38 @@ const routeTree = rootRoute.addChildren([
     alertsRoute,
     reportsRoute,
     adminRoute,
+    emailAnalyticsRoute,
+    moldsRoute,
+    trialsRoute,
+    packagingRoute,
+    ppsRoute,
+    complianceDashboardRoute,
+    certificationsRoute,
+    projectComplianceRoute,
+    materialComplianceRoute,
+    labTestsRoute,
+    projectPoliciesRoute,
+    processFlowsRoute,
+    shiftEntriesRoute,
+    wipLedgerRoute,
+    stationsRoute,
+    workflowRoute,
+    qcManagementRoute,
+    productionEntryRoute,
+    batchTrackingRoute,
+    processConfigurationRoute,
+    workflowBuilderRoute,
+    materialDashboardRoute,
+    workforceManagementRoute,
+    dailyPlanningRoute,
+    approvalTrackerRoute,
+    mrpCalculatorRoute,
     accountRoute,
   ]),
   loginRoute,
+  changePasswordRoute,
+  mfaVerifyRoute,
+  acceptInviteRoute,
 ]);
 
 projectsRoute.addChildren([projectsIndexRoute, projectDetailRoute, newProjectRoute]);

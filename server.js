@@ -338,5 +338,89 @@ app.post("/api/projects/:id/plan/simulate", async (req, res) => {
   res.json({ quantity, cutoffDate: cutoffDate.toISOString(), scenarios });
 });
 
+// ============================================================
+// WebSocket Server (Socket.IO) for Real-Time Notifications
+// ============================================================
+const http = require('http');
+const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
+
+const httpServer = http.createServer(app);
+
+// Initialize Socket.IO with CORS
+const io = new Server(httpServer, {
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST']
+  }
+});
+
+// JWT Authentication Middleware for WebSocket
+io.use((socket, next) => {
+  try {
+    const token = socket.handshake.auth.token;
+    
+    if (!token) {
+      return next(new Error('Authentication token required'));
+    }
+
+    // Verify JWT token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key-change-in-production');
+    
+    // Attach user to socket
+    socket.user = decoded;
+    next();
+  } catch (error) {
+    console.error('Socket.IO auth error:', error.message);
+    next(new Error('Invalid or expired token'));
+  }
+});
+
+// Connection handler
+io.on('connection', (socket) => {
+  const userId = socket.user.id;
+  const userName = socket.user.name || 'Unknown User';
+  
+  // Join user-specific room
+  socket.join(`user:${userId}`);
+  
+  console.log(`🔌 WebSocket: User ${userName} (${userId}) connected [Socket ID: ${socket.id}]`);
+  
+  // Handle disconnection
+  socket.on('disconnect', (reason) => {
+    console.log(`🔌 WebSocket: User ${userName} (${userId}) disconnected. Reason: ${reason}`);
+  });
+  
+  // Optional: Handle custom events
+  socket.on('ping', () => {
+    socket.emit('pong', { timestamp: Date.now() });
+  });
+});
+
+// Expose io globally for use in services (notificationService, etc.)
+global.io = io;
+
+console.log('🔌 WebSocket server ready for real-time notifications');
+
+// ============================================================
+// Email Digest Service
+// ============================================================
+const emailDigestService = require('./api/lib/emailDigestService');
+
+// Initialize email digest cron jobs
+emailDigestService.initialize().then(() => {
+  console.log('📧 Email digest service initialized (daily 8am, weekly Monday 8am)');
+}).catch(error => {
+  console.error('❌ Failed to initialize email digest service:', error);
+});
+
+// ============================================================
+// Start Server
+// ============================================================
 const port = process.env.PORT || 4000;
-app.listen(port, () => console.log(`API running on http://localhost:${port}`));
+httpServer.listen(port, () => {
+  console.log(`✅ API server running on http://localhost:${port}`);
+  console.log(`✅ WebSocket server ready at ws://localhost:${port}`);
+  console.log(`✅ CORS enabled for: ${allowedOrigins.join(', ')}`);
+});

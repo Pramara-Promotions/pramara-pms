@@ -1,5 +1,6 @@
 // web/src/features/admin/AuditLogViewer.tsx
 import { useState, useEffect } from 'react';
+import { Info, X } from 'lucide-react';
 import PermissionGate from '../../components/auth/PermissionGate';
 import { http } from '../../lib/http';
 
@@ -23,6 +24,10 @@ export default function AuditLogViewer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'flagged'>('all');
+  const [bannerDismissed, setBannerDismissed] = useState(() => {
+    // Check if banner was dismissed in this session
+    return sessionStorage.getItem('auditBannerDismissed') === 'true';
+  });
 
   const fetchLogs = async () => {
     try {
@@ -32,7 +37,21 @@ export default function AuditLogViewer() {
       const res = await http(endpoint);
       if (!res.ok) throw new Error(`Failed to fetch audit logs (${res.status})`);
       const data = await res.json();
-      setLogs(data.logs || data);
+      
+      // Map backend structure to frontend model
+      const rawLogs = data.logs || data;
+      const mappedLogs: AuditLog[] = Array.isArray(rawLogs) ? rawLogs.map((log: any) => ({
+        id: log.id,
+        action: log.action,
+        details: log.meta || log.details || log.changes,
+        ipAddress: log.ip || log.ipAddress,
+        userAgent: log.userAgent,
+        isFlagged: log.flagged || log.isFlagged || false,
+        createdAt: log.createdAt,
+        user: log.actor || log.user,
+      })) : [];
+      
+      setLogs(mappedLogs);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load audit logs');
     } finally {
@@ -43,6 +62,11 @@ export default function AuditLogViewer() {
   useEffect(() => {
     fetchLogs();
   }, [filter]);
+
+  const handleDismissBanner = () => {
+    setBannerDismissed(true);
+    sessionStorage.setItem('auditBannerDismissed', 'true');
+  };
 
   if (loading) {
     return (
@@ -69,6 +93,30 @@ export default function AuditLogViewer() {
       </div>
     }>
       <div className="p-6">
+        {/* Retention Policy Banner */}
+        {!bannerDismissed && (
+          <div className="mb-6 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+            <Info className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-1">
+                Audit Log Retention Policy
+              </h3>
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                Audit logs are automatically retained for <strong>15 days</strong> from the date of creation.
+                After this period, logs are permanently deleted to comply with data retention policies.
+                If you need to retain logs for longer periods, please export them regularly.
+              </p>
+            </div>
+            <button
+              onClick={handleDismissBanner}
+              className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 flex-shrink-0"
+              aria-label="Dismiss banner"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        )}
+
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Audit Logs</h2>
           <div className="flex space-x-2">

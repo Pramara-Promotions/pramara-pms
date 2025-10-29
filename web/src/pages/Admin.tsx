@@ -6,9 +6,10 @@ import RoleManagement from '../features/admin/RoleManagement';
 import DepartmentManagement from '../features/admin/DepartmentManagement';
 import DeviceManagement from '../features/admin/DeviceManagement';
 import AuditLogViewer from '../features/admin/AuditLogViewer';
+import EmailSettings from '../features/admin/EmailSettings';
 import PermissionRequestManagement from '../features/common/PermissionRequestManagement';
 
-type TabType = 'users' | 'roles' | 'departments' | 'requests' | 'devices' | 'audit';
+type TabType = 'users' | 'roles' | 'departments' | 'requests' | 'devices' | 'audit' | 'email';
 
 export default function Admin() {
   const { isSuperAdmin, hasAnyPermission } = useAuth();
@@ -37,6 +38,7 @@ export default function Admin() {
     { id: 'requests', label: 'Permission Requests' },
     { id: 'devices', label: 'Devices', requireSuperAdmin: true },
     { id: 'audit', label: 'Audit Logs', permission: 'AUDIT_VIEW' },
+    { id: 'email', label: 'Email Settings', permission: 'SYSTEM_SETTINGS' },
   ];
 
   const renderTabContent = () => {
@@ -53,6 +55,8 @@ export default function Admin() {
         return <DeviceManagement />;
       case 'audit':
         return <AuditLogViewer />;
+      case 'email':
+        return <EmailSettings />;
       default:
         return <div>Select a tab</div>;
     }

@@ -374,6 +374,16 @@ router.post('/users/:userId/roles', authGuard, permissionGuard('USER_MANAGE_ROLE
       data: { userId, roleId },
     });
 
+    // Audit log
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      action: 'ROLE_ASSIGNED',
+      actorId: req.user?.id,
+      targetId: userId,
+      details: { roleId, roleName: role.name },
+      ipAddress: req.ip,
+    });
+
     res.status(201).json({ ok: true, message: 'Role assigned' });
   } catch (error) {
     console.error('[users/roles] Assign failed:', error);
@@ -391,6 +401,9 @@ router.delete('/users/:userId/roles/:roleId', authGuard, permissionGuard('USER_M
 
     const userRole = await prisma.userRole.findFirst({
       where: { userId, roleId },
+      include: {
+        role: { select: { name: true } }
+      }
     });
 
     if (!userRole) {
@@ -398,6 +411,16 @@ router.delete('/users/:userId/roles/:roleId', authGuard, permissionGuard('USER_M
     }
 
     await prisma.userRole.delete({ where: { id: userRole.id } });
+
+    // Audit log
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      action: 'ROLE_REMOVED',
+      actorId: req.user?.id,
+      targetId: userId,
+      details: { roleId, roleName: userRole.role?.name },
+      ipAddress: req.ip,
+    });
 
     res.json({ ok: true, message: 'Role removed' });
   } catch (error) {

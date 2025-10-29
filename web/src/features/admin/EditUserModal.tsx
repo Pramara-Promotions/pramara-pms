@@ -30,14 +30,16 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
     isActive: true,
     departmentId: '',
     roleIds: [] as string[],
+    auditRetentionDays: 30,
   });
   const [departments, setDepartments] = useState<Department[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
   const [resettingPassword, setResettingPassword] = useState(false);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [resettingMfa, setResettingMfa] = useState(false);
 
   useEffect(() => {
     if (isOpen && user) {
@@ -48,8 +50,10 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
         isActive: user.isActive,
         departmentId: user.department?.id || '',
         roleIds: user.roles?.map(r => typeof r === 'string' ? r : r.id) || [],
+        auditRetentionDays: (user as any).auditRetentionDays || 30,
       });
       fetchDepartmentsAndRoles();
+      fetchMfaStatus();
     }
   }, [isOpen, user]);
 
@@ -74,6 +78,19 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
     }
   };
 
+  const fetchMfaStatus = async () => {
+    if (!user) return;
+    try {
+      const res = await http(`/api/admin/users/${user.id}/mfa-status`);
+      if (res.ok) {
+        const data = await res.json();
+        setMfaEnabled(data.mfaEnabled || false);
+      }
+    } catch (e) {
+      console.error('Failed to fetch MFA status', e);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -91,6 +108,7 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
           status: formData.status,
           isActive: formData.isActive,
           departmentId: formData.departmentId || null,
+          auditRetentionDays: formData.auditRetentionDays,
         }),
       });
 
@@ -123,7 +141,6 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
       onSuccess();
       onClose();
       setShowPasswordReset(false);
-      setNewPassword('');
     } catch (e: any) {
       setError(e?.message ?? 'Failed to update user');
     } finally {
@@ -132,14 +149,18 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
   };
 
   const handlePasswordReset = async () => {
-    if (!user || !newPassword) return;
+    if (!user) return;
+
+    if (!confirm('This will generate a random password and require the user to change it on next login. Continue?')) {
+      return;
+    }
 
     setResettingPassword(true);
     try {
       const res = await http(`/api/admin/users/${user.id}/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: newPassword }),
+        body: JSON.stringify({ method: 'manual' }),
       });
 
       if (!res.ok) {
@@ -147,13 +168,40 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
         throw new Error(data.error || 'Failed to reset password');
       }
 
-      alert('Password reset successfully');
+      const data = await res.json();
+      alert(`Password reset successfully!\n\nTemporary password: ${data.password}\n\nUser must change this on next login.`);
       setShowPasswordReset(false);
-      setNewPassword('');
     } catch (e: any) {
       alert(e?.message ?? 'Failed to reset password');
     } finally {
       setResettingPassword(false);
+    }
+  };
+
+  const handleMfaReset = async () => {
+    if (!user) return;
+
+    if (!confirm('This will disable MFA for the user. They will need to re-enable it. Continue?')) {
+      return;
+    }
+
+    setResettingMfa(true);
+    try {
+      const res = await http(`/api/admin/users/${user.id}/reset-mfa`, {
+        method: 'POST',
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to reset MFA');
+      }
+
+      alert('MFA disabled successfully');
+      setMfaEnabled(false);
+    } catch (e: any) {
+      alert(e?.message ?? 'Failed to reset MFA');
+    } finally {
+      setResettingMfa(false);
     }
   };
 
@@ -293,35 +341,68 @@ export default function EditUserModal({ isOpen, user, onClose, onSuccess }: Edit
               </div>
             </div>
 
-            {/* Password Reset Section */}
-            <div className="mb-6 p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900">
-              <button
-                type="button"
-                onClick={() => setShowPasswordReset(!showPasswordReset)}
-                className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
-              >
-                {showPasswordReset ? '▼ Hide Password Reset' : '▶ Reset Password'}
-              </button>
+            {/* Audit Retention */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Audit Log Retention (Days)
+              </label>
+              <input
+                type="number"
+                min="15"
+                max="365"
+                value={formData.auditRetentionDays}
+                onChange={(e) => setFormData(prev => ({ ...prev, auditRetentionDays: parseInt(e.target.value) || 30 }))}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                User will see their logs for this duration. Minimum 15 days, maximum 365 days.
+              </p>
+            </div>
+
+            {/* Security Actions Section */}
+            <div className="mb-6 p-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 space-y-4">
+              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Security Actions</h4>
               
-              {showPasswordReset && (
-                <div className="mt-3 space-y-3">
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Enter new password"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
-                  />
+              {/* Password Reset */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Reset Password</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Generate random password and force change on login</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handlePasswordReset}
+                  disabled={resettingPassword}
+                  className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  {resettingPassword ? 'Resetting...' : 'Reset'}
+                </button>
+              </div>
+
+              {/* MFA Status & Reset */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Multi-Factor Authentication
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Status: {mfaEnabled ? 
+                      <span className="text-green-600 dark:text-green-400 font-medium">Enabled</span> : 
+                      <span className="text-gray-600 dark:text-gray-400">Disabled</span>
+                    }
+                  </p>
+                </div>
+                {mfaEnabled && (
                   <button
                     type="button"
-                    onClick={handlePasswordReset}
-                    disabled={!newPassword || resettingPassword}
-                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                    onClick={handleMfaReset}
+                    disabled={resettingMfa}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
                   >
-                    {resettingPassword ? 'Resetting...' : 'Reset Password'}
+                    {resettingMfa ? 'Disabling...' : 'Disable MFA'}
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* Actions */}

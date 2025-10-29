@@ -231,18 +231,43 @@ router.post("/admin/users", authGuard, permissionGuard('USER_CREATE'), async (re
   }
 });
 
-// PUT /api/admin/users/:id  { name?, status?, isActive?, departmentId? }
+// PUT /api/admin/users/:id  { name?, status?, isActive?, departmentId?, auditRetentionDays? }
 router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
     const { id } = req.params;
-    const { name, status, isActive, departmentId } = req.body || {};
+    const { name, status, isActive, departmentId, auditRetentionDays } = req.body || {};
     
     const updateData = {};
     if (name !== undefined) updateData.name = name || null;
     if (status !== undefined) updateData.status = status;
     if (isActive !== undefined) updateData.isActive = !!isActive;
     if (departmentId !== undefined) updateData.departmentId = departmentId || null;
+    
+    // Audit retention: enforce minimum 15 days (Super Admin only)
+    if (auditRetentionDays !== undefined) {
+      const AUDIT_CONFIG = require('../middleware/auditLogger').AUDIT_CONFIG;
+      const retention = parseInt(auditRetentionDays);
+      
+      if (retention < AUDIT_CONFIG.MINIMUM_RETENTION_DAYS) {
+        return res.status(400).json({
+          error: `Audit retention cannot be less than ${AUDIT_CONFIG.MINIMUM_RETENTION_DAYS} days (security policy)`,
+          minimumAllowed: AUDIT_CONFIG.MINIMUM_RETENTION_DAYS,
+          maximumAllowed: AUDIT_CONFIG.MAXIMUM_USER_RETENTION_DAYS,
+          requested: retention
+        });
+      }
+      
+      if (retention > AUDIT_CONFIG.MAXIMUM_USER_RETENTION_DAYS) {
+        return res.status(400).json({
+          error: `Audit retention cannot exceed ${AUDIT_CONFIG.MAXIMUM_USER_RETENTION_DAYS} days`,
+          maximumAllowed: AUDIT_CONFIG.MAXIMUM_USER_RETENTION_DAYS,
+          requested: retention
+        });
+      }
+      
+      updateData.auditRetentionDays = retention;
+    }
 
     const row = await prisma.user.update({
       where: { id },
@@ -253,6 +278,7 @@ router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (r
         name: true,
         status: true,
         isActive: true,
+        auditRetentionDays: true,
         department: { select: { id: true, name: true } },
         roles: {
           include: {
@@ -262,12 +288,23 @@ router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (r
       },
     });
     
+    // Audit log
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      action: 'USER_UPDATED',
+      actorId: req.user?.id,
+      targetId: id,
+      details: updateData,
+      ipAddress: req.ip,
+    });
+    
     res.json({
       id: row.id,
       email: row.email,
       name: row.name,
       status: row.status,
       isActive: row.isActive,
+      auditRetentionDays: row.auditRetentionDays,
       department: row.department,
       roles: row.roles.map(ur => ({ id: ur.role.id, name: ur.role.name })),
     });
@@ -278,18 +315,70 @@ router.put("/admin/users/:id", authGuard, permissionGuard('USER_EDIT'), async (r
   }
 });
 
-// POST /api/admin/users/:id/reset-password  { password }
+// POST /api/admin/users/:id/reset-password  { method: 'email' | 'manual' }
 router.post("/admin/users/:id/reset-password", authGuard, permissionGuard('USER_EDIT'), async (req, res) => {
   if (!hasModel("user")) return res.status(503).json({ error: "User model not available" });
   try {
     const { id } = req.params;
-    const { password } = req.body || {};
-    if (!password) return res.status(400).json({ error: "password required" });
+    const { method = 'manual' } = req.body || {};
+    
+    // Generate secure random 12-character password
+    const crypto = require('crypto');
+    const randomPassword = crypto.randomBytes(6).toString('hex'); // 12 chars
     
     const argon2 = require('argon2');
-    const passwordHash = await argon2.hash(String(password));
-    await prisma.user.update({ where: { id }, data: { passwordHash } });
-    res.json({ ok: true, message: 'Password reset successfully' });
+    const passwordHash = await argon2.hash(randomPassword);
+    
+    await prisma.user.update({ 
+      where: { id }, 
+      data: { 
+        passwordHash,
+        mustChangePassword: true, // Force password change on next login
+        passwordResetAt: new Date()
+      } 
+    });
+    
+    // Audit log
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      action: 'PASSWORD_RESET',
+      actorId: req.user?.id,
+      targetId: id,
+      details: { method, forced: true },
+      ipAddress: req.ip,
+      flagged: true,
+    });
+    
+    // If email method, send email with password
+    if (method === 'email') {
+      const user = await prisma.user.findUnique({
+        where: { id },
+        select: { email: true, name: true }
+      });
+      
+      if (user) {
+        const { sendPasswordResetEmail } = require('../lib/emailService');
+        const resetByUser = await prisma.user.findUnique({
+          where: { id: req.user?.id },
+          select: { name: true, email: true }
+        });
+        
+        await sendPasswordResetEmail({
+          email: user.email,
+          temporaryPassword: randomPassword,
+          resetByName: resetByUser?.name || resetByUser?.email || 'Administrator'
+        });
+        
+        console.log('[ADMIN] Password reset email sent to:', user.email);
+      }
+    }
+    
+    res.json({ 
+      ok: true, 
+      message: 'Password reset successfully',
+      // Only return password for manual method (admin will give to user)
+      password: method === 'manual' ? randomPassword : undefined
+    });
   } catch (e) {
     console.error("[admin] reset password failed:", e);
     if (e?.code === "P2025") return res.status(404).json({ error: "User not found" });
@@ -370,12 +459,34 @@ router.delete("/admin/users/:id", authGuard, permissionGuard('USER_DELETE'), asy
       return res.status(400).json({ error: "Cannot delete your own account" });
     }
     
+    // Get user info before deletion for audit log
+    const userToDelete = await prisma.user.findUnique({
+      where: { id },
+      select: { email: true, name: true }
+    });
+    
+    if (!userToDelete) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
     // Delete related records first (Prisma cascade doesn't work for all relations)
     await prisma.userRole.deleteMany({ where: { userId: id } });
     await prisma.session.deleteMany({ where: { userId: id } });
     
     // Now delete the user
     await prisma.user.delete({ where: { id } });
+    
+    // Audit log
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      action: 'USER_DELETED',
+      actorId: req.user?.id,
+      targetId: id,
+      details: { email: userToDelete.email, name: userToDelete.name },
+      ipAddress: req.ip,
+      flagged: true,
+    });
+    
     res.json({ ok: true, message: 'User deleted successfully' });
   } catch (e) {
     console.error("[admin] delete user failed:", e);
@@ -414,6 +525,76 @@ router.delete("/admin/sessions/:id", authGuard, permissionGuard.role('Super Admi
     console.error("[admin] delete session failed:", e);
     if (e?.code === "P2025") return res.status(404).json({ error: "Session not found" });
     res.status(400).json({ error: "Delete session failed" });
+  }
+});
+
+// GET /api/admin/users/:id/mfa-status
+router.get("/admin/users/:id/mfa-status", authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { mfaEnabled: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ mfaEnabled: user.mfaEnabled || false });
+  } catch (error) {
+    console.error('GET /api/admin/users/:id/mfa-status error:', error);
+    res.status(500).json({ error: 'Failed to fetch MFA status' });
+  }
+});
+
+// POST /api/admin/users/:id/reset-mfa
+router.post("/admin/users/:id/reset-mfa", authGuard, permissionGuard.role('Super Admin'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.user.update({
+      where: { id },
+      data: {
+        mfaEnabled: false,
+        mfaSecret: null,
+      },
+    });
+
+    // Get user info for email
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { email: true, name: true }
+    });
+
+    // Send MFA disabled alert email
+    if (user) {
+      const { sendMfaDisabledEmail } = require('../lib/emailService');
+      await sendMfaDisabledEmail({
+        email: user.email,
+        userName: user.name || user.email,
+        selfService: false  // Admin-initiated
+      });
+    }
+
+    // Audit log
+    const { logAudit } = require('../middleware/auditLogger');
+    await logAudit({
+      action: 'MFA_DISABLED',
+      actorId: req.user?.id,
+      targetId: id,
+      details: { adminReset: true },
+      ipAddress: req.ip,
+      flagged: true,
+    });
+
+    res.json({ success: true, message: 'MFA disabled successfully' });
+  } catch (error) {
+    console.error('POST /api/admin/users/:id/reset-mfa error:', error);
+    if (error?.code === 'P2025') {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.status(500).json({ error: 'Failed to reset MFA' });
   }
 });
 

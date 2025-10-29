@@ -32,7 +32,33 @@ export default function DeviceManagement() {
       const res = await http('/api/devices');
       if (!res.ok) throw new Error(`Failed to fetch devices (${res.status})`);
       const data = await res.json();
-      setDevices(data);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.devices)
+          ? data.devices
+          : [];
+
+      // Normalize backend fields -> UI model
+      const normalized: Device[] = list.map((d: any) => ({
+        id: d.id,
+        fingerprint: d.fingerprint,
+        deviceName: d.deviceName || d.name || 'Unnamed Device',
+        browser: d.browser,
+        os: d.os,
+        deviceType: d.deviceType,
+        ipAddress: d.ipAddress || d.ip || undefined,
+        isTrusted: typeof d.isTrusted === 'boolean' ? d.isTrusted : !!d.trusted,
+        lastUsedAt: d.lastUsedAt,
+        user: d.user
+          ? {
+              id: d.user.id,
+              email: d.user.email,
+              name: d.user.name,
+            }
+          : undefined,
+      }));
+
+      setDevices(normalized);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load devices');
     } finally {

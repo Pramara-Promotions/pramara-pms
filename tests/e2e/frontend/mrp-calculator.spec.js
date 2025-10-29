@@ -42,8 +42,8 @@ test.describe('MRP Calculator Page', () => {
     await page.fill('input[name="targetQuantity"]', '1000');
     
     // Select loss type
-    await page.click('select').nth(2);
-    await page.selectOption('select').nth(2), 'project_wide');
+    const lossTypeSelect = page.locator('select').nth(2);
+    await lossTypeSelect.selectOption('project_wide');
     
     // Enter project-wide loss
     await page.fill('input[name="projectWideLoss"]', '10');
@@ -116,7 +116,8 @@ test.describe('MRP Calculator Page', () => {
     await skuSelect.selectOption({ index: 1 });
     
     await page.fill('input[name="targetQuantity"]', '1000');
-    await page.selectOption('select').nth(2), 'project_wide');
+    const lossTypeSelect2 = page.locator('select').nth(2);
+    await lossTypeSelect2.selectOption('project_wide');
     await page.fill('input[name="projectWideLoss"]', '10');
     await page.click('button:has-text("Calculate MRP")');
     

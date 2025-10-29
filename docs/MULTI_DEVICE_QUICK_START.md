@@ -2,6 +2,30 @@
 
 ## 🚀 Quick Start Commands
 
+### Pull Latest Code & Setup (Automated)
+```powershell
+# One command to pull, check dependencies, and setup
+.\scripts\pull-and-setup.ps1
+```
+
+### Manual Pull & Setup
+```powershell
+# 1. Pull latest code
+git pull origin phase2-execution-control
+
+# 2. Check for dependency changes
+cat docs/DEPENDENCY_SYNC.md
+
+# 3. Install dependencies (if needed)
+cd api && npm install && cd ../web && npm install && cd ..
+
+# 4. Copy environment config
+Copy-Item -Force .env.cloud .env
+
+# 5. Start servers
+npm run dev
+```
+
 ### Find Your Network IP
 ```powershell
 npm run network:ip

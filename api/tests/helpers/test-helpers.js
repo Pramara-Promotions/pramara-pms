@@ -53,11 +53,14 @@ async function createTestProject(prisma, projectData = {}) {
  * Create test station in database
  */
 async function createTestStation(prisma, stationData = {}) {
+  // Filter out fields that don't exist in Station schema
+  const { type, ...validStationData } = stationData;
+  
   const defaultStation = {
     name: `Test Station ${Date.now()}`,
     capacity: 8,
     updatedAt: new Date(),
-    ...stationData
+    ...validStationData
   };
 
   return await prisma.station.create({
@@ -116,16 +119,20 @@ async function createTestWorker(prisma, workerData = {}) {
  * Clean up test data
  */
 async function cleanupTestData(prisma, resourceType, ids) {
+  // Filter out undefined/null IDs
+  const validIds = ids.filter(id => id != null);
+  if (validIds.length === 0) return;
+  
   const deleteOperations = {
-    users: () => prisma.user.deleteMany({ where: { id: { in: ids } } }),
-    projects: () => prisma.project.deleteMany({ where: { id: { in: ids } } }),
-    stations: () => prisma.station.deleteMany({ where: { id: { in: ids } } }),
-    materials: () => prisma.material.deleteMany({ where: { id: { in: ids } } }),
-    workers: () => prisma.worker.deleteMany({ where: { id: { in: ids } } }),
-    processConfigs: () => prisma.processConfig.deleteMany({ where: { id: { in: ids } } }),
-    workflowStages: () => prisma.workflowStage.deleteMany({ where: { id: { in: ids } } }),
-    dailyPlans: () => prisma.dailyPlan.deleteMany({ where: { id: { in: ids } } }),
-    approvalRequests: () => prisma.approvalRequest.deleteMany({ where: { id: { in: ids } } })
+    users: () => prisma.user.deleteMany({ where: { id: { in: validIds } } }),
+    projects: () => prisma.project.deleteMany({ where: { id: { in: validIds } } }),
+    stations: () => prisma.station.deleteMany({ where: { id: { in: validIds } } }),
+    materials: () => prisma.material.deleteMany({ where: { id: { in: validIds } } }),
+    workers: () => prisma.worker.deleteMany({ where: { id: { in: validIds } } }),
+    processConfigs: () => prisma.processConfig.deleteMany({ where: { id: { in: validIds } } }),
+    workflowStages: () => prisma.workflowStage.deleteMany({ where: { id: { in: validIds } } }),
+    dailyPlans: () => prisma.dailyPlan.deleteMany({ where: { id: { in: validIds } } }),
+    approvalRequests: () => prisma.approvalRequest.deleteMany({ where: { id: { in: validIds } } })
   };
 
   const operation = deleteOperations[resourceType];

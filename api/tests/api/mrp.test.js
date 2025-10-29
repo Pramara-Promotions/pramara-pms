@@ -70,11 +70,11 @@ describe('MRP API Tests', () => {
     createdIds.stations.push(testStation.id);
 
     // Create test SKU
-    await prisma.sKU.create({
+      await prisma.projectSku.create({
       data: {
         projectId: testProject.id,
-        name: 'Test SKU-001',
-        targetQuantity: 1000
+          code: 'TEST-SKU-001',
+          name: 'Test SKU-001'
       }
     });
   });

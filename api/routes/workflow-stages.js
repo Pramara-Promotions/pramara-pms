@@ -99,6 +99,7 @@ router.post('/stages', async (req, res) => {
     const {
       projectId,
       name,
+        description,
       order,
       parentStageId,
       responsibleId,
@@ -118,23 +119,21 @@ router.post('/stages', async (req, res) => {
     
     const stage = await prisma.workflowStage.create({
       data: {
+          id: require('crypto').randomUUID(),
         projectId: parseInt(projectId),
         name,
-        order: order || 0,
-        parentStageId: parentStageId || null,
-        responsibleId: responsibleId || null,
-        approverId: approverId || null,
-        approverType: approverType || null,
-        requiredDocs: requiredDocs || [],
+          description: description || null,
+          sequence: order || 0,
+          estimatedDays: bufferDays || 2,
+          requiresQC: false,
         qcTemplateId: qcTemplateId || null,
-        materialIds: materialIds || [],
-        dependencies: dependencies || [],
-        bufferDays: bufferDays || 2,
-        status: 'not-started'
+          requiresApproval: approverType ? true : false,
+          approvalType: approverType || null,
+          status: 'pending',
+          updatedAt: new Date()
       },
       include: {
-        SubStages: true,
-        Tasks: true
+          WorkflowTask: true
       }
     });
     

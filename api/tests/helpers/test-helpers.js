@@ -98,11 +98,13 @@ async function createTestMaterial(prisma, materialData = {}) {
  * Create test worker in database
  */
 async function createTestWorker(prisma, workerData = {}) {
+  const { randomUUID } = require('crypto');
   const defaultWorker = {
-    name: `Test Worker ${Date.now()}`,
-    type: 'company',
-    skills: ['molding'],
-    ...workerData
+    id: workerData.id || randomUUID(),
+    name: workerData.name || `Test Worker ${Date.now()}`,
+    workerType: workerData.workerType || workerData.type || 'company',
+    skills: workerData.skills || ['molding'],
+    updatedAt: new Date()
   };
 
   return await prisma.worker.create({

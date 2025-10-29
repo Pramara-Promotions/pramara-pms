@@ -23,24 +23,21 @@ router.get('/', async (req, res) => {
         Project: {
           select: {
             id: true,
-            projectCode: true,
-            projectName: true
+            code: true,
+            name: true
           }
         },
-        stations: {
+        DailyPlanStation: {
           include: {
             Station: {
-              select: { code: true, name: true }
-            },
-            Worker: {
               select: { id: true, name: true }
             }
           }
         },
         _count: {
           select: {
-            stations: true,
-            adaptations: true
+            DailyPlanStation: true,
+            PlanAdaptation: true
           }
         }
       },
@@ -63,21 +60,13 @@ router.get('/:id', async (req, res) => {
       where: { id },
       include: {
         Project: true,
-        stations: {
+        DailyPlanStation: {
           include: {
-            Station: true,
-            Worker: true,
-            materialReservations: {
-              include: {
-                Material: {
-                  select: { name: true, unit: true, stockQty: true }
-                }
-              }
-            }
+            Station: true
           }
         },
-        adaptations: {
-          orderBy: { timestamp: 'desc' }
+        PlanAdaptation: {
+          orderBy: { createdAt: 'desc' }
         }
       }
     });
@@ -295,30 +284,46 @@ router.post('/', async (req, res) => {
     // Create plan
     const plan = await prisma.dailyPlan.create({
       data: {
+          id: require('crypto').randomUUID(),
         projectId,
         date: new Date(date),
+          scenario: scenarioType || 'balanced',
         targetQty,
         scenarioType: scenarioType || 'balanced',
+          generatedBy: req.auth?.user?.email || 'system',
+          totalTargetQty: targetQty || 0,
+          totalExpectedOutput: targetQty || 0,
+          riskFactors: [],
         notes: notes || null,
         status: 'draft',
-        stations: {
-          create: stations.map(s => ({
-            stationId: s.stationId,
-            targetQty: s.targetQty,
-            workerId: s.workerId || null,
-            assignmentReason: s.assignmentReason || null
-          }))
-        }
       },
       include: {
-        stations: {
+          DailyPlanStation: {
           include: {
-            Station: true,
-            Worker: true
+              Station: true
           }
         }
       }
     });
+    
+      // Create stations separately
+      if (stations && stations.length > 0) {
+        await Promise.all(stations.map(s => 
+          prisma.dailyPlanStation.create({
+            data: {
+              id: require('crypto').randomUUID(),
+              dailyPlanId: plan.id,
+              stationId: s.stationId,
+              projectId: projectId,
+              projectSkuId: s.skuId || null,
+              targetQty: s.targetQty,
+              assignedWorkers: s.workerIds || [],
+              materialsRequired: {},
+              dependencies: []
+            }
+          })
+        ));
+      }
     
     // Reserve materials
     if (materialValidation.reservations) {
@@ -408,13 +413,12 @@ router.put('/:id/approve', async (req, res) => {
       data: {
         status: 'approved',
         approvedAt: new Date(),
-        approvedBy: approvedBy || req.user.userId
+        approvedBy: approvedBy || req.auth?.user?.email || 'system'
       },
       include: {
-        stations: {
+        DailyPlanStation: {
           include: {
-            Station: true,
-            Worker: true
+            Station: true
           }
         }
       }

@@ -306,6 +306,7 @@ model Project {
   Batch                 Batch[]
   changes               ChangeLog[]
   complianceItems       ComplianceItem[]
+  DailyPlan             DailyPlan[]
   DailyPlanStation      DailyPlanStation[]
   inventoryNeeds        InventoryNeed[]
   MaterialConsumption   MaterialConsumption[]
@@ -350,6 +351,11 @@ model Project {
   
   // WIP Ledger Relations
   wipLedgers            WIPLedger[]
+  
+  // MRP Relations
+  materialRequirements  MaterialRequirement[]
+  mrpLearning           MRPLearning[]
+  mrpRecommendations    MRPRecommendation[]
 }
 
 model ProjectPref {
@@ -388,6 +394,12 @@ model ProjectSku {
   project             Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
   QCChecklistTemplate QCChecklistTemplate[]
   QCSubmission        QCSubmission[]
+  
+  // MRP Relations
+  materialRequirements MaterialRequirement[]
+  bomItems             BOMItem[]
+  mrpLearning          MRPLearning[]
+  mrpRecommendations   MRPRecommendation[]
 
   @@unique([projectId, code])
   @@index([projectId])
@@ -742,19 +754,27 @@ model BatchMovement {
 
 model DailyPlan {
   id                  String                @id
+  projectId           Int?
   date                DateTime
   factoryId           Int?
   scenario            String
+  scenarioType        String?               // 'fastest', 'cheapest', 'balanced'
+  targetQty           Int?
   generatedBy         String
   status              String                @default("draft")
   totalTargetQty      Int
   totalExpectedOutput Int
   estimatedCost       Float?
+  estimatedDuration   Float?
   reasoning           Json?
   riskFactors         String[]
+  notes               String?
+  adaptations         Json?                 // Array of adaptation records
   createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
   approvedAt          DateTime?
   approvedBy          String?
+  Project             Project?              @relation(fields: [projectId], references: [id], onDelete: Cascade)
   Factory             Factory?              @relation(fields: [factoryId], references: [id])
   DailyPlanStation    DailyPlanStation[]
   MaterialReservation MaterialReservation[]
@@ -762,6 +782,7 @@ model DailyPlan {
   ShiftPlan           ShiftPlan[]
 
   @@index([date])
+  @@index([projectId])
   @@index([factoryId])
 }
 
@@ -1117,6 +1138,102 @@ model MaterialReservation {
   @@index([materialId])
   @@index([status])
 }
+
+// ==================== MRP MODELS ====================
+
+model MaterialRequirement {
+  id                Int      @id @default(autoincrement())
+  projectId         Int
+  skuId             Int?
+  materialId        String
+  quantityRequired  Float
+  lossType          String   // 'project_wide', 'sku_specific', 'material_specific'
+  lossPercentage    Float
+  totalWithLoss     Float
+  costEstimate      Float?
+  status            String   @default("pending") // 'pending', 'approved', 'ordered', 'received'
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdBy         String?
+  
+  // Relations
+  Project           Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku        ProjectSku? @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  
+  @@index([projectId])
+  @@index([materialId])
+  @@index([skuId])
+  @@index([status])
+}
+
+model BOMItem {
+  id                Int        @id @default(autoincrement())
+  skuId             Int
+  materialId        String
+  quantityPerUnit   Float
+  unit              String
+  notes             String?
+  isActive          Boolean    @default(true)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  
+  // Relations
+  ProjectSku        ProjectSku @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  
+  @@unique([skuId, materialId])
+  @@index([skuId])
+  @@index([materialId])
+}
+
+model MRPLearning {
+  id                    Int      @id @default(autoincrement())
+  materialId            String
+  projectId             Int?
+  skuId                 Int?
+  estimatedQuantity     Float
+  estimatedLoss         Float
+  actualQuantity        Float
+  actualLoss            Float
+  accuracyPercentage    Float
+  lossType              String   // 'project_wide', 'sku_specific', 'material_specific'
+  recordedAt            DateTime @default(now())
+  recordedBy            String?
+  
+  // Relations
+  Project               Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku            ProjectSku? @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  
+  @@index([materialId])
+  @@index([projectId])
+  @@index([skuId])
+  @@index([lossType])
+}
+
+model MRPRecommendation {
+  id                Int      @id @default(autoincrement())
+  materialId        String
+  projectId         Int?
+  skuId             Int?
+  recommendedLoss   Float
+  confidence        Float    // 0-100
+  basedOnRecords    Int      // Number of learning records used
+  status            String   @default("pending") // 'pending', 'accepted', 'rejected'
+  reason            String?  // Why accepted/rejected
+  createdAt         DateTime @default(now())
+  reviewedAt        DateTime?
+  reviewedBy        String?
+  
+  // Relations
+  Project           Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku        ProjectSku? @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  
+  @@index([materialId])
+  @@index([projectId])
+  @@index([skuId])
+  @@index([status])
+}
+
+// ==================== END MRP MODELS ====================
 
 model PlanAdaptation {
   id                String    @id

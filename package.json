@@ -28,7 +28,16 @@
     "chat:save": "node scripts/save-chat-context.js",
     "chat:load": "node scripts/load-chat-context.js",
     "sync:push": "node scripts/sync-push.js",
-    "sync:pull": "node scripts/sync-pull.js"
+    "sync:pull": "node scripts/sync-pull.js",
+    "test:api": "cd api && npm test",
+    "test:e2e": "npx playwright test",
+    "test:e2e:ui": "npx playwright test --ui",
+    "test:e2e:headed": "npx playwright test --headed",
+    "test:integration": "cd api && npm run test:integration",
+    "test:performance": "cd api && npm run test:performance",
+    "test:all": "npm run test:api && npm run test:e2e && npm run test:integration",
+    "test:report": "npx playwright show-report",
+    "test:debug": "npx playwright test --debug"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

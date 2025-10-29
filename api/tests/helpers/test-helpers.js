@@ -38,9 +38,9 @@ async function createTestUser(prisma, userData = {}) {
  */
 async function createTestProject(prisma, projectData = {}) {
   const defaultProject = {
+    code: projectData.code || `TEST-${Date.now()}`,
     name: `Test Project ${Date.now()}`,
-    customerName: 'Test Customer',
-    status: 'active',
+    quantity: projectData.quantity || 1000,
     ...projectData
   };
 
@@ -55,8 +55,8 @@ async function createTestProject(prisma, projectData = {}) {
 async function createTestStation(prisma, stationData = {}) {
   const defaultStation = {
     name: `Test Station ${Date.now()}`,
-    type: 'molding',
     capacity: 8,
+    updatedAt: new Date(),
     ...stationData
   };
 
@@ -69,14 +69,24 @@ async function createTestStation(prisma, stationData = {}) {
  * Create test material in database
  */
 async function createTestMaterial(prisma, materialData = {}) {
+  const { randomUUID } = require('crypto');
+  
+  // Map old field names to new ones
+  const stockQty = materialData.stockQty || materialData.stockQuantity || 100;
+  const reservedQty = materialData.reservedQty || materialData.reservedQuantity || 0;
+  const minStock = materialData.minStock || materialData.minStockLevel || 50;
+  const costPerUnit = materialData.costPerUnit || materialData.unitCost || 10;
+  
   const defaultMaterial = {
-    name: `Test Material ${Date.now()}`,
-    type: 'raw_material',
-    stockQuantity: 100,
-    reservedQuantity: 0,
-    minStockLevel: 50,
-    unitCost: 10,
-    ...materialData
+    id: materialData.id || randomUUID(),
+    name: materialData.name || `Test Material ${Date.now()}`,
+    type: materialData.type || 'raw_material',
+    unit: materialData.unit || 'kg',
+    stockQty,
+    reservedQty,
+    minStock,
+    costPerUnit,
+    updatedAt: new Date()
   };
 
   return await prisma.material.create({
@@ -113,8 +123,7 @@ async function cleanupTestData(prisma, resourceType, ids) {
     processConfigs: () => prisma.processConfig.deleteMany({ where: { id: { in: ids } } }),
     workflowStages: () => prisma.workflowStage.deleteMany({ where: { id: { in: ids } } }),
     dailyPlans: () => prisma.dailyPlan.deleteMany({ where: { id: { in: ids } } }),
-    approvalRequests: () => prisma.approvalRequest.deleteMany({ where: { id: { in: ids } } }),
-    materialRequirements: () => prisma.materialRequirement.deleteMany({ where: { id: { in: ids } } })
+    approvalRequests: () => prisma.approvalRequest.deleteMany({ where: { id: { in: ids } } })
   };
 
   const operation = deleteOperations[resourceType];

@@ -2,6 +2,20 @@
 const request = require('supertest');
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
+
+// Mock the auth middleware BEFORE requiring the router
+jest.mock('../../middleware/auth', () => ({
+  authenticate: (req, res, next) => {
+    req.user = { id: 'test-user-id', email: 'test@test.com', roles: ['admin'] };
+    req.auth = {
+      user: req.user,
+      roles: [{ name: 'admin' }],
+      perms: new Set(['*'])
+    };
+    next();
+  }
+}));
+
 const mrpRouter = require('../../routes/mrp');
 const {
   generateTestToken,
@@ -14,13 +28,6 @@ const {
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
-
-// Mock authentication middleware
-app.use((req, res, next) => {
-  req.auth = { user: { id: 'test-user-id', role: 'admin' } };
-  next();
-});
-
 app.use('/api/mrp', mrpRouter);
 
 describe('MRP API Tests', () => {

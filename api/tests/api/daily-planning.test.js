@@ -2,6 +2,20 @@
 const request = require('supertest');
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
+
+// Mock the auth middleware BEFORE requiring the router
+jest.mock('../../middleware/auth', () => ({
+  authenticate: (req, res, next) => {
+    req.user = { id: 'test-user-id', email: 'test@test.com', roles: ['admin'] };
+    req.auth = {
+      user: req.user,
+      roles: [{ name: 'admin' }],
+      perms: new Set(['*'])
+    };
+    next();
+  }
+}));
+
 const dailyPlanningRouter = require('../../routes/daily-planning');
 const {
   generateTestToken,
@@ -12,12 +26,6 @@ const {
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
-
-app.use((req, res, next) => {
-  req.auth = { user: { id: 'test-user-id', role: 'admin' } };
-  next();
-});
-
 app.use('/api/daily-plans', dailyPlanningRouter);
 
 describe('Daily Planning API Tests', () => {

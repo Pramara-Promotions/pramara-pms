@@ -7,6 +7,20 @@
 const request = require('supertest');
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
+
+// Mock the auth middleware BEFORE requiring routers
+jest.mock('../../middleware/auth', () => ({
+  authenticate: (req, res, next) => {
+    req.user = { id: 'test-user-id', email: 'test@test.com', roles: ['admin'] };
+    req.auth = {
+      user: req.user,
+      roles: [{ name: 'admin' }],
+      perms: new Set(['*'])
+    };
+    next();
+  }
+}));
+
 const {
   generateTestToken,
   createTestProject,
@@ -30,12 +44,6 @@ const batchesRouter = require('../../routes/batches');
 
 const app = express();
 app.use(express.json());
-
-// Mock auth
-app.use((req, res, next) => {
-  req.auth = { user: { id: 'test-user-id', role: 'admin' } };
-  next();
-});
 
 // Register routes
 app.use('/api/workflow', workflowStagesRouter);

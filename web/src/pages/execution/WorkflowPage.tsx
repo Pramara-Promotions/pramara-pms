@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Plus, CheckCircle, Clock, AlertCircle, Flag, TrendingUp, Users, Calendar, Filter } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listWorkers } from '../../lib/services/workers';
+import { listTasks, getTasksAnalytics, createTask, updateTask } from '../../lib/services/tasks';
 
 interface Task {
   id: number;
@@ -81,13 +84,8 @@ const WorkflowPage = () => {
   const fetchTasks = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (statusFilter) params.append('status', statusFilter);
-      if (priorityFilter) params.append('priority', priorityFilter);
-
-      const res = await fetch(`/api/tasks?${params}`, { credentials: 'include' });
-      if (res.ok) setTasks(await res.json());
+      const rows = await listTasks({ projectId: projectFilter, status: statusFilter, priority: priorityFilter });
+      setTasks(rows || []);
     } catch (error) {
       console.error('Error fetching tasks:', error);
     } finally {
@@ -97,11 +95,8 @@ const WorkflowPage = () => {
 
   const fetchAnalytics = async () => {
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-
-      const res = await fetch(`/api/tasks/analytics/summary?${params}`, { credentials: 'include' });
-      if (res.ok) setAnalytics(await res.json());
+      const data = await getTasksAnalytics({ projectId: projectFilter });
+      setAnalytics(data || null);
     } catch (error) {
       console.error('Error fetching analytics:', error);
     }
@@ -109,8 +104,8 @@ const WorkflowPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -118,8 +113,8 @@ const WorkflowPage = () => {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/users', { credentials: 'include' });
-      if (res.ok) setUsers(await res.json());
+      const rows = await listWorkers();
+      setUsers(rows || []);
     } catch (error) {
       console.error('Error fetching users:', error);
     }
@@ -129,26 +124,18 @@ const WorkflowPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = selectedTask ? `/api/tasks/${selectedTask.id}` : '/api/tasks';
-      const method = selectedTask ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        resetForm();
-        fetchTasks();
-        fetchAnalytics();
+      if (selectedTask) {
+        await updateTask(selectedTask.id, formData);
       } else {
-        alert('Failed to save task');
+        await createTask(formData);
       }
+      setIsModalOpen(false);
+      resetForm();
+      fetchTasks();
+      fetchAnalytics();
     } catch (error) {
       console.error('Error saving task:', error);
+      alert('Failed to save task');
     } finally {
       setIsLoading(false);
     }
@@ -187,17 +174,9 @@ const WorkflowPage = () => {
 
   const handleStatusChange = async (taskId: number, newStatus: string) => {
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ status: newStatus }),
-      });
-
-      if (res.ok) {
-        fetchTasks();
-        fetchAnalytics();
-      }
+      await updateTask(taskId, { status: newStatus });
+      fetchTasks();
+      fetchAnalytics();
     } catch (error) {
       console.error('Error updating status:', error);
     }

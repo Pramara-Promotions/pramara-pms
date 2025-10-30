@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Package, CheckCircle, AlertTriangle, FileCheck, Download } from 'lucide-react';
+import { listMaterialCompliance, createMaterialCompliance, updateMaterialCompliance, approveMaterialCompliance, deleteMaterialCompliance } from '../../lib/services/compliance';
 
 interface MaterialCompliance {
   id: string;
@@ -58,12 +59,8 @@ const MaterialCompliancePage = () => {
   const fetchMaterials = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (statusFilter) params.append('status', statusFilter);
-      if (complianceFilter) params.append('complianceType', complianceFilter);
-
-      const res = await fetch(`/api/compliance/material-compliance?${params}`, { credentials: 'include' });
-      if (res.ok) setMaterials(await res.json());
+      const rows = await listMaterialCompliance({ status: statusFilter });
+      setMaterials(rows || []);
     } catch (error) {
       console.error('Error fetching materials:', error);
     } finally {
@@ -75,28 +72,18 @@ const MaterialCompliancePage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = editingMaterial 
-        ? `/api/compliance/material-compliance/${editingMaterial.id}`
-        : '/api/compliance/material-compliance';
-      const method = editingMaterial ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingMaterial(null);
-        resetForm();
-        fetchMaterials();
+      if (editingMaterial) {
+        await updateMaterialCompliance(editingMaterial.id, formData);
       } else {
-        alert('Failed to save material');
+        await createMaterialCompliance(formData);
       }
+      setIsModalOpen(false);
+      setEditingMaterial(null);
+      resetForm();
+      fetchMaterials();
     } catch (error) {
       console.error('Error saving material:', error);
+      alert('Failed to save material');
     } finally {
       setIsLoading(false);
     }
@@ -105,11 +92,8 @@ const MaterialCompliancePage = () => {
   const handleVerify = async (id: string) => {
     if (!confirm('Verify this material compliance?')) return;
     try {
-      const res = await fetch(`/api/compliance/material-compliance/${id}/verify`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) fetchMaterials();
+      await approveMaterialCompliance(id);
+      fetchMaterials();
     } catch (error) {
       console.error('Error verifying material:', error);
     }
@@ -118,11 +102,8 @@ const MaterialCompliancePage = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this material?')) return;
     try {
-      const res = await fetch(`/api/compliance/material-compliance/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) fetchMaterials();
+      await deleteMaterialCompliance(id);
+      fetchMaterials();
     } catch (error) {
       console.error('Error deleting material:', error);
     }

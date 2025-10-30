@@ -1,5 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Plus, Package, TrendingUp, AlertCircle, CheckCircle, MapPin, Clock } from 'lucide-react';
+import { listProjects, listProjectSkus } from '../../lib/services/projects';
+import { listBatches, getBatchAnalytics, createBatch } from '../../lib/services/batches';
+import { Plus, Package, TrendingUp, AlertCircle, CheckCircle, MapPin, Clock, QrCode, MoveRight, FileText, Scissors, AlertTriangle, GitBranch, Boxes } from 'lucide-react';
+import QRCodeDisplay from '../../components/batch/QRCodeDisplay';
+import QRCodeModal from '../../components/batch/QRCodeModal';
+import FloatingScanButton from '../../components/batch/FloatingScanButton';
+import BatchMovementModal from '../../components/batch/BatchMovementModal';
+import BatchDetailModal from '../../components/batch/BatchDetailModal';
+import SplitBatchModal from '../../components/batch/SplitBatchModal';
+import RejectionModal from '../../components/batch/RejectionModal';
+import BatchTraceabilityModal from '../../components/batch/BatchTraceabilityModal';
+import { AssemblyModal } from '../../components/batch/AssemblyModal';
 
 interface Batch {
   id: string;
@@ -14,6 +25,8 @@ interface Batch {
   status: string;
   createdAt: string;
   completedAt: string | null;
+  qrCodeUrl?: string;
+  qrCodeDataURL?: string;
   Project: { id: number; name: string };
   ProjectSku: { id: number; skuCode: string; name: string };
   Station: { id: number; name: string; code: string } | null;
@@ -39,10 +52,18 @@ const BatchTrackingPage = () => {
   const [analytics, setAnalytics] = useState<BatchAnalytics | null>(null);
   const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
   const [projectSkus, setProjectSkus] = useState<Array<{ id: number; skuCode: string; name: string }>>([]);
+  const [stations, setStations] = useState<Array<{ id: number; name: string; code: string }>>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [projectFilter, setProjectFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [selectedQRBatch, setSelectedQRBatch] = useState<Batch | null>(null);
+  const [selectedMovementBatch, setSelectedMovementBatch] = useState<Batch | null>(null);
+  const [selectedDetailBatch, setSelectedDetailBatch] = useState<string | null>(null);
+  const [selectedSplitBatch, setSelectedSplitBatch] = useState<Batch | null>(null);
+  const [selectedRejectionBatch, setSelectedRejectionBatch] = useState<Batch | null>(null);
+  const [selectedTraceabilityBatch, setSelectedTraceabilityBatch] = useState<Batch | null>(null);
+  const [isAssemblyModalOpen, setIsAssemblyModalOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     projectId: '',
@@ -63,17 +84,26 @@ const BatchTrackingPage = () => {
     fetchBatches();
     fetchAnalytics();
     fetchProjects();
+    fetchStations();
   }, [projectFilter, statusFilter]);
+
+  const fetchStations = async () => {
+    try {
+      const response = await fetch('/api/stations');
+      if (response.ok) {
+        const data = await response.json();
+        setStations(data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching stations:', error);
+    }
+  };
 
   const fetchBatches = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (statusFilter) params.append('status', statusFilter);
-
-      const res = await fetch(`/api/batches?${params}`, { credentials: 'include' });
-      if (res.ok) setBatches(await res.json());
+      const data = await listBatches({ projectId: projectFilter, status: statusFilter });
+      setBatches(data || []);
     } catch (error) {
       console.error('Error fetching batches:', error);
     } finally {
@@ -83,11 +113,8 @@ const BatchTrackingPage = () => {
 
   const fetchAnalytics = async () => {
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-
-      const res = await fetch(`/api/batches/analytics/summary?${params}`, { credentials: 'include' });
-      if (res.ok) setAnalytics(await res.json());
+      const data = await getBatchAnalytics({ projectId: projectFilter });
+      setAnalytics(data || null);
     } catch (error) {
       console.error('Error fetching analytics:', error);
     }
@@ -95,8 +122,8 @@ const BatchTrackingPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -104,8 +131,8 @@ const BatchTrackingPage = () => {
 
   const fetchProjectSkus = async (projectId: number) => {
     try {
-      const res = await fetch(`/api/projects/${projectId}/skus`, { credentials: 'include' });
-      if (res.ok) setProjectSkus(await res.json());
+      const rows = await listProjectSkus(projectId);
+      setProjectSkus(rows || []);
     } catch (error) {
       console.error('Error fetching project SKUs:', error);
     }
@@ -115,23 +142,22 @@ const BatchTrackingPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const res = await fetch('/api/batches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
+      await createBatch({
+        projectId: formData.projectId,
+        projectSkuId: formData.projectSkuId,
+        batchCode: formData.batchCode,
+        targetQty: formData.targetQty,
       });
 
-      if (res.ok) {
+      {
         setIsModalOpen(false);
         resetForm();
         fetchBatches();
         fetchAnalytics();
-      } else {
-        alert('Failed to create batch');
       }
     } catch (error) {
       console.error('Error creating batch:', error);
+      alert('Failed to create batch');
     } finally {
       setIsLoading(false);
     }
@@ -158,6 +184,29 @@ const BatchTrackingPage = () => {
     return statusOptions.find(s => s.value === status) || statusOptions[0];
   };
 
+  const handlePrintHandover = (batchId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const printWindow = window.open(`/api/batches/${batchId}/handover-sheet`, '_blank');
+    if (printWindow) {
+      printWindow.focus();
+    }
+  };
+
+  const handleSplitBatch = (batch: Batch, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedSplitBatch(batch);
+  };
+
+  const handleRejectBatch = (batch: Batch, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedRejectionBatch(batch);
+  };
+
+  const handleTraceability = (batch: Batch, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedTraceabilityBatch(batch);
+  };
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -168,13 +217,22 @@ const BatchTrackingPage = () => {
           </h1>
           <p className="text-gray-600 mt-1">Monitor batch production and genealogy</p>
         </div>
-        <button
-          onClick={() => { resetForm(); setIsModalOpen(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus size={20} />
-          New Batch
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setIsAssemblyModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+          >
+            <Boxes size={20} />
+            Create Assembly
+          </button>
+          <button
+            onClick={() => { resetForm(); setIsModalOpen(true); }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus size={20} />
+            New Batch
+          </button>
+        </div>
       </div>
 
       {analytics && (
@@ -260,7 +318,11 @@ const BatchTrackingPage = () => {
             const StatusIcon = statusConfig.icon;
             const completionPercent = batch.targetQty > 0 ? (batch.currentQty / batch.targetQty) * 100 : 0;
             return (
-              <div key={batch.id} className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-5">
+              <div 
+                key={batch.id} 
+                className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-5 cursor-pointer"
+                onClick={() => setSelectedTraceabilityBatch(batch)}
+              >
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
@@ -272,7 +334,25 @@ const BatchTrackingPage = () => {
                     </div>
                     <p className="text-sm text-gray-600">{batch.Project.name}</p>
                     <p className="text-sm text-gray-600">SKU: {batch.ProjectSku.skuCode}</p>
+                    <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                      <GitBranch className="w-3 h-3" />
+                      Click to view traceability
+                    </p>
                   </div>
+                  
+                  {/* QR Code Preview Button */}
+                  {batch.qrCodeDataURL && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedQRBatch(batch);
+                      }}
+                      className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors group"
+                      title="View QR Code"
+                    >
+                      <QrCode className="w-5 h-5 text-slate-600 group-hover:text-primary-600 transition-colors" />
+                    </button>
+                  )}
                 </div>
 
                 {batch.poNumber && (
@@ -327,6 +407,49 @@ const BatchTrackingPage = () => {
                 <div className="mt-3 text-xs text-gray-500">
                   Created: {new Date(batch.createdAt).toLocaleDateString()}
                 </div>
+
+                {/* Action Buttons */}
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedMovementBatch(batch);
+                    }}
+                    className="btn-primary flex items-center justify-center gap-2 text-sm touch-target"
+                  >
+                    <MoveRight className="w-4 h-4" />
+                    <span className="hidden sm:inline">Log Movement</span>
+                    <span className="sm:hidden">Move</span>
+                  </button>
+                  <button
+                    onClick={(e) => handleRejectBatch(batch, e)}
+                    className="btn-primary bg-error-600 hover:bg-error-700 flex items-center justify-center gap-2 text-sm touch-target"
+                    title="Report Rejection"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    <span className="hidden sm:inline">Report Rejection</span>
+                    <span className="sm:hidden">Reject</span>
+                  </button>
+                  <button
+                    onClick={(e) => handleSplitBatch(batch, e)}
+                    className="btn-gradient flex items-center justify-center gap-2 text-sm touch-target"
+                    title="Split into Sub-Batches"
+                    disabled={batch.status === 'split'}
+                  >
+                    <Scissors className="w-4 h-4" />
+                    <span className="hidden sm:inline">Split Batch</span>
+                    <span className="sm:hidden">Split</span>
+                  </button>
+                  <button
+                    onClick={(e) => handlePrintHandover(batch.id, e)}
+                    className="btn-secondary flex items-center justify-center gap-2 text-sm touch-target"
+                    title="Print Handover Sheet"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span className="hidden sm:inline">Print Sheet</span>
+                    <span className="sm:hidden">Print</span>
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -350,7 +473,7 @@ const BatchTrackingPage = () => {
                   <label className="block text-sm font-medium mb-2">SKU *</label>
                   <select required value={formData.projectSkuId} onChange={(e) => setFormData({ ...formData, projectSkuId: e.target.value })} className="w-full px-3 py-2 border rounded-lg" disabled={!formData.projectId}>
                     <option value="">Select SKU</option>
-                    {projectSkus.map(s => <option key={s.id} value={s.id}>{s.skuCode} - {s.name}</option>)}
+                    {projectSkus.map((s: any) => <option key={s.id} value={s.id}>{s.skuCode} - {s.skuName}</option>)}
                   </select>
                 </div>
                 <div>
@@ -376,6 +499,128 @@ const BatchTrackingPage = () => {
           </div>
         </div>
       )}
+
+      {/* QR Code Modal */}
+      {selectedQRBatch && selectedQRBatch.qrCodeDataURL && (
+        <QRCodeModal
+          isOpen={true}
+          onClose={() => setSelectedQRBatch(null)}
+          qrCodeDataURL={selectedQRBatch.qrCodeDataURL}
+          batchCode={selectedQRBatch.batchCode}
+          batchId={selectedQRBatch.id}
+        />
+      )}
+
+      {/* Batch Movement Modal */}
+      {selectedMovementBatch && (
+        <BatchMovementModal
+          isOpen={true}
+          onClose={() => setSelectedMovementBatch(null)}
+          onSuccess={() => {
+            fetchBatches();
+            fetchAnalytics();
+          }}
+          batchId={selectedMovementBatch.id}
+          batchCode={selectedMovementBatch.batchCode}
+          currentStationId={selectedMovementBatch.currentStationId}
+          currentQty={selectedMovementBatch.currentQty}
+          stations={stations}
+        />
+      )}
+
+      {/* Batch Detail Modal */}
+      {selectedDetailBatch && (
+        <BatchDetailModal
+          isOpen={true}
+          onClose={() => setSelectedDetailBatch(null)}
+          batchId={selectedDetailBatch}
+        />
+      )}
+
+      {/* Split Batch Modal */}
+      {selectedSplitBatch && (
+        <SplitBatchModal
+          isOpen={true}
+          onClose={() => setSelectedSplitBatch(null)}
+          onSuccess={() => {
+            fetchBatches();
+            fetchAnalytics();
+            setSelectedSplitBatch(null);
+          }}
+          batchId={selectedSplitBatch.id}
+          batchCode={selectedSplitBatch.batchCode}
+          currentQty={selectedSplitBatch.currentQty}
+          projectName={selectedSplitBatch.Project.name}
+          skuCode={selectedSplitBatch.ProjectSku.skuCode}
+        />
+      )}
+
+      {/* Rejection Modal */}
+      {selectedRejectionBatch && (
+        <RejectionModal
+          isOpen={true}
+          onClose={() => setSelectedRejectionBatch(null)}
+          onSuccess={() => {
+            fetchBatches();
+            fetchAnalytics();
+            setSelectedRejectionBatch(null);
+          }}
+          batchId={selectedRejectionBatch.id}
+          batchCode={selectedRejectionBatch.batchCode}
+          currentQty={selectedRejectionBatch.currentQty}
+          projectName={selectedRejectionBatch.Project.name}
+          skuCode={selectedRejectionBatch.ProjectSku.skuCode}
+          operatorId={1}
+          stations={stations}
+        />
+      )}
+
+      {/* Batch Traceability Modal */}
+      {selectedTraceabilityBatch && (
+        <BatchTraceabilityModal
+          isOpen={true}
+          onClose={() => setSelectedTraceabilityBatch(null)}
+          batchId={selectedTraceabilityBatch.id}
+          batchCode={selectedTraceabilityBatch.batchCode}
+        />
+      )}
+
+      {/* Assembly Modal */}
+      {isAssemblyModalOpen && projectFilter && (
+        <AssemblyModal
+          isOpen={true}
+          onClose={() => setIsAssemblyModalOpen(false)}
+          projectId={projectFilter}
+          onAssemblyCreated={() => {
+            fetchBatches();
+            fetchAnalytics();
+            setIsAssemblyModalOpen(false);
+          }}
+        />
+      )}
+
+      {!projectFilter && isAssemblyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Select Project First</h3>
+            <p className="text-gray-600 mb-6">
+              Please select a project from the filter dropdown before creating an assembly.
+            </p>
+            <button
+              onClick={() => setIsAssemblyModalOpen(false)}
+              className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Scan Button */}
+      <FloatingScanButton 
+        stations={stations}
+        openMovementModal={true}
+      />
     </div>
   );
 };

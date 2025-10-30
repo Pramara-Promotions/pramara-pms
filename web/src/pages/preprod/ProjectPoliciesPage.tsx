@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, FileText, CheckCircle, AlertTriangle, Clock, BookOpen, Users } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
+import { listProjects } from '../../lib/services/projects';
+import { listWorkers } from '../../lib/services/workers';
+import { listProjectPolicies, createProjectPolicy, updateProjectPolicy, activateProjectPolicy, deleteProjectPolicy } from '../../lib/services/preproduction';
 
 interface ProjectPolicy {
   id: string;
@@ -67,8 +70,8 @@ const ProjectPoliciesPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -76,8 +79,8 @@ const ProjectPoliciesPage = () => {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/users', { credentials: 'include' });
-      if (res.ok) setUsers(await res.json());
+      const rows = await listWorkers();
+      setUsers(rows || []);
     } catch (error) {
       console.error('Error fetching users:', error);
     }
@@ -86,13 +89,8 @@ const ProjectPoliciesPage = () => {
   const fetchPolicies = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (statusFilter) params.append('status', statusFilter);
-      if (typeFilter) params.append('policyType', typeFilter);
-
-      const res = await fetch(`/api/project-policies?${params}`, { credentials: 'include' });
-      if (res.ok) setPolicies(await res.json());
+      const rows = await listProjectPolicies({ projectId: projectFilter, status: statusFilter, category: typeFilter });
+      setPolicies(rows || []);
     } catch (error) {
       console.error('Error fetching policies:', error);
     } finally {
@@ -104,28 +102,18 @@ const ProjectPoliciesPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = editingPolicy 
-        ? `/api/project-policies/${editingPolicy.id}`
-        : '/api/project-policies';
-      const method = editingPolicy ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingPolicy(null);
-        resetForm();
-        fetchPolicies();
+      if (editingPolicy) {
+        await updateProjectPolicy(editingPolicy.id, formData);
       } else {
-        alert('Failed to save policy');
+        await createProjectPolicy(formData);
       }
+      setIsModalOpen(false);
+      setEditingPolicy(null);
+      resetForm();
+      fetchPolicies();
     } catch (error) {
       console.error('Error saving policy:', error);
+      alert('Failed to save policy');
     } finally {
       setIsLoading(false);
     }
@@ -134,13 +122,8 @@ const ProjectPoliciesPage = () => {
   const handleActivate = async (id: string) => {
     if (!confirm('Activate this policy?')) return;
     try {
-      const res = await fetch(`/api/project-policies/${id}/activate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ note: 'Policy activated' })
-      });
-      if (res.ok) fetchPolicies();
+      await activateProjectPolicy(id);
+      fetchPolicies();
     } catch (error) {
       console.error('Error activating policy:', error);
     }
@@ -149,11 +132,8 @@ const ProjectPoliciesPage = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this policy?')) return;
     try {
-      const res = await fetch(`/api/project-policies/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) fetchPolicies();
+      await deleteProjectPolicy(id);
+      fetchPolicies();
     } catch (error) {
       console.error('Error deleting policy:', error);
     }

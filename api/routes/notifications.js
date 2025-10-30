@@ -143,6 +143,91 @@ router.post('/notifications/test', authGuard, async (req, res) => {
   }
 });
 
+// Create RICH test notification with three-part structure (for development/testing)
+router.post('/notifications/test-rich', authGuard, async (req, res) => {
+  try {
+    const userId = req.auth.user.id;
+    
+    // Create a notification with full metadata structure
+    const notification = await prisma.notification.create({
+      data: {
+        userId,
+        type: 'QC_FAILED',
+        title: '❌ QC Failed',
+        message: 'Batch B-12345 failed quality control. Immediate attention required.',
+        read: false,
+        dismissed: false,
+        priority: 'critical',
+        entityType: 'batch',
+        entityId: 'B-12345',
+        entityName: 'Batch B-12345',
+        location: 'Station 3 - QC Area',
+        primaryAction: 'View Batch',
+        primaryActionUrl: '/execution/batches?batchId=B-12345',
+        primaryActionType: 'navigate',
+        // Impact details - showing what's affected
+        impactDetails: JSON.stringify({
+          blockedTasks: 3,
+          affectedUsers: 5,
+          hoursShortfall: 4
+        }),
+        // Suggested actions - clickable solutions
+        secondaryActions: JSON.stringify([
+          { label: 'Rework Batch', url: '/execution/batches?batchId=B-12345&action=rework', type: 'navigate' },
+          { label: 'Report Issue', url: '/qc/report?batchId=B-12345', type: 'navigate' },
+          { label: 'Contact Supervisor', url: '/messages?to=supervisor', type: 'navigate' }
+        ])
+      }
+    });
+
+    // Create another rich notification - Low Stock
+    const notification2 = await prisma.notification.create({
+      data: {
+        userId,
+        type: 'LOW_STOCK',
+        title: '⚠️ Low Stock Alert',
+        message: 'Material XYZ-123 is running low. Current stock: 50 units.',
+        read: false,
+        dismissed: false,
+        priority: 'high',
+        entityType: 'material',
+        entityId: 'XYZ-123',
+        entityName: 'Material XYZ-123',
+        location: 'Warehouse A',
+        primaryAction: 'View Material',
+        primaryActionUrl: '/planning/materials?materialId=XYZ-123',
+        primaryActionType: 'navigate',
+        impactDetails: JSON.stringify({
+          blockedTasks: 2,
+          affectedUsers: 8,
+          delayedStagesCount: 2
+        }),
+        secondaryActions: JSON.stringify([
+          { label: 'Create Purchase Order', url: '/planning/materials?materialId=XYZ-123&action=order', type: 'navigate' },
+          { label: 'Check Alternatives', url: '/planning/materials?materialId=XYZ-123&alternatives=true', type: 'navigate' },
+          { label: 'View Usage History', url: '/planning/materials?materialId=XYZ-123&history=true', type: 'navigate' }
+        ])
+      }
+    });
+
+    // Emit real-time notifications via Socket.IO
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${userId}`).emit('notification', notification);
+      io.to(`user:${userId}`).emit('notification', notification2);
+      console.log(`📬 Rich notifications sent to user:${userId}`);
+    }
+    
+    res.status(201).json({ 
+      message: 'Created 2 rich test notifications with full metadata',
+      notifications: [notification, notification2]
+    });
+  } catch (error) {
+    console.error('Error creating rich test notification:', error);
+    res.status(500).json({ error: 'Failed to create test notification', details: error.message });
+  }
+});
+
 // Helper function to create a notification (for internal use)
 async function createNotification({ userId, type, title, message, link = null }, io = null) {
   try {

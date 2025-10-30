@@ -129,7 +129,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/stations/:id - Update station
+// PUT /api/stations/:id - Update station (enhanced fields)
 router.put('/:id', async (req, res) => {
   try {
     const {
@@ -143,6 +143,19 @@ router.put('/:id', async (req, res) => {
       active,
       avgOutputRate,
       avgQualityRate,
+      // Enhanced fields
+      workstationType,
+      isMultiAsset,
+      baseCycleTime,
+      actualCycleTime,
+      cycleTimeUnit,
+      targetUtilization,
+      actualUtilization,
+      requiresAssets,
+      requiredAssetTypes,
+      currentSKU,
+      skuCycleTimeMap,
+      performanceBaseline,
     } = req.body;
 
     const updateData = { updatedAt: new Date() };
@@ -156,6 +169,19 @@ router.put('/:id', async (req, res) => {
     if (active !== undefined) updateData.active = active;
     if (avgOutputRate !== undefined) updateData.avgOutputRate = parseFloat(avgOutputRate);
     if (avgQualityRate !== undefined) updateData.avgQualityRate = parseFloat(avgQualityRate);
+    // Enhanced fields
+    if (workstationType !== undefined) updateData.workstationType = workstationType || null;
+    if (isMultiAsset !== undefined) updateData.isMultiAsset = Boolean(isMultiAsset);
+    if (baseCycleTime !== undefined) updateData.baseCycleTime = baseCycleTime != null ? Number(baseCycleTime) : null;
+    if (actualCycleTime !== undefined) updateData.actualCycleTime = actualCycleTime != null ? Number(actualCycleTime) : null;
+    if (cycleTimeUnit !== undefined) updateData.cycleTimeUnit = cycleTimeUnit || null;
+    if (targetUtilization !== undefined) updateData.targetUtilization = targetUtilization != null ? Number(targetUtilization) : null;
+    if (actualUtilization !== undefined) updateData.actualUtilization = actualUtilization != null ? Number(actualUtilization) : null;
+    if (requiresAssets !== undefined) updateData.requiresAssets = Boolean(requiresAssets);
+    if (requiredAssetTypes !== undefined) updateData.requiredAssetTypes = Array.isArray(requiredAssetTypes) ? requiredAssetTypes : [];
+    if (currentSKU !== undefined) updateData.currentSKU = currentSKU || null;
+    if (skuCycleTimeMap !== undefined) updateData.skuCycleTimeMap = skuCycleTimeMap || null;
+    if (performanceBaseline !== undefined) updateData.performanceBaseline = performanceBaseline || null;
 
     const station = await prisma.station.update({
       where: { id: parseInt(req.params.id) },
@@ -171,6 +197,38 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error updating station:', error);
     res.status(500).json({ error: 'Failed to update station' });
+  }
+});
+
+// GET /api/stations/:id/capacity - capacity summary leveraging process-config
+router.get('/:id/capacity', async (req, res) => {
+  try {
+    const stationId = parseInt(req.params.id);
+    const station = await prisma.station.findUnique({ where: { id: stationId } });
+    if (!station) return res.status(404).json({ error: 'Station not found' });
+
+    const configs = await prisma.processConfig.findMany({
+      where: { stationId },
+      include: { calculations: { orderBy: { calculatedAt: 'desc' }, take: 1 } }
+    });
+
+    const dailyHours = 24;
+    const machineCount = station.capacity || 1;
+    const totalCapacityHours = dailyHours * machineCount;
+
+    res.json({
+      stationId,
+      stationCode: station.code,
+      stationName: station.name,
+      machineCount,
+      dailyHours,
+      totalCapacityHours,
+      configurations: configs.length,
+      recentCalculations: configs.map(c => c.calculations[0]).filter(Boolean),
+    });
+  } catch (e) {
+    console.error('stations:capacity', e);
+    res.status(500).json({ error: 'Failed to fetch station capacity' });
   }
 });
 

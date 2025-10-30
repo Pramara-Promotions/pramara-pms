@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Upload, FileImage, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listPackaging, createPackaging, updatePackaging, reviewPackaging, approvePackaging, deletePackaging } from '../../lib/services/preproduction';
 
 interface PackagingDesign {
   id: string;
@@ -104,33 +106,27 @@ const PackagingPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setProjects(data);
-      }
+      const data = await listProjects();
+      setProjects(data);
     } catch (error) {
       console.error('Error fetching projects:', error);
+      alert('Failed to load projects');
     }
   };
 
   const fetchDesigns = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (selectedProjectId) params.append('projectId', selectedProjectId);
-      if (statusFilter) params.append('status', statusFilter);
-      if (typeFilter) params.append('packagingType', typeFilter);
+      const filters: any = {};
+      if (selectedProjectId) filters.projectId = parseInt(selectedProjectId);
+      if (statusFilter) filters.status = statusFilter;
+      if (typeFilter) filters.packagingType = typeFilter;
 
-      const res = await fetch(`/api/pre-production/packaging?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDesigns(data);
-      }
+      const data = await listPackaging(filters);
+      setDesigns(data);
     } catch (error) {
       console.error('Error fetching designs:', error);
+      alert('Failed to load packaging designs');
     } finally {
       setIsLoading(false);
     }
@@ -176,18 +172,8 @@ const PackagingPage = () => {
     if (!feedback) return;
 
     try {
-      const res = await fetch(`/api/pre-production/packaging/${id}/review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ feedback }),
-      });
-
-      if (res.ok) {
-        fetchDesigns();
-      } else {
-        alert('Failed to submit review');
-      }
+      await reviewPackaging(id, feedback);
+      fetchDesigns();
     } catch (error) {
       console.error('Error reviewing design:', error);
       alert('Failed to submit review');
@@ -198,16 +184,8 @@ const PackagingPage = () => {
     if (!confirm('Are you sure you want to approve this design?')) return;
 
     try {
-      const res = await fetch(`/api/pre-production/packaging/${id}/approve`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        fetchDesigns();
-      } else {
-        alert('Failed to approve design');
-      }
+      await approvePackaging(id);
+      fetchDesigns();
     } catch (error) {
       console.error('Error approving design:', error);
       alert('Failed to approve design');
@@ -218,16 +196,8 @@ const PackagingPage = () => {
     if (!confirm('Are you sure you want to delete this design?')) return;
 
     try {
-      const res = await fetch(`/api/pre-production/packaging/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        fetchDesigns();
-      } else {
-        alert('Failed to delete design');
-      }
+      await deletePackaging(id);
+      fetchDesigns();
     } catch (error) {
       console.error('Error deleting design:', error);
       alert('Failed to delete design');

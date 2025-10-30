@@ -173,6 +173,61 @@ async function seedProjectData(projectId) {
   }
 }
 
+async function seedStationsAndSkus(projectId) {
+  // Ensure a few stations
+  const stationNames = ['Molding Line 1', 'Spray Booth A', 'Assembly Table 1'];
+  for (let i = 0; i < stationNames.length; i++) {
+    const code = `ST-${String(i + 1).padStart(3, '0')}`;
+    const name = stationNames[i];
+    const found = await prisma.station.findFirst({ where: { code } });
+    if (!found) {
+      await prisma.station.create({
+        data: {
+          code,
+          name,
+          projectId,
+          capacity: i === 0 ? 2 : 1,
+          status: 'operational',
+          updatedAt: new Date(),
+        },
+      });
+    }
+  }
+
+  // Ensure a couple of SKUs
+  const skus = [
+    { code: 'RED-TOY', name: 'Toy Red', color: 'Red' },
+    { code: 'BLUE-TOY', name: 'Toy Blue', color: 'Blue' },
+  ];
+  for (const s of skus) {
+    const exist = await prisma.projectSku.findFirst({ where: { projectId, code: s.code } });
+    if (!exist) {
+      await prisma.projectSku.create({ data: { projectId, code: s.code, name: s.name, color: s.color, orderQty: 1000 } });
+    }
+  }
+
+  // Seed a couple of assets
+  const assets = [
+    { assetName: 'Injection Molder X1', assetType: 'machine', mobility: 'fixed' },
+    { assetName: 'Spray Gun SG-100', assetType: 'tool', mobility: 'movable' },
+  ];
+  for (const a of assets) {
+    const exists = await prisma.asset.findFirst({ where: { assetName: a.assetName } });
+    if (!exists) {
+      await prisma.asset.create({
+        data: {
+          assetCode: `AST-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          assetName: a.assetName,
+          assetType: a.assetType,
+          mobility: a.mobility,
+          status: 'available',
+          condition: 'good',
+        }
+      });
+    }
+  }
+}
+
 /* ---------- main ---------- */
 async function main() {
   console.log('Seeding…');
@@ -258,6 +313,9 @@ async function main() {
   // 6) Demo related data
   console.log('📊 Seeding project data...');
   await seedProjectData(project.id);
+
+  console.log('🏭 Seeding stations, SKUs and assets...');
+  await seedStationsAndSkus(project.id);
 
   console.log('✅ Seed complete.');
   console.log('   Admin:', adminEmail, '/ password:', adminPassword, '(please change)');

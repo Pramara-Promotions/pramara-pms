@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { apiGet, apiPost } from '../lib/api';
+import { listProjects } from '../lib/services/projects';
+import { calculateMRP, getMRPAccuracy, getMRPRecommendations, listProjectMRPs, acceptRecommendation } from '../lib/services/mrp';
+import { listProjectSkus } from '../lib/services/projects';
 
 interface MRP {
   id: string;
@@ -54,7 +56,7 @@ export default function MRPCalculatorPage() {
 
   const fetchProjects = async () => {
     try {
-      const response = await apiGet('/api/projects');
+      const response = await listProjects();
       setProjects(response || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
@@ -63,8 +65,8 @@ export default function MRPCalculatorPage() {
 
   const fetchSKUs = async (projectId: string) => {
     try {
-      const response = await apiGet(`/api/projects/${projectId}/skus`);
-      setSkus(response.skus || []);
+      const response = await listProjectSkus(projectId);
+      setSkus(response || []);
     } catch (error) {
       console.error('Error fetching SKUs:', error);
     }
@@ -72,7 +74,7 @@ export default function MRPCalculatorPage() {
 
   const fetchAccuracy = async () => {
     try {
-      const response = await apiGet('/api/mrp/learning/accuracy?days=90');
+      const response = await getMRPAccuracy(90);
       setAccuracy(response);
     } catch (error) {
       console.error('Error fetching accuracy:', error);
@@ -81,8 +83,8 @@ export default function MRPCalculatorPage() {
 
   const fetchRecommendations = async () => {
     try {
-      const response = await apiGet('/api/mrp/learning/recommendations?status=pending');
-      setRecommendations(response.recommendations || []);
+      const response = await getMRPRecommendations('pending');
+      setRecommendations(response || []);
     } catch (error) {
       console.error('Error fetching recommendations:', error);
     }
@@ -96,19 +98,19 @@ export default function MRPCalculatorPage() {
     
     setCalculating(true);
     try {
-      const response = await apiPost('/api/mrp/calculate', {
+      await calculateMRP({
         projectId: formData.projectId,
         skuId: formData.skuId,
-        targetQty: parseInt(formData.targetQty),
-        lossType: formData.lossType,
-        projectWideLoss: parseFloat(formData.projectWideLoss)
+        targetQty: formData.targetQty,
+        lossType: formData.lossType as any,
+        projectWideLoss: formData.projectWideLoss,
       });
       
       alert('MRP calculated successfully!');
       
       // Fetch MRPs for this project
-      const mrpResponse = await apiGet(`/api/mrp/${formData.projectId}`);
-      setMRPs(mrpResponse.mrps || []);
+      const mrpResponse: any = await listProjectMRPs(formData.projectId);
+      setMRPs(Array.isArray(mrpResponse) ? mrpResponse : (mrpResponse.mrps || []));
     } catch (error) {
       console.error('Error calculating MRP:', error);
       alert('Failed to calculate MRP');
@@ -119,7 +121,7 @@ export default function MRPCalculatorPage() {
 
   const handleAcceptRecommendation = async (id: string) => {
     try {
-      await apiPost(`/api/mrp/recommendations/${id}/accept`, {});
+      await acceptRecommendation(id);
       fetchRecommendations();
       alert('Recommendation accepted');
     } catch (error) {
@@ -195,7 +197,7 @@ export default function MRPCalculatorPage() {
               disabled={!formData.projectId}
             >
               <option value="">Select SKU</option>
-              {skus.map(s => (
+              {skus.map((s: any) => (
                 <option key={s.id} value={s.id}>{s.skuCode} - {s.skuName}</option>
               ))}
             </select>

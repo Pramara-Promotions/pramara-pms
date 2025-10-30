@@ -3,15 +3,17 @@ import { useEffect, useState } from 'react'
 import { 
   Menu, Search, Plus, LayoutGrid, ClipboardList, PackageCheck, AlertTriangle, 
   BarChart3, Settings, LogOut, User, Factory, FlaskConical, PackageOpen,
-  CheckSquare, Boxes, CalendarCheck, Users, TrendingUp, Bell
+  CheckSquare, Boxes, CalendarCheck, Users, TrendingUp, Bell, Home
 } from 'lucide-react'
 import clsx from 'clsx'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import CommandPalette from '../../features/common/CommandPalette'
 import QuickAddModal from '../../features/common/QuickAddModal'
 import { useAuth } from '../../features/common/AuthProvider'
 import SecurityAlertBanner from '../SecurityAlertBanner'
 import NotificationBell from '../notifications/NotificationBell'
 import NotificationCenter from '../notifications/NotificationCenter'
+import PinnedNavItem from './PinnedNavItem'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -22,6 +24,41 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = useRouterState({ select: s => s.location.pathname })
   const { user, logout, loading } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  // Fetch pinned items
+  const { data: preferences } = useQuery({
+    queryKey: ['user-preferences', user?.id],
+    queryFn: async () => {
+      const res = await fetch('/api/user/preferences', {
+        credentials: 'include'
+      })
+      if (!res.ok) throw new Error('Failed to fetch preferences')
+      return res.json()
+    },
+    enabled: !!user
+  })
+
+  const pinnedItems = Array.isArray(preferences?.pinnedItems) ? preferences.pinnedItems : []
+
+  // Unpin mutation
+  const unpinMutation = useMutation({
+    mutationFn: async (pinId: string) => {
+      const res = await fetch(`/api/user/preferences/pin/${pinId}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      })
+      if (!res.ok) throw new Error('Failed to unpin')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['user-preferences'] })
+    }
+  })
+
+  const handleUnpin = (pinId: string) => {
+    unpinMutation.mutate(pinId)
+  }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -66,53 +103,42 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="w-8" />
         </div>
         <nav className="p-3 space-y-1 flex-1 overflow-y-auto">
-          <NavItem to="/"          icon={LayoutGrid}   label="Dashboard" />
+          {/* Core Navigation - Only 3 items */}
+          <NavItem to="/"          icon={Home}         label="Home" />
           <NavItem to="/projects"  icon={ClipboardList}label="Projects" />
-          <NavItem to="/tasks"     icon={PackageCheck} label="Tasks" />
-          <NavItem to="/qc"        icon={AlertTriangle}label="QC" />
-          <NavItem to="/alerts"    icon={AlertTriangle}label="Alerts" />
-          <NavItem to="/reports"   icon={BarChart3}    label="Reports" />
           
-          {/* Pre-Production Section */}
-          {sidebarOpen && <div className="text-xs font-semibold text-gray-500 mt-4 mb-2 px-3">PRE-PRODUCTION</div>}
-          <NavItem to="/preprod/molds"    icon={Factory}      label="Molds" />
-          <NavItem to="/preprod/trials"   icon={FlaskConical} label="Trials" />
-          <NavItem to="/preprod/packaging"icon={PackageOpen}  label="Packaging" />
-          <NavItem to="/preprod/pps"      icon={CheckSquare}  label="PPS" />
-          <NavItem to="/preprod/policies" icon={ClipboardList}label="Policies" />
-          <NavItem to="/preprod/process-flows" icon={BarChart3} label="Process Flows" />
+          {/* Admin - Role-based */}
+          {user?.roles?.some((r: any) => r.role?.name === 'ADMIN') && (
+            <NavItem to="/admin" icon={Settings} label="Admin" />
+          )}
           
-          {/* Compliance Section */}
-          {sidebarOpen && <div className="text-xs font-semibold text-gray-500 mt-4 mb-2 px-3">COMPLIANCE</div>}
-          <NavItem to="/compliance"               icon={CheckSquare} label="Dashboard" />
-          <NavItem to="/compliance/certifications"icon={CheckSquare} label="Certifications" />
-          <NavItem to="/compliance/projects"      icon={ClipboardList}label="Projects" />
-          <NavItem to="/compliance/materials"     icon={Boxes}       label="Materials" />
-          <NavItem to="/compliance/lab-tests"     icon={FlaskConical}label="Lab Tests" />
+          {/* Pinned Items Section */}
+          {pinnedItems.length > 0 && (
+            <>
+              <div className="border-t my-3" />
+              {sidebarOpen && (
+                <div className="text-xs font-semibold text-gray-500 px-3 mb-2 flex items-center justify-between">
+                  <span>PINNED</span>
+                </div>
+              )}
+              <div className="space-y-1">
+                {pinnedItems.map((item: any) => (
+                  <PinnedNavItem key={item.id} item={item} onUnpin={handleUnpin} />
+                ))}
+              </div>
+            </>
+          )}
           
-          {/* Execution Section */}
-          {sidebarOpen && <div className="text-xs font-semibold text-gray-500 mt-4 mb-2 px-3">EXECUTION</div>}
-          <NavItem to="/execution/stations"       icon={Factory}      label="Stations" />
-          <NavItem to="/execution/workflow"       icon={BarChart3}    label="Workflow" />
-          <NavItem to="/execution/workflow-builder" icon={Settings}   label="Workflow Builder" />
-          <NavItem to="/execution/qc"             icon={CheckSquare}  label="QC Management" />
-          <NavItem to="/execution/production"     icon={Factory}      label="Production Entry" />
-          <NavItem to="/execution/batches"        icon={PackageCheck} label="Batch Tracking" />
-          <NavItem to="/execution/process-config" icon={Settings}     label="Process Config" />
-          <NavItem to="/execution/shift-entries"  icon={CalendarCheck}label="Shift Entries" />
-          <NavItem to="/execution/wip-ledger"     icon={ClipboardList}label="WIP Ledger" />
-          
-          {/* Planning Section */}
-          {sidebarOpen && <div className="text-xs font-semibold text-gray-500 mt-4 mb-2 px-3">PLANNING</div>}
-          <NavItem to="/planning/daily"      icon={CalendarCheck}label="Daily Planning" />
-          <NavItem to="/planning/workforce"  icon={Users}        label="Workforce" />
-          <NavItem to="/planning/materials"  icon={Boxes}        label="Materials" />
-          <NavItem to="/planning/mrp"        icon={TrendingUp}   label="MRP Calculator" />
-          <NavItem to="/planning/approvals"  icon={Bell}         label="Approvals" />
-          
-          {/* Admin Section */}
-          {sidebarOpen && <div className="text-xs font-semibold text-gray-500 mt-4 mb-2 px-3">ADMIN</div>}
-          <NavItem to="/admin"     icon={Settings}     label="Admin" />
+          {/* Empty state for pinned items */}
+          {pinnedItems.length === 0 && sidebarOpen && (
+            <>
+              <div className="border-t my-3" />
+              <div className="px-3 py-4 bg-gray-50 rounded-lg text-xs text-gray-600 text-center">
+                <p className="mb-1">Pin frequently accessed items here</p>
+                <p className="text-gray-500 text-[10px]">Search for items and pin them to sidebar</p>
+              </div>
+            </>
+          )}
         </nav>
       </aside>
 

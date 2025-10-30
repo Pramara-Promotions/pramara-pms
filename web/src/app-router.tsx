@@ -20,6 +20,10 @@ import ListTab from "./pages/projects/tabs/ListTab";
 import BoardTab from "./pages/projects/tabs/BoardTab";
 import FilesTab from "./pages/projects/tabs/FilesTab";
 import MessagesTab from "./pages/projects/tabs/MessagesTab";
+import ExecutionTab from "./pages/projects/tabs/ExecutionTab";
+import PreProdTab from "./pages/projects/tabs/PreProdTab";
+import ComplianceTab from "./pages/projects/tabs/ComplianceTab";
+import PlanningTab from "./pages/projects/tabs/PlanningTab";
 import Tasks from "./pages/Tasks";
 import QC from "./pages/QC";
 import Alerts from "./pages/Alerts";
@@ -58,6 +62,7 @@ import WorkforceManagementPage from "./pages/WorkforceManagementPage";
 import DailyPlanningPage from "./pages/DailyPlanningPage";
 import ApprovalTrackerPage from "./pages/ApprovalTrackerPage";
 import MRPCalculatorPage from "./pages/MRPCalculatorPage";
+import StageView from "./pages/cross-project/StageView";
 
 /****************************************************
  * [LMK-02] ROOT ROUTE (no context)
@@ -139,6 +144,30 @@ const messagesTabRoute = createRoute({
   getParentRoute: () => projectDetailRoute,
   path: "messages",
   component: MessagesTab,
+});
+
+const executionTabRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "execution",
+  component: ExecutionTab,
+});
+
+const preprodTabRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "preprod",
+  component: PreProdTab,
+});
+
+const complianceTabRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "compliance",
+  component: ComplianceTab,
+});
+
+const planningTabRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "planning",
+  component: PlanningTab,
 });
 
 const tasksRoute = createRoute({
@@ -327,6 +356,12 @@ const mrpCalculatorRoute = createRoute({
   component: MRPCalculatorPage,
 });
 
+const stageViewRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "stages/$stage",
+  component: StageView,
+});
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "login",
@@ -402,6 +437,7 @@ const routeTree = rootRoute.addChildren([
     dailyPlanningRoute,
     approvalTrackerRoute,
     mrpCalculatorRoute,
+    stageViewRoute,
     accountRoute,
   ]),
   loginRoute,
@@ -417,6 +453,10 @@ projectDetailRoute.addChildren([
   skusTabRoute,
   listTabRoute,
   boardTabRoute,
+  executionTabRoute,
+  preprodTabRoute,
+  complianceTabRoute,
+  planningTabRoute,
   filesTabRoute,
   messagesTabRoute,
 ]);

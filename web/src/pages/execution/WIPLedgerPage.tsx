@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { listProjects } from '../../lib/services/projects';
+import { listWipTransactions, createWipTransaction, cancelWipTransaction, getWipBalanceSummary } from '../../lib/services/wip';
 import { Plus, Package, TrendingUp, TrendingDown, BarChart3, Search } from 'lucide-react';
 
 interface WIPTransaction {
@@ -80,8 +82,8 @@ const WIPLedgerPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -90,12 +92,8 @@ const WIPLedgerPage = () => {
   const fetchTransactions = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (itemSearch) params.append('itemCode', itemSearch);
-
-      const res = await fetch(`/api/wip-ledger?${params}`, { credentials: 'include' });
-      if (res.ok) setTransactions(await res.json());
+      const rows = await listWipTransactions({ projectId: projectFilter, itemCode: itemSearch });
+      setTransactions(rows || []);
     } catch (error) {
       console.error('Error fetching transactions:', error);
     } finally {
@@ -106,11 +104,8 @@ const WIPLedgerPage = () => {
   const fetchBalances = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-
-      const res = await fetch(`/api/wip-ledger/balance/summary?${params}`, { credentials: 'include' });
-      if (res.ok) setBalances(await res.json());
+      const rows = await getWipBalanceSummary({ projectId: projectFilter });
+      setBalances(rows || []);
     } catch (error) {
       console.error('Error fetching balances:', error);
     } finally {
@@ -122,14 +117,8 @@ const WIPLedgerPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const res = await fetch('/api/wip-ledger', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
+      await createWipTransaction(formData);
+      {
         setIsModalOpen(false);
         resetForm();
         if (viewMode === 'balance') {
@@ -137,11 +126,10 @@ const WIPLedgerPage = () => {
         } else {
           fetchTransactions();
         }
-      } else {
-        alert('Failed to create transaction');
       }
     } catch (error) {
       console.error('Error creating transaction:', error);
+      alert('Failed to create transaction');
     } finally {
       setIsLoading(false);
     }

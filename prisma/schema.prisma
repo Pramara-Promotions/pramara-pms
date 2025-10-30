@@ -284,6 +284,19 @@ model Notification {
   @@index([entityType, entityId])
 }
 
+model UserPreferences {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  pinnedItems Json     @default("[]")
+  homeLayout  Json?
+  theme       String   @default("light")
+  notifications Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
 model SystemSetting {
   key       String   @id
   value     Json
@@ -305,6 +318,7 @@ model Project {
   ApprovalRequest       ApprovalRequest[]
   Batch                 Batch[]
   Lots                  Lot[]
+  BoardColumn           BoardColumn[]
   changes               ChangeLog[]
   complianceItems       ComplianceItem[]
   DailyPlan             DailyPlan[]
@@ -1789,6 +1803,24 @@ model StockMovement {
   @@index([materialId])
   @@index([movementType])
   @@index([timestamp])
+}
+
+model BoardColumn {
+  id         String      @id @default(cuid())
+  projectId  Int
+  name       String
+  section    TaskSection
+  position   Int         @default(0)
+  wipLimit   Int?
+  color      String?
+  isDefault  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime
+  Project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, section])
+  @@index([projectId])
+  @@index([projectId, position])
 }
 
 model Task {

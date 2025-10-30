@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, FileCheck, AlertTriangle, CheckCircle, Clock, Lock } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listComplianceRecords, createComplianceRecord, updateComplianceRecord, deleteComplianceRecord } from '../../lib/services/compliance';
 
 interface ProjectCompliance {
   id: string;
@@ -58,24 +60,26 @@ const ProjectCompliancePage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const data = await listProjects();
+      setProjects(data);
     } catch (error) {
       console.error('Error fetching projects:', error);
+      alert('Failed to load projects');
     }
   };
 
   const fetchCompliances = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (statusFilter) params.append('status', statusFilter);
+      const filters: any = {};
+      if (projectFilter) filters.projectId = projectFilter;
+      if (statusFilter) filters.status = statusFilter;
 
-      const res = await fetch(`/api/compliance/project-compliance?${params}`, { credentials: 'include' });
-      if (res.ok) setCompliances(await res.json());
+      const data = await listComplianceRecords(filters);
+      setCompliances(data);
     } catch (error) {
       console.error('Error fetching compliances:', error);
+      alert('Failed to load compliance records');
     } finally {
       setIsLoading(false);
     }
@@ -85,28 +89,19 @@ const ProjectCompliancePage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = editingCompliance 
-        ? `/api/compliance/project-compliance/${editingCompliance.id}`
-        : '/api/compliance/project-compliance';
-      const method = editingCompliance ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingCompliance(null);
-        resetForm();
-        fetchCompliances();
+      if (editingCompliance) {
+        await updateComplianceRecord(editingCompliance.id, formData);
       } else {
-        alert('Failed to save compliance');
+        await createComplianceRecord(formData);
       }
+      
+      setIsModalOpen(false);
+      setEditingCompliance(null);
+      resetForm();
+      fetchCompliances();
     } catch (error) {
       console.error('Error saving compliance:', error);
+      alert('Failed to save compliance record');
     } finally {
       setIsLoading(false);
     }
@@ -115,13 +110,11 @@ const ProjectCompliancePage = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this compliance requirement?')) return;
     try {
-      const res = await fetch(`/api/compliance/project-compliance/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) fetchCompliances();
+      await deleteComplianceRecord(id);
+      fetchCompliances();
     } catch (error) {
       console.error('Error deleting compliance:', error);
+      alert('Failed to delete compliance record');
     }
   };
 

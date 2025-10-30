@@ -1,5 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Plus, Factory, TrendingUp, Package, AlertCircle, Clock } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listStations } from '../../lib/services/stations';
+import { listShifts } from '../../lib/services/shifts';
+import { listProductionEntries, getProductionAnalytics, createProductionEntry } from '../../lib/services/productionEntries';
 
 interface ProductionEntry {
   id: string;
@@ -66,12 +70,8 @@ const ProductionEntryPage = () => {
   const fetchEntries = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (stationFilter) params.append('stationId', stationFilter);
-
-      const res = await fetch(`/api/production-entries?${params}`, { credentials: 'include' });
-      if (res.ok) setEntries(await res.json());
+      const rows = await listProductionEntries({ projectId: projectFilter, stationId: stationFilter });
+      setEntries(rows || []);
     } catch (error) {
       console.error('Error fetching production entries:', error);
     } finally {
@@ -81,11 +81,8 @@ const ProductionEntryPage = () => {
 
   const fetchAnalytics = async () => {
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-
-      const res = await fetch(`/api/production-entries/analytics/summary?${params}`, { credentials: 'include' });
-      if (res.ok) setAnalytics(await res.json());
+      const data = await getProductionAnalytics({ projectId: projectFilter, stationId: stationFilter });
+      setAnalytics(data || null);
     } catch (error) {
       console.error('Error fetching analytics:', error);
     }
@@ -93,8 +90,8 @@ const ProductionEntryPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -102,8 +99,8 @@ const ProductionEntryPage = () => {
 
   const fetchStations = async () => {
     try {
-      const res = await fetch('/api/stations', { credentials: 'include' });
-      if (res.ok) setStations(await res.json());
+      const rows = await listStations();
+      setStations(rows || []);
     } catch (error) {
       console.error('Error fetching stations:', error);
     }
@@ -111,8 +108,8 @@ const ProductionEntryPage = () => {
 
   const fetchShifts = async () => {
     try {
-      const res = await fetch('/api/shifts', { credentials: 'include' });
-      if (res.ok) setShifts(await res.json());
+      const rows = await listShifts();
+      setShifts(rows || []);
     } catch (error) {
       console.error('Error fetching shifts:', error);
     }
@@ -122,23 +119,14 @@ const ProductionEntryPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const res = await fetch('/api/production-entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        resetForm();
-        fetchEntries();
-        fetchAnalytics();
-      } else {
-        alert('Failed to create production entry');
-      }
+      await createProductionEntry(formData);
+      setIsModalOpen(false);
+      resetForm();
+      fetchEntries();
+      fetchAnalytics();
     } catch (error) {
       console.error('Error creating production entry:', error);
+      alert('Failed to create production entry');
     } finally {
       setIsLoading(false);
     }

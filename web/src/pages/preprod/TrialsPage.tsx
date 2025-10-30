@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, ArrowLeft, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { getMold, listTrials, createTrial, approveTrial } from '../../lib/services/preproduction';
 
 interface Trial {
   id: string;
@@ -83,18 +84,13 @@ const TrialsPage = () => {
 
   const fetchMoldDetails = async (moldId: string) => {
     try {
-      const res = await fetch(`/api/pre-production/molds/${moldId}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedMold(data);
-        setFormData(prev => ({
-          ...prev,
-          projectId: data.projectId.toString(),
-          trialNumber: (data.trials?.length + 1).toString(),
-        }));
-      }
+      const data = await getMold(moldId);
+      setSelectedMold(data);
+      setFormData(prev => ({
+        ...prev,
+        projectId: data.projectId.toString(),
+        trialNumber: (data.trials?.length + 1).toString(),
+      }));
     } catch (error) {
       console.error('Error fetching mold:', error);
     }
@@ -103,16 +99,8 @@ const TrialsPage = () => {
   const fetchTrials = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (moldIdParam) params.append('moldId', moldIdParam);
-
-      const res = await fetch(`/api/pre-production/trials?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTrials(data);
-      }
+      const rows = await listTrials(moldIdParam ? { moldId: moldIdParam } : {});
+      setTrials(rows || []);
     } catch (error) {
       console.error('Error fetching trials:', error);
     } finally {
@@ -139,25 +127,14 @@ const TrialsPage = () => {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/pre-production/trials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          ...formData,
-          defectTypes: defectTypes.length > 0 ? defectTypes : null,
-        }),
+      await createTrial({
+        ...formData,
+        defectTypes: defectTypes.length > 0 ? defectTypes : null,
       });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        resetForm();
-        fetchTrials();
-        fetchMoldDetails(moldIdParam!);
-      } else {
-        const error = await res.json();
-        alert(error.error || 'Failed to create trial');
-      }
+      setIsModalOpen(false);
+      resetForm();
+      fetchTrials();
+      fetchMoldDetails(moldIdParam!);
     } catch (error) {
       console.error('Error creating trial:', error);
       alert('Failed to create trial');
@@ -170,16 +147,8 @@ const TrialsPage = () => {
     if (!confirm('Are you sure you want to approve this trial?')) return;
 
     try {
-      const res = await fetch(`/api/pre-production/trials/${trialId}/approve`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        fetchTrials();
-      } else {
-        alert('Failed to approve trial');
-      }
+      await approveTrial(trialId);
+      fetchTrials();
     } catch (error) {
       console.error('Error approving trial:', error);
       alert('Failed to approve trial');

@@ -31,13 +31,51 @@ function hasModel(name) {
 /** Utility: toInt */
 const toInt = (v) => Number.parseInt(v, 10);
 
+// Import project health utility
+const { calculateProjectHealth } = require('../lib/projectHealth');
+
+// Import Kanban utilities
+const {
+  getBoardConfig,
+  updateBoardColumn,
+  createBoardColumn,
+  deleteBoardColumn,
+  moveTask
+} = require('../lib/kanban');
+
 /** ============= Projects: list / create / update / delete ============= */
 
-router.get('/projects', authGuard, permissionGuard('PROJECT_VIEW'), async (_req, res) => {
+router.get('/projects', authGuard, permissionGuard('PROJECT_VIEW'), async (req, res) => {
   try {
+    const { includeHealth } = req.query;
+    
     const items = await prisma.project.findMany({
       orderBy: [{ createdAt: 'desc' }],
     });
+
+    // If includeHealth requested, calculate health for all projects
+    if (includeHealth === 'true') {
+      const projectsWithHealth = await Promise.all(
+        items.map(async (project) => {
+          try {
+            const health = await calculateProjectHealth(project.id);
+            return {
+              ...project,
+              health: {
+                score: health.healthScore,
+                status: health.status,
+                attentionItemCount: health.attentionItems.length
+              }
+            };
+          } catch (error) {
+            console.error(`Failed to calculate health for project ${project.id}:`, error);
+            return project;
+          }
+        })
+      );
+      return res.json(projectsWithHealth);
+    }
+
     res.json(items);
   } catch (e) {
     console.error('GET /projects failed:', e);
@@ -152,6 +190,19 @@ router.delete('/projects/:id', authGuard, permissionGuard('PROJECT_DELETE'), asy
   } catch (e) {
     console.error('DELETE /projects/:id failed:', e);
     res.status(400).json({ error: 'Delete failed' });
+  }
+});
+
+/** ======================= Project Health ======================= */
+
+router.get('/projects/:id/health', authGuard, permissionGuard('PROJECT_VIEW'), async (req, res) => {
+  try {
+    const id = toInt(req.params.id);
+    const health = await calculateProjectHealth(id);
+    res.json(health);
+  } catch (error) {
+    console.error('GET /projects/:id/health failed:', error);
+    res.status(500).json({ error: 'Failed to calculate project health' });
   }
 });
 
@@ -755,5 +806,226 @@ router.get('/projects/:id/stations', authGuard, async (req, res) => {
     res.status(500).json({ error: 'Failed to load stations' });
   }
 });
+
+// ============================================================================
+// KANBAN BOARD CONFIGURATION ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /projects/:id/board-config
+ * Get Kanban board configuration for a project
+ * Returns columns with task counts, creates default columns if none exist
+ */
+router.get(
+  '/projects/:id/board-config',
+  authGuard,
+  permissionGuard('PROJECT_VIEW'),
+  async (req, res) => {
+    try {
+      const projectId = toInt(req.params.id);
+
+      // Verify project exists
+      const project = await prisma.project.findUnique({
+        where: { id: projectId }
+      });
+
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      const config = await getBoardConfig(projectId);
+      res.json(config);
+    } catch (error) {
+      console.error('GET /projects/:id/board-config failed:', error);
+      res.status(500).json({ error: 'Failed to load board configuration' });
+    }
+  }
+);
+
+/**
+ * POST /projects/:id/board-config/columns
+ * Create new custom column for project board
+ */
+router.post(
+  '/projects/:id/board-config/columns',
+  authGuard,
+  permissionGuard('PROJECT_EDIT'),
+  async (req, res) => {
+    try {
+      const projectId = toInt(req.params.id);
+      const { name, section, wipLimit, color } = req.body;
+
+      // Validation
+      if (!name || !section) {
+        return res.status(400).json({ error: 'Name and section are required' });
+      }
+
+      const validSections = ['Pre_Prod', 'Production', 'QC', 'Dispatch'];
+      if (!validSections.includes(section)) {
+        return res.status(400).json({ 
+          error: `Invalid section. Must be one of: ${validSections.join(', ')}` 
+        });
+      }
+
+      const column = await createBoardColumn(projectId, {
+        name,
+        section,
+        wipLimit: wipLimit || null,
+        color: color || null
+      });
+
+      res.status(201).json(column);
+    } catch (error) {
+      console.error('POST /projects/:id/board-config/columns failed:', error);
+      
+      if (error.message.includes('already exists')) {
+        return res.status(409).json({ error: error.message });
+      }
+      
+      res.status(500).json({ error: 'Failed to create column' });
+    }
+  }
+);
+
+/**
+ * PUT /projects/:id/board-config/columns/:columnId
+ * Update board column configuration
+ */
+router.put(
+  '/projects/:id/board-config/columns/:columnId',
+  authGuard,
+  permissionGuard('PROJECT_EDIT'),
+  async (req, res) => {
+    try {
+      const projectId = toInt(req.params.id);
+      const { columnId } = req.params;
+      const { name, position, wipLimit, color } = req.body;
+
+      const updates = {};
+      if (name !== undefined) updates.name = name;
+      if (position !== undefined) updates.position = position;
+      if (wipLimit !== undefined) updates.wipLimit = wipLimit;
+      if (color !== undefined) updates.color = color;
+
+      const column = await updateBoardColumn(projectId, columnId, updates);
+      res.json(column);
+    } catch (error) {
+      console.error('PUT /projects/:id/board-config/columns/:columnId failed:', error);
+      
+      if (error.message === 'Column not found') {
+        return res.status(404).json({ error: error.message });
+      }
+      
+      res.status(500).json({ error: 'Failed to update column' });
+    }
+  }
+);
+
+/**
+ * DELETE /projects/:id/board-config/columns/:columnId
+ * Delete custom column (cannot delete default columns or columns with tasks)
+ */
+router.delete(
+  '/projects/:id/board-config/columns/:columnId',
+  authGuard,
+  permissionGuard('PROJECT_EDIT'),
+  async (req, res) => {
+    try {
+      const projectId = toInt(req.params.id);
+      const { columnId } = req.params;
+
+      const result = await deleteBoardColumn(projectId, columnId);
+      res.json(result);
+    } catch (error) {
+      console.error('DELETE /projects/:id/board-config/columns/:columnId failed:', error);
+      
+      if (error.message === 'Column not found') {
+        return res.status(404).json({ error: error.message });
+      }
+      
+      if (error.message.includes('Cannot delete')) {
+        return res.status(400).json({ error: error.message });
+      }
+      
+      res.status(500).json({ error: 'Failed to delete column' });
+    }
+  }
+);
+
+/**
+ * GET /projects/:id/tasks
+ * Get all tasks for a project
+ */
+router.get(
+  '/projects/:id/tasks',
+  authGuard,
+  permissionGuard('PROJECT_VIEW'),
+  async (req, res) => {
+    try {
+      const projectId = toInt(req.params.id);
+
+      const tasks = await prisma.task.findMany({
+        where: { projectId },
+        orderBy: [
+          { section: 'asc' },
+          { position: 'asc' }
+        ]
+      });
+
+      res.json(tasks);
+    } catch (error) {
+      console.error('GET /projects/:id/tasks failed:', error);
+      res.status(500).json({ error: 'Failed to load tasks' });
+    }
+  }
+);
+
+/**
+ * PUT /tasks/:id/move
+ * Move task to different column/position
+ * Supports drag-and-drop functionality
+ */
+router.put(
+  '/tasks/:id/move',
+  authGuard,
+  permissionGuard('TASK_EDIT'),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { section, position } = req.body;
+
+      // Validation
+      if (!section || position === undefined) {
+        return res.status(400).json({ 
+          error: 'Section and position are required' 
+        });
+      }
+
+      const validSections = ['Pre_Prod', 'Production', 'QC', 'Dispatch'];
+      if (!validSections.includes(section)) {
+        return res.status(400).json({ 
+          error: `Invalid section. Must be one of: ${validSections.join(', ')}` 
+        });
+      }
+
+      if (typeof position !== 'number' || position < 0) {
+        return res.status(400).json({ 
+          error: 'Position must be a non-negative number' 
+        });
+      }
+
+      const task = await moveTask(id, section, position);
+      res.json(task);
+    } catch (error) {
+      console.error('PUT /tasks/:id/move failed:', error);
+      
+      if (error.message === 'Task not found') {
+        return res.status(404).json({ error: error.message });
+      }
+      
+      res.status(500).json({ error: 'Failed to move task' });
+    }
+  }
+);
 
 module.exports = router;

@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { listProjects } from '../../lib/services/projects';
+import { listStations } from '../../lib/services/stations';
+import { listWorkers } from '../../lib/services/workers';
+import { listQCSubmissions, getQCAnalytics, createQCSubmission, updateQCSubmission, approveQCSubmission, rejectQCSubmission } from '../../lib/services/qcSubmissions';
 import { Plus, CheckCircle, XCircle, Clock, AlertTriangle, TrendingUp, Eye, ThumbsUp, ThumbsDown } from 'lucide-react';
 
 interface QCSubmission {
@@ -90,13 +94,8 @@ const QCManagementPage = () => {
   const fetchSubmissions = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (statusFilter) params.append('status', statusFilter);
-      if (resultFilter) params.append('result', resultFilter);
-
-      const res = await fetch(`/api/qc-submissions?${params}`, { credentials: 'include' });
-      if (res.ok) setSubmissions(await res.json());
+      const rows = await listQCSubmissions({ projectId: projectFilter, status: statusFilter, result: resultFilter });
+      setSubmissions(rows || []);
     } catch (error) {
       console.error('Error fetching QC submissions:', error);
     } finally {
@@ -106,11 +105,8 @@ const QCManagementPage = () => {
 
   const fetchAnalytics = async () => {
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-
-      const res = await fetch(`/api/qc-submissions/analytics/summary?${params}`, { credentials: 'include' });
-      if (res.ok) setAnalytics(await res.json());
+      const data = await getQCAnalytics({ projectId: projectFilter });
+      setAnalytics(data || null);
     } catch (error) {
       console.error('Error fetching analytics:', error);
     }
@@ -118,8 +114,8 @@ const QCManagementPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -127,8 +123,8 @@ const QCManagementPage = () => {
 
   const fetchStations = async () => {
     try {
-      const res = await fetch('/api/stations', { credentials: 'include' });
-      if (res.ok) setStations(await res.json());
+      const rows = await listStations();
+      setStations(rows || []);
     } catch (error) {
       console.error('Error fetching stations:', error);
     }
@@ -136,8 +132,8 @@ const QCManagementPage = () => {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/users', { credentials: 'include' });
-      if (res.ok) setUsers(await res.json());
+      const rows = await listWorkers();
+      setUsers(rows || []);
     } catch (error) {
       console.error('Error fetching users:', error);
     }
@@ -147,26 +143,21 @@ const QCManagementPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = selectedSubmission ? `/api/qc-submissions/${selectedSubmission.id}` : '/api/qc-submissions';
-      const method = selectedSubmission ? 'PUT' : 'POST';
+      if (selectedSubmission) {
+        await updateQCSubmission(selectedSubmission.id, formData);
+      } else {
+        await createQCSubmission(formData);
+      }
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
+      {
         setIsModalOpen(false);
         resetForm();
         fetchSubmissions();
         fetchAnalytics();
-      } else {
-        alert('Failed to save QC submission');
       }
     } catch (error) {
       console.error('Error saving QC submission:', error);
+      alert('Failed to save QC submission');
     } finally {
       setIsLoading(false);
     }
@@ -176,17 +167,9 @@ const QCManagementPage = () => {
     if (!confirm('Approve this QC submission?')) return;
     
     try {
-      const res = await fetch(`/api/qc-submissions/${submissionId}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ approverNotes: 'Approved' }),
-      });
-
-      if (res.ok) {
-        fetchSubmissions();
-        fetchAnalytics();
-      }
+      await approveQCSubmission(submissionId, 'Approved');
+      fetchSubmissions();
+      fetchAnalytics();
     } catch (error) {
       console.error('Error approving submission:', error);
     }
@@ -197,17 +180,9 @@ const QCManagementPage = () => {
     if (!notes) return;
     
     try {
-      const res = await fetch(`/api/qc-submissions/${submissionId}/reject`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ approverNotes: notes }),
-      });
-
-      if (res.ok) {
-        fetchSubmissions();
-        fetchAnalytics();
-      }
+      await rejectQCSubmission(submissionId, notes);
+      fetchSubmissions();
+      fetchAnalytics();
     } catch (error) {
       console.error('Error rejecting submission:', error);
     }

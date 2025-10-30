@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, GitBranch, Play, CheckCircle, AlertTriangle, Clock, Workflow } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listProcessFlows, createProcessFlow, updateProcessFlow, activateProcessFlow, deleteProcessFlow } from '../../lib/services/preproduction';
 
 interface ProcessFlow {
   id: string;
@@ -66,8 +68,8 @@ const ProcessFlowsPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -76,12 +78,8 @@ const ProcessFlowsPage = () => {
   const fetchFlows = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (statusFilter) params.append('status', statusFilter);
-
-      const res = await fetch(`/api/process-flows?${params}`, { credentials: 'include' });
-      if (res.ok) setFlows(await res.json());
+      const rows = await listProcessFlows({ projectId: projectFilter, status: statusFilter });
+      setFlows(rows || []);
     } catch (error) {
       console.error('Error fetching flows:', error);
     } finally {
@@ -93,28 +91,18 @@ const ProcessFlowsPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = editingFlow 
-        ? `/api/process-flows/${editingFlow.id}`
-        : '/api/process-flows';
-      const method = editingFlow ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingFlow(null);
-        resetForm();
-        fetchFlows();
+      if (editingFlow) {
+        await updateProcessFlow(editingFlow.id, formData);
       } else {
-        alert('Failed to save flow');
+        await createProcessFlow(formData);
       }
+      setIsModalOpen(false);
+      setEditingFlow(null);
+      resetForm();
+      fetchFlows();
     } catch (error) {
       console.error('Error saving flow:', error);
+      alert('Failed to save flow');
     } finally {
       setIsLoading(false);
     }
@@ -123,11 +111,8 @@ const ProcessFlowsPage = () => {
   const handleActivate = async (id: string) => {
     if (!confirm('Activate this process flow?')) return;
     try {
-      const res = await fetch(`/api/process-flows/${id}/activate`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) fetchFlows();
+      await activateProcessFlow(id);
+      fetchFlows();
     } catch (error) {
       console.error('Error activating flow:', error);
     }
@@ -136,14 +121,9 @@ const ProcessFlowsPage = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this process flow?')) return;
     try {
-      const res = await fetch(`/api/process-flows/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        fetchFlows();
-        if (selectedFlow?.id === id) setSelectedFlow(null);
-      }
+      await deleteProcessFlow(id);
+      fetchFlows();
+      if (selectedFlow?.id === id) setSelectedFlow(null);
     } catch (error) {
       console.error('Error deleting flow:', error);
     }

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Eye, FileText } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listMolds, createMold, updateMold, deleteMold } from '../../lib/services/preproduction';
 
 interface Mold {
   id: string;
@@ -78,11 +80,8 @@ const MoldsPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setProjects(data);
-      }
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -91,18 +90,8 @@ const MoldsPage = () => {
   const fetchMolds = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (selectedProjectId) params.append('projectId', selectedProjectId);
-      if (statusFilter) params.append('status', statusFilter);
-      if (searchQuery) params.append('search', searchQuery);
-
-      const res = await fetch(`/api/pre-production/molds?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMolds(data);
-      }
+      const rows = await listMolds({ projectId: selectedProjectId, status: statusFilter, search: searchQuery });
+      setMolds(rows || []);
     } catch (error) {
       console.error('Error fetching molds:', error);
     } finally {
@@ -115,28 +104,15 @@ const MoldsPage = () => {
     setIsLoading(true);
 
     try {
-      const url = editingMold
-        ? `/api/pre-production/molds/${editingMold.id}`
-        : '/api/pre-production/molds';
-      
-      const method = editingMold ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingMold(null);
-        resetForm();
-        fetchMolds();
+      if (editingMold) {
+        await updateMold(editingMold.id, formData);
       } else {
-        const error = await res.json();
-        alert(error.error || 'Failed to save mold');
+        await createMold(formData);
       }
+      setIsModalOpen(false);
+      setEditingMold(null);
+      resetForm();
+      fetchMolds();
     } catch (error) {
       console.error('Error saving mold:', error);
       alert('Failed to save mold');
@@ -149,16 +125,8 @@ const MoldsPage = () => {
     if (!confirm('Are you sure you want to delete this mold?')) return;
 
     try {
-      const res = await fetch(`/api/pre-production/molds/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        fetchMolds();
-      } else {
-        alert('Failed to delete mold');
-      }
+      await deleteMold(id);
+      fetchMolds();
     } catch (error) {
       console.error('Error deleting mold:', error);
       alert('Failed to delete mold');

@@ -1,4 +1,8 @@
 import { useState, useEffect } from 'react';
+import { listProjects } from '../../lib/services/projects';
+import { listStations } from '../../lib/services/stations';
+import { listWorkers } from '../../lib/services/workers';
+import { listShiftEntries, createShiftEntry, updateShiftEntry, deleteShiftEntry, submitShiftEntry, approveShiftEntry } from '../../lib/services/shiftEntries';
 import { Plus, Edit2, Trash2, Clock, Users, TrendingUp, AlertTriangle, CheckCircle } from 'lucide-react';
 
 interface ShiftEntry {
@@ -66,8 +70,8 @@ const ShiftEntriesPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -75,8 +79,8 @@ const ShiftEntriesPage = () => {
 
   const fetchStations = async () => {
     try {
-      const res = await fetch('/api/stations', { credentials: 'include' });
-      if (res.ok) setStations(await res.json());
+      const rows = await listStations();
+      setStations(rows || []);
     } catch (error) {
       console.error('Error fetching stations:', error);
     }
@@ -84,8 +88,8 @@ const ShiftEntriesPage = () => {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/users', { credentials: 'include' });
-      if (res.ok) setUsers(await res.json());
+      const rows = await listWorkers();
+      setUsers(rows || []);
     } catch (error) {
       console.error('Error fetching users:', error);
     }
@@ -94,12 +98,8 @@ const ShiftEntriesPage = () => {
   const fetchEntries = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (statusFilter) params.append('status', statusFilter);
-
-      const res = await fetch(`/api/shift-entries?${params}`, { credentials: 'include' });
-      if (res.ok) setEntries(await res.json());
+      const rows = await listShiftEntries({ projectId: projectFilter, status: statusFilter });
+      setEntries(rows || []);
     } catch (error) {
       console.error('Error fetching entries:', error);
     } finally {
@@ -111,28 +111,21 @@ const ShiftEntriesPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = editingEntry 
-        ? `/api/shift-entries/${editingEntry.id}`
-        : '/api/shift-entries';
-      const method = editingEntry ? 'PUT' : 'POST';
+      if (editingEntry) {
+        await updateShiftEntry(editingEntry.id, formData);
+      } else {
+        await createShiftEntry(formData);
+      }
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
+      {
         setIsModalOpen(false);
         setEditingEntry(null);
         resetForm();
         fetchEntries();
-      } else {
-        alert('Failed to save shift entry');
       }
     } catch (error) {
       console.error('Error saving shift entry:', error);
+      alert('Failed to save shift entry');
     } finally {
       setIsLoading(false);
     }
@@ -140,11 +133,8 @@ const ShiftEntriesPage = () => {
 
   const handleSubmitForApproval = async (id: string) => {
     try {
-      const res = await fetch(`/api/shift-entries/${id}/submit`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) fetchEntries();
+      await submitShiftEntry(id);
+      fetchEntries();
     } catch (error) {
       console.error('Error submitting entry:', error);
     }
@@ -153,11 +143,8 @@ const ShiftEntriesPage = () => {
   const handleApprove = async (id: string) => {
     if (!confirm('Approve this shift entry?')) return;
     try {
-      const res = await fetch(`/api/shift-entries/${id}/approve`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) fetchEntries();
+      await approveShiftEntry(id);
+      fetchEntries();
     } catch (error) {
       console.error('Error approving entry:', error);
     }
@@ -166,11 +153,8 @@ const ShiftEntriesPage = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this shift entry?')) return;
     try {
-      const res = await fetch(`/api/shift-entries/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) fetchEntries();
+      await deleteShiftEntry(id);
+      fetchEntries();
     } catch (error) {
       console.error('Error deleting entry:', error);
     }

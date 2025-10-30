@@ -10,7 +10,7 @@ export default function Account() {
   const [mfaQR, setMfaQR] = useState(null);
   const [mfaBase32, setMfaBase32] = useState(null);
   const [mfaToken, setMfaToken] = useState("");
-  const [loading, setLoading] = useState(false);
+  // removed unused loading state to satisfy ESLint
 
   // ---- Load user + sessions ----
   async function load() {

@@ -98,9 +98,11 @@ export default function ProjectShell() {
   const tabs = [
     { label: "Overview", path: basePath },
     { label: "SKUs", path: `${basePath}/skus` },
-    { label: "List", path: `${basePath}/list` },
     { label: "Board", path: `${basePath}/board` },
-    { label: "Messages", path: `${basePath}/messages` },
+    { label: "Execution", path: `${basePath}/execution` },
+    { label: "PreProd", path: `${basePath}/preprod` },
+    { label: "Compliance", path: `${basePath}/compliance` },
+    { label: "Planning", path: `${basePath}/planning` },
     { label: "Files", path: `${basePath}/files` },
   ];
 

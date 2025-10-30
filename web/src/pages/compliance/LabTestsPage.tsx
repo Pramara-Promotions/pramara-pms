@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, FlaskConical, CheckCircle, XCircle, Clock, FileText, Download } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listLabTests, createLabTest, updateLabTest, deleteLabTest } from '../../lib/services/compliance';
 
 interface LabTest {
   id: string;
@@ -68,8 +70,8 @@ const LabTestsPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -78,12 +80,8 @@ const LabTestsPage = () => {
   const fetchTests = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (resultFilter) params.append('result', resultFilter);
-      if (projectFilter) params.append('projectId', projectFilter);
-
-      const res = await fetch(`/api/compliance/lab-tests?${params}`, { credentials: 'include' });
-      if (res.ok) setTests(await res.json());
+      const rows = await listLabTests({ projectId: projectFilter, status: resultFilter });
+      setTests(rows || []);
     } catch (error) {
       console.error('Error fetching tests:', error);
     } finally {
@@ -95,28 +93,18 @@ const LabTestsPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = editingTest 
-        ? `/api/compliance/lab-tests/${editingTest.id}`
-        : '/api/compliance/lab-tests';
-      const method = editingTest ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingTest(null);
-        resetForm();
-        fetchTests();
+      if (editingTest) {
+        await updateLabTest(editingTest.id, formData);
       } else {
-        alert('Failed to save test');
+        await createLabTest(formData);
       }
+      setIsModalOpen(false);
+      setEditingTest(null);
+      resetForm();
+      fetchTests();
     } catch (error) {
       console.error('Error saving test:', error);
+      alert('Failed to save test');
     } finally {
       setIsLoading(false);
     }
@@ -125,11 +113,8 @@ const LabTestsPage = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this lab test?')) return;
     try {
-      const res = await fetch(`/api/compliance/lab-tests/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) fetchTests();
+      await deleteLabTest(id);
+      fetchTests();
     } catch (error) {
       console.error('Error deleting test:', error);
     }

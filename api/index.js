@@ -65,9 +65,13 @@ const stationsRouter = require('./routes/stations');
 const tasksRouter = require('./routes/tasks');
 const qcSubmissionsRouter = require('./routes/qc-submissions');
 const productionEntriesRouter = require('./routes/production-entries');
+const searchRouter = require('./routes/search');
 
 const batchesRouter = require('./routes/batches');
 const lotsRouter = require('./routes/lots');
+const assetsRouter = require('./routes/assets');
+const workstationAssetsRouter = require('./routes/workstation-assets');
+const maintenanceRouter = require('./routes/maintenance');
 const workflowStagesRouter = require('./routes/workflow-stages');
 const processConfigRouter = require('./routes/process-config');
 const workersRouter = require('./routes/workers');
@@ -75,6 +79,10 @@ const dailyPlanningRouter = require('./routes/daily-planning');
 const approvalRequestsRouter = require('./routes/approval-requests');
 const mrpRouter = require('./routes/mrp');
 const materialsRouter = require('./routes/materials');
+const dashboardRouter = require('./routes/dashboard');
+const userRouter = require('./routes/user');
+const capacityRouter = require('./routes/capacity');
+const workflowsRouter = require('./routes/workflows');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -171,8 +179,12 @@ app.use('/api/stations', stationsRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/qc-submissions', qcSubmissionsRouter);
 app.use('/api/production-entries', productionEntriesRouter);
+app.use('/api/search', searchRouter);
 app.use('/api/batches', batchesRouter);
 app.use('/api/lots', lotsRouter);
+app.use('/api/assets', assetsRouter);
+app.use('/api/workstation-assets', workstationAssetsRouter);
+app.use('/api/maintenance', maintenanceRouter);
 app.use('/api/workflow', workflowStagesRouter);
 app.use('/api/process-config', processConfigRouter);
 app.use('/api/workers', workersRouter);
@@ -180,6 +192,10 @@ app.use('/api/daily-plans', dailyPlanningRouter);
 app.use('/api/approvals', approvalRequestsRouter);
 app.use('/api/mrp', mrpRouter);
 app.use('/api/materials', materialsRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/user', userRouter);
+app.use('/api/capacity', capacityRouter);
+app.use('/api/workflows', workflowsRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

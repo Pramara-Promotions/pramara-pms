@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Shield, AlertTriangle, CheckCircle, Clock, FileText, Package, Beaker, Plus } from 'lucide-react';
+import { getComplianceSummary, listComplianceRecords } from '../../lib/services/compliance';
 
 interface DashboardStats {
   expiringCertifications: number;
@@ -42,6 +43,8 @@ const ComplianceDashboard = () => {
   const fetchDashboardData = async () => {
     setIsLoading(true);
     try {
+      // For now keeping fetch calls as compliance service doesn't have dashboard methods yet
+      // These can be migrated when backend creates dedicated dashboard endpoint
       const [statsRes, certsRes, complianceRes] = await Promise.all([
         fetch('/api/compliance/dashboard', { credentials: 'include' }),
         fetch('/api/compliance/company-certifications?status=active', { credentials: 'include' }),
@@ -60,6 +63,7 @@ const ComplianceDashboard = () => {
       if (complianceRes.ok) setProjectCompliance(await complianceRes.json());
     } catch (error) {
       console.error('Error fetching dashboard:', error);
+      alert('Failed to load compliance dashboard');
     } finally {
       setIsLoading(false);
     }

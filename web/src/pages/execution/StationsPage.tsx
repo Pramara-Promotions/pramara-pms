@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { listProjects } from '../../lib/services/projects';
+import { listStations, listStationTypes, getStationAnalytics, createStation, updateStation } from '../../lib/services/stations';
 import { Plus, Factory, TrendingUp, Clock, AlertCircle, CheckCircle, Wrench, Search, BarChart3 } from 'lucide-react';
 
 interface Station {
@@ -87,13 +89,8 @@ const StationsPage = () => {
   const fetchStations = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (statusFilter) params.append('status', statusFilter);
-      if (projectFilter) params.append('projectId', projectFilter);
-      if (search) params.append('search', search);
-
-      const res = await fetch(`/api/stations?${params}`, { credentials: 'include' });
-      if (res.ok) setStations(await res.json());
+      const rows = await listStations({ status: statusFilter, projectId: projectFilter, search });
+      setStations(rows || []);
     } catch (error) {
       console.error('Error fetching stations:', error);
     } finally {
@@ -103,8 +100,8 @@ const StationsPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects?status=active', { credentials: 'include' });
-      if (res.ok) setProjects(await res.json());
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -112,8 +109,8 @@ const StationsPage = () => {
 
   const fetchStationTypes = async () => {
     try {
-      const res = await fetch('/api/stations/meta/types', { credentials: 'include' });
-      if (res.ok) setStationTypes(await res.json());
+      const rows = await listStationTypes();
+      setStationTypes(rows || []);
     } catch (error) {
       console.error('Error fetching station types:', error);
     }
@@ -121,12 +118,9 @@ const StationsPage = () => {
 
   const fetchAnalytics = async (stationId: number) => {
     try {
-      const res = await fetch(`/api/stations/${stationId}/analytics`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setAnalytics(data);
-        setIsAnalyticsOpen(true);
-      }
+      const data = await getStationAnalytics(stationId);
+      setAnalytics(data);
+      setIsAnalyticsOpen(true);
     } catch (error) {
       console.error('Error fetching analytics:', error);
     }
@@ -136,25 +130,20 @@ const StationsPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = selectedStation ? `/api/stations/${selectedStation.id}` : '/api/stations';
-      const method = selectedStation ? 'PUT' : 'POST';
+      if (selectedStation) {
+        await updateStation(selectedStation.id, formData);
+      } else {
+        await createStation(formData);
+      }
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
+      {
         setIsModalOpen(false);
         resetForm();
         fetchStations();
-      } else {
-        alert('Failed to save station');
       }
     } catch (error) {
       console.error('Error saving station:', error);
+      alert('Failed to save station');
     } finally {
       setIsLoading(false);
     }

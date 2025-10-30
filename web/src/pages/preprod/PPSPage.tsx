@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, FileText, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { listProjects } from '../../lib/services/projects';
+import { listPPS, createPPS, updatePPS, approvePPS, rejectPPS, deletePPS } from '../../lib/services/preproduction';
 
 interface PPSApproval {
   id: string;
@@ -109,11 +111,8 @@ const PPSPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch('/api/projects', { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        setProjects(data);
-      }
+      const rows = await listProjects();
+      setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
     }
@@ -122,18 +121,8 @@ const PPSPage = () => {
   const fetchPPSApprovals = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (selectedProjectId) params.append('projectId', selectedProjectId);
-      if (statusFilter) params.append('status', statusFilter);
-      if (stageFilter) params.append('currentStage', stageFilter);
-
-      const res = await fetch(`/api/pre-production/pps?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPpsApprovals(data);
-      }
+      const rows = await listPPS({ projectId: selectedProjectId, status: statusFilter });
+      setPpsApprovals(rows || []);
     } catch (error) {
       console.error('Error fetching PPS approvals:', error);
     } finally {
@@ -146,28 +135,15 @@ const PPSPage = () => {
     setIsLoading(true);
 
     try {
-      const url = editingPPS
-        ? `/api/pre-production/pps/${editingPPS.id}`
-        : '/api/pre-production/pps';
-      
-      const method = editingPPS ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingPPS(null);
-        resetForm();
-        fetchPPSApprovals();
+      if (editingPPS) {
+        await updatePPS(editingPPS.id, formData);
       } else {
-        const error = await res.json();
-        alert(error.error || 'Failed to save PPS');
+        await createPPS(formData);
       }
+      setIsModalOpen(false);
+      setEditingPPS(null);
+      resetForm();
+      fetchPPSApprovals();
     } catch (error) {
       console.error('Error saving PPS:', error);
       alert('Failed to save PPS');
@@ -183,18 +159,8 @@ const PPSPage = () => {
     if (!effectiveDate) return;
 
     try {
-      const res = await fetch(`/api/pre-production/pps/${id}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ effectiveDate, expiryDate: expiryDate || null }),
-      });
-
-      if (res.ok) {
-        fetchPPSApprovals();
-      } else {
-        alert('Failed to approve PPS');
-      }
+      await approvePPS(id, JSON.stringify({ effectiveDate, expiryDate: expiryDate || null }));
+      fetchPPSApprovals();
     } catch (error) {
       console.error('Error approving PPS:', error);
       alert('Failed to approve PPS');
@@ -206,18 +172,8 @@ const PPSPage = () => {
     if (!rejectionReason) return;
 
     try {
-      const res = await fetch(`/api/pre-production/pps/${id}/reject`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ rejectionReason }),
-      });
-
-      if (res.ok) {
-        fetchPPSApprovals();
-      } else {
-        alert('Failed to reject PPS');
-      }
+      await rejectPPS(id, rejectionReason);
+      fetchPPSApprovals();
     } catch (error) {
       console.error('Error rejecting PPS:', error);
       alert('Failed to reject PPS');
@@ -228,16 +184,8 @@ const PPSPage = () => {
     if (!confirm('Are you sure you want to delete this PPS approval?')) return;
 
     try {
-      const res = await fetch(`/api/pre-production/pps/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        fetchPPSApprovals();
-      } else {
-        alert('Failed to delete PPS approval');
-      }
+      await deletePPS(id);
+      fetchPPSApprovals();
     } catch (error) {
       console.error('Error deleting PPS approval:', error);
       alert('Failed to delete PPS approval');

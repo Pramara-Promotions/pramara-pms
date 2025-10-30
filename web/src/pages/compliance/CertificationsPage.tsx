@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Shield, Calendar, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { listCertifications, createCertification, updateCertification, deleteCertification } from '../../lib/services/compliance';
 
 interface CompanyCertification {
   id: string;
@@ -58,12 +59,8 @@ const CertificationsPage = () => {
   const fetchCertifications = async () => {
     setIsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (statusFilter) params.append('status', statusFilter);
-      if (typeFilter) params.append('certificationType', typeFilter);
-
-      const res = await fetch(`/api/compliance/company-certifications?${params}`, { credentials: 'include' });
-      if (res.ok) setCertifications(await res.json());
+      const rows = await listCertifications({ status: statusFilter });
+      setCertifications(rows || []);
     } catch (error) {
       console.error('Error fetching certifications:', error);
     } finally {
@@ -75,28 +72,18 @@ const CertificationsPage = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const url = editingCert 
-        ? `/api/compliance/company-certifications/${editingCert.id}`
-        : '/api/compliance/company-certifications';
-      const method = editingCert ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingCert(null);
-        resetForm();
-        fetchCertifications();
+      if (editingCert) {
+        await updateCertification(editingCert.id, formData);
       } else {
-        alert('Failed to save certification');
+        await createCertification(formData);
       }
+      setIsModalOpen(false);
+      setEditingCert(null);
+      resetForm();
+      fetchCertifications();
     } catch (error) {
       console.error('Error saving certification:', error);
+      alert('Failed to save certification');
     } finally {
       setIsLoading(false);
     }
@@ -105,11 +92,8 @@ const CertificationsPage = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this certification?')) return;
     try {
-      const res = await fetch(`/api/compliance/company-certifications/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) fetchCertifications();
+      await deleteCertification(id);
+      fetchCertifications();
     } catch (error) {
       console.error('Error deleting certification:', error);
     }

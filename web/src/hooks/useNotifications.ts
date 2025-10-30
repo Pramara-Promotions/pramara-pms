@@ -121,6 +121,10 @@ export function useNotifications(): UseNotificationsReturn {
   // Mark single notification as read
   const markAsRead = useCallback(async (id: string) => {
     try {
+      // Find the notification to check if it was unread
+      const notification = notifications.find(n => n.id === id);
+      const wasUnread = notification && !notification.read;
+
       const res = await http(`/api/notifications/${id}/read`, {
         method: 'PATCH'
       });
@@ -133,11 +137,15 @@ export function useNotifications(): UseNotificationsReturn {
       setNotifications(prev =>
         prev.map(n => n.id === id ? { ...n, read: true, readAt: new Date().toISOString() } : n)
       );
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      
+      // Only decrement count if it was actually unread
+      if (wasUnread) {
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
     } catch (err) {
       console.error('Error marking notification as read:', err);
     }
-  }, []);
+  }, [notifications]);
 
   // Mark all notifications as read
   const markAllAsRead = useCallback(async () => {
@@ -163,6 +171,10 @@ export function useNotifications(): UseNotificationsReturn {
   // Dismiss notification
   const dismissNotification = useCallback(async (id: string) => {
     try {
+      // Find the notification BEFORE deleting to check if it was unread
+      const notification = notifications.find(n => n.id === id);
+      const wasUnread = notification && !notification.read;
+
       const res = await http(`/api/notifications/${id}`, {
         method: 'DELETE'
       });
@@ -175,8 +187,7 @@ export function useNotifications(): UseNotificationsReturn {
       setNotifications(prev => prev.filter(n => n.id !== id));
       
       // Decrement unread count if it was unread
-      const notification = notifications.find(n => n.id === id);
-      if (notification && !notification.read) {
+      if (wasUnread) {
         setUnreadCount(prev => Math.max(0, prev - 1));
       }
     } catch (err) {
@@ -186,38 +197,26 @@ export function useNotifications(): UseNotificationsReturn {
 
   // Initialize WebSocket connection
   useEffect(() => {
-    // Get auth token from cookie or localStorage
-    const getAuthToken = () => {
-      // Try to get from cookie first
-      const cookies = document.cookie.split(';');
-      const tokenCookie = cookies.find(c => c.trim().startsWith('token='));
-      if (tokenCookie) {
-        return tokenCookie.split('=')[1];
-      }
-      
-      // Fallback to localStorage
-      return localStorage.getItem('token');
-    };
+    // Note: Token is in httpOnly cookie, so we can't read it with document.cookie
+    // But Socket.IO will send it automatically with the connection request
+    console.log('[useNotifications] Initializing WebSocket connection...');
+    console.log('[useNotifications] Cookies will be sent automatically (httpOnly)');
 
-    const token = getAuthToken();
-    if (!token) {
-      console.warn('No auth token found, skipping WebSocket connection');
-      setLoading(false);
-      return;
-    }
+    const wsUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+    console.log('[useNotifications] WebSocket URL:', wsUrl);
 
-    // Determine backend URL
-    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-
-    // Initialize Socket.IO client
-    const socket = io(backendUrl, {
-      auth: { token },
+    // Connect to WebSocket server
+    // Token will be sent via cookies (httpOnly) automatically
+    const socket = io(wsUrl, {
       transports: ['websocket', 'polling'],
-      reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      reconnectionAttempts: Infinity
+      reconnectionAttempts: 5,
+      withCredentials: true,  // This ensures cookies are sent
+      autoConnect: true
     });
+
+    console.log('[useNotifications] Socket.IO client created, attempting connection...');
 
     socketRef.current = socket;
 
@@ -227,62 +226,75 @@ export function useNotifications(): UseNotificationsReturn {
       setConnected(true);
       setError(null);
       
-      // Fetch initial notifications
+      // Fetch initial notifications on connect
       fetchNotifications();
-      
-      // Clear any pending reconnect timeout
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
     });
 
-    // Connection error
-    socket.on('connect_error', (err) => {
-      console.error('🔌 WebSocket connection error:', err.message);
-      setConnected(false);
-      setError('Connection failed. Retrying...');
-    });
-
-    // Disconnection
-    socket.on('disconnect', (reason) => {
-      console.log('🔌 WebSocket disconnected. Reason:', reason);
-      setConnected(false);
-      
-      // Set reconnect timeout message
-      if (reason === 'io server disconnect') {
-        setError('Server disconnected. Reconnecting...');
-      }
-    });
-
-    // Real-time notification received
+    // Handle incoming notifications
     socket.on('notification', (notification: Notification) => {
-      console.log('📬 New notification received:', notification);
+      console.log('📬 Received notification:', notification);
       
       // Add to notifications list
       setNotifications(prev => [notification, ...prev]);
       
-      // Increment unread count if not already read
+      // Update unread count if it's unread
       if (!notification.read) {
         setUnreadCount(prev => prev + 1);
       }
       
-      // Show browser notification
-      showBrowserNotification(notification);
+      // Show browser notification for high/critical priority
+      if (notification.priority === 'critical' || notification.priority === 'high') {
+        showBrowserNotification(notification);
+      }
     });
 
-    // Pong response (for connection testing)
-    socket.on('pong', (data) => {
-      console.log('🏓 Pong received:', data);
+    // Handle disconnection
+    socket.on('disconnect', (reason) => {
+      console.log('🔌 WebSocket disconnected:', reason);
+      setConnected(false);
+      
+      if (reason === 'io server disconnect') {
+        // Server forcibly disconnected, try to reconnect
+        socket.connect();
+      }
     });
+
+    // Handle connection errors
+    socket.on('connect_error', (error: any) => {
+      console.error('🔌 WebSocket connection error:', error);
+      console.error('🔌 Error message:', error.message);
+      console.error('🔌 Error data:', error.data);
+      setConnected(false);
+      setError('Connection error. Retrying...');
+    });
+
+    // Handle reconnection attempts
+    socket.on('reconnect_attempt', (attemptNumber) => {
+      console.log(`🔌 Reconnection attempt ${attemptNumber}`);
+    });
+
+    socket.on('reconnect', (attemptNumber) => {
+      console.log(`🔌 Reconnected after ${attemptNumber} attempts`);
+      setConnected(true);
+      setError(null);
+      fetchNotifications(); // Re-fetch on reconnect
+    });
+
+    socket.on('reconnect_failed', () => {
+      console.error('🔌 Reconnection failed');
+      setError('Connection lost. Please refresh the page.');
+    });
+
+    // Fetch initial notifications
+    fetchNotifications().then(() => setLoading(false));
 
     // Cleanup on unmount
     return () => {
-      console.log('🔌 Cleaning up WebSocket connection');
-      socket.disconnect();
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
+      socket.disconnect();
+      socketRef.current = null;
     };
   }, [fetchNotifications, showBrowserNotification]);
 
@@ -290,17 +302,6 @@ export function useNotifications(): UseNotificationsReturn {
   useEffect(() => {
     requestNotificationPermission();
   }, [requestNotificationPermission]);
-
-  // Ping server periodically to keep connection alive
-  useEffect(() => {
-    if (!connected || !socketRef.current) return;
-
-    const pingInterval = setInterval(() => {
-      socketRef.current?.emit('ping');
-    }, 30000); // Every 30 seconds
-
-    return () => clearInterval(pingInterval);
-  }, [connected]);
 
   return {
     notifications,

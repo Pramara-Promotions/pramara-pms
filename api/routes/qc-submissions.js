@@ -1,6 +1,6 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { requireAuth } = require('../middleware/authMiddleware');
+const { authenticate: requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -83,43 +83,89 @@ router.post('/', async (req, res) => {
       projectId,
       stationId,
       batchCode,
+      batchId,
       submissionDate,
       inspectorId,
       sampleSize,
+      inspectedQuantity,
       passedQty,
+      passedQuantity,
       failedQty,
+      failedQuantity,
       defectQty,
+      defects,
       result,
+      stage,
       inspectorNotes,
       measurements,
       checklistData,
       imageUrls,
     } = req.body;
 
+    let resolvedBatchCode = batchCode || null;
+    
+    // If batchId is provided instead of batchCode, look up the batch's batchCode
+    if (!resolvedBatchCode && batchId) {
+      const batch = await prisma.batch.findUnique({ where: { id: String(batchId) } });
+      resolvedBatchCode = batch?.batchCode || null;
+    }
+
+    const resolvedPassedQty = passedQty ?? passedQuantity ?? null;
+    const resolvedFailedQty = failedQty ?? failedQuantity ?? null;
+    const resolvedDefectQty = defectQty ?? resolvedFailedQty;
+    const resolvedSampleSize = sampleSize ?? inspectedQuantity ?? 0;
+    const resolvedSubmissionDate = submissionDate ? new Date(submissionDate) : new Date();
+    const resolvedProjectId = Number(projectId);
+
+    // Ensure stationId - use first available station if not provided
+    let resolvedStationId = stationId ? Number(stationId) : null;
+    if (!resolvedStationId) {
+      const firstStation = await prisma.station.findFirst({ where: { active: true } });
+      if (firstStation) {
+        resolvedStationId = firstStation.id;
+      } else {
+        return res.status(400).json({ error: 'No active station found; stationId required' });
+      }
+    }
+
+    // Ensure templateId - create/find default template
+    let templateId;
+    const existingTemplate = await prisma.qCChecklistTemplate.findFirst({
+      where: { projectId: resolvedProjectId, stationId: resolvedStationId, active: true }
+    });
+    if (existingTemplate) {
+      templateId = existingTemplate.id;
+    } else {
+      const defaultTemplate = await prisma.qCChecklistTemplate.create({
+        data: {
+          id: `QCTEMPLATE-${Date.now()}`,
+          name: 'Default QC Template',
+          projectId: resolvedProjectId,
+          stationId: resolvedStationId,
+          version: 1,
+          active: true,
+          updatedAt: new Date(),
+        },
+      });
+      templateId = defaultTemplate.id;
+    }
+
     const submission = await prisma.qCSubmission.create({
       data: {
-        projectId: parseInt(projectId),
-        stationId: stationId ? parseInt(stationId) : null,
-        batchCode,
-        submissionDate: new Date(submissionDate),
-        inspectorId,
-        sampleSize: parseInt(sampleSize),
-        passedQty: passedQty ? parseInt(passedQty) : null,
-        failedQty: failedQty ? parseInt(failedQty) : null,
-        defectQty: defectQty ? parseInt(defectQty) : null,
-        result: result || 'pending',
-        status: 'submitted',
-        inspectorNotes,
-        measurements: measurements || {},
-        checklistData: checklistData || {},
-        imageUrls: imageUrls || [],
-        createdBy: req.user.id,
-        updatedAt: new Date(),
+        id: `QC-${Date.now()}`,
+        templateId,
+        projectId: resolvedProjectId,
+        stationId: resolvedStationId,
+        batchCode: resolvedBatchCode,
+        notes: inspectorNotes || (stage ? `Stage: ${stage}` : null),
+        overallPass: result === 'passed',
+        photos: imageUrls || [],
+        submittedBy: inspectorId || req.user.id,
+        submittedAt: resolvedSubmissionDate,
       },
       include: {
-        project: { select: { id: true, name: true } },
-        station: { select: { id: true, name: true } },
-        inspector: { select: { id: true, name: true } },
+        Project: { select: { id: true, name: true } },
+        Station: { select: { id: true, name: true } },
       },
     });
 

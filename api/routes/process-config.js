@@ -30,16 +30,14 @@ router.get('/', async (req, res) => {
         },
         Project: {
           select: {
-            id: true,
-            projectCode: true,
-            projectName: true
+            id: true
           }
         },
-        Sku: {
+        ProjectSku: {
           select: {
             id: true,
-            skuCode: true,
-            skuName: true
+            code: true,
+            name: true
           }
         }
       }
@@ -105,46 +103,53 @@ router.post('/', async (req, res) => {
       assemblyTimeSec,
       // General
       scrapRate,
-      machineCapacity
+      machineCapacity,
+      // Alternate field names from tests
+      processType,
+      setupTime,
+      cycleTimePerUnit
     } = req.body;
     
-    // Validation
-    if (!stationId || !stationType) {
+    // Resolve and validate
+    const resolvedStationType = stationType || processType;
+    if (!stationId || !resolvedStationType) {
       return res.status(400).json({ error: 'Station ID and station type are required' });
     }
     
     const config = await prisma.processConfig.create({
       data: {
+        id: require('crypto').randomUUID(),
         stationId: parseInt(stationId),
-        stationType,
+        stationType: resolvedStationType,
         projectId: projectId ? parseInt(projectId) : null,
         projectSkuId: projectSkuId ? parseInt(projectSkuId) : null,
         // Molding
-        cycleTimeSec: cycleTimeSec || null,
-        cavities: cavities || null,
-        itemWeightGrams: itemWeightGrams || null,
-        runnerWeightGrams: runnerWeightGrams || null,
-        setupTimeMins: setupTimeMins || null,
+        cycleTimeSec: cycleTimeSec ?? cycleTimePerUnit ?? null,
+        cavities: cavities ?? null,
+        itemWeightGrams: itemWeightGrams ?? null,
+        runnerWeightGrams: runnerWeightGrams ?? null,
+        setupTimeMins: setupTimeMins ?? setupTime ?? null,
         // Painting/Printing
-        paintPerUnitMl: paintPerUnitMl || null,
-        thinnerPerUnitMl: thinnerPerUnitMl || null,
-        dryingTimeSec: dryingTimeSec || null,
-        maskingSteps: maskingSteps || null,
+        paintPerUnitMl: paintPerUnitMl ?? null,
+        thinnerPerUnitMl: thinnerPerUnitMl ?? null,
+        dryingTimeSec: dryingTimeSec ?? null,
+        maskingSteps: maskingSteps ?? null,
         // Assembly
-        partsPerUnit: partsPerUnit || null,
-        assemblyTimeSec: assemblyTimeSec || null,
+        partsPerUnit: partsPerUnit ?? null,
+        assemblyTimeSec: assemblyTimeSec ?? null,
         // General
-        scrapRate: scrapRate || 0.02,
-        machineCapacity: machineCapacity || 1
+        scrapRate: scrapRate ?? 0.02,
+        machineCapacity: machineCapacity ?? 1,
+        updatedAt: new Date()
       },
       include: {
         Station: true,
         Project: true,
-        Sku: true
+        ProjectSku: true
       }
     });
     
-    res.status(201).json({ config });
+    res.status(201).json(config);
   } catch (error) {
     console.error('Error creating process config:', error);
     res.status(500).json({ error: 'Failed to create process configuration' });
@@ -176,7 +181,7 @@ router.put('/:id', async (req, res) => {
       include: {
         Station: true,
         Project: true,
-        Sku: true
+        ProjectSku: true
       }
     });
     

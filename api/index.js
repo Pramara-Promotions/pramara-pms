@@ -65,7 +65,9 @@ const stationsRouter = require('./routes/stations');
 const tasksRouter = require('./routes/tasks');
 const qcSubmissionsRouter = require('./routes/qc-submissions');
 const productionEntriesRouter = require('./routes/production-entries');
+
 const batchesRouter = require('./routes/batches');
+const lotsRouter = require('./routes/lots');
 const workflowStagesRouter = require('./routes/workflow-stages');
 const processConfigRouter = require('./routes/process-config');
 const workersRouter = require('./routes/workers');
@@ -170,6 +172,7 @@ app.use('/api/tasks', tasksRouter);
 app.use('/api/qc-submissions', qcSubmissionsRouter);
 app.use('/api/production-entries', productionEntriesRouter);
 app.use('/api/batches', batchesRouter);
+app.use('/api/lots', lotsRouter);
 app.use('/api/workflow', workflowStagesRouter);
 app.use('/api/process-config', processConfigRouter);
 app.use('/api/workers', workersRouter);
@@ -1635,7 +1638,105 @@ app.use((err, req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 4000;
+
+// ====================================================================
+// [LANDMARK 14] SOCKET.IO SETUP FOR REAL-TIME NOTIFICATIONS
+// ====================================================================
+let io;
+
 if (require.main === module) {
+  const http = require('http');
+  const { Server } = require('socket.io');
+  const jwt = require('jsonwebtoken');
+
+  const server = http.createServer(app);
+  
+  io = new Server(server, {
+    cors: {
+      origin: process.env.WEB_ORIGIN || 'http://localhost:5173',
+      credentials: true,
+    },
+    transports: ['websocket', 'polling'],
+  });
+
+  // Socket.IO authentication middleware
+  io.use((socket, next) => {
+    try {
+      // Try to get token from auth (client-sent) or from cookies (httpOnly)
+      let token = socket.handshake.auth.token;
+      
+      // If no token in auth, try to extract from cookies
+      if (!token) {
+        const cookieHeader = socket.handshake.headers.cookie;
+        if (cookieHeader) {
+          const cookies = cookieHeader.split(';').reduce((acc, cookie) => {
+            const [key, value] = cookie.trim().split('=');
+            acc[key] = value;
+            return acc;
+          }, {});
+          token = cookies.token || cookies.pms_token;
+        }
+      }
+      
+      console.log('[Socket.IO Auth] Connection attempt from:', socket.handshake.address);
+      console.log('[Socket.IO Auth] Token source:', socket.handshake.auth.token ? 'auth' : 'cookie');
+      console.log('[Socket.IO Auth] Token received:', token ? `YES (${token.substring(0, 20)}...)` : 'NO');
+      
+      if (!token) {
+        console.log('[Socket.IO Auth] ❌ Rejected: No token in auth or cookies');
+        return next(new Error('Authentication error: No token provided'));
+      }
+
+      // Dev token bypass
+      if (token.startsWith('dev-token-')) {
+        socket.userId = 'cmhbrbzgq006oawxyjyh0ge9h'; // Actual admin user ID from database
+        socket.userEmail = process.env.DEV_AUTH_EMAIL || 'admin@pramara.local';
+        console.log('[Socket.IO Auth] ✅ Dev token accepted for:', socket.userEmail);
+        return next();
+      }
+
+      // Verify JWT token
+      const secret = process.env.JWT_SECRET || 'dev-secret';
+      const payload = jwt.verify(token, secret);
+      
+      socket.userId = String(payload.sub || '');
+      socket.userEmail = payload.email || null;
+      
+      console.log('[Socket.IO Auth] ✅ JWT token accepted for:', socket.userEmail);
+      next();
+    } catch (err) {
+      console.error('[Socket.IO Auth] ❌ Error:', err.message);
+      next(new Error('Authentication error: ' + err.message));
+    }
+  });
+
+  // Socket.IO connection handling
+  io.on('connection', (socket) => {
+    console.log(`🔌 Client connected: ${socket.id} (User: ${socket.userEmail})`);
+
+    // Join user-specific room for targeted notifications
+    socket.join(`user:${socket.userId}`);
+
+    // Handle ping for connection health check
+    socket.on('ping', () => {
+      socket.emit('pong', { timestamp: Date.now() });
+    });
+
+    // Handle disconnection
+    socket.on('disconnect', (reason) => {
+      console.log(`🔌 Client disconnected: ${socket.id} (Reason: ${reason})`);
+    });
+  });
+
+  // Export io instance for use in other parts of the app
+  app.set('io', io);
+
+  server.listen(PORT, () => {
+    console.log(`🚀 API running on http://localhost:${PORT}`);
+    console.log(`🔌 WebSocket ready for real-time notifications`);
+  });
+} else {
+  // For testing environments
   app.listen(PORT, () => {
     console.log(`🚀 API running on http://localhost:${PORT}`);
   });

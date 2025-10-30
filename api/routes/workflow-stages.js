@@ -137,7 +137,7 @@ router.post('/stages', async (req, res) => {
       }
     });
     
-    res.status(201).json({ stage });
+    res.status(201).json(stage);
   } catch (error) {
     console.error('Error creating workflow stage:', error);
     res.status(500).json({ error: 'Failed to create workflow stage' });

@@ -516,6 +516,1109 @@ POST   /api/stations/:id/assignment/override    (log user override and track out
 
 ---
 
+## 2.2B COMPLETE BATCH TRACKING & TRACEABILITY SYSTEM (UPDATED OCT 30, 2025)
+
+### Overview
+Complete end-to-end batch tracking from raw material production through assembly to final packaging. Supports sub-batching, rejection tracking, multi-SKU assembly, and lot grouping with full traceability.
+
+### Batch Lifecycle Flow
+
+#### Phase 1: Initial Batch Creation (Production Start)
+**Example: Molding Station**
+
+**Inputs:**
+- Raw materials (e.g., ABS granules)
+- Project, SKU, Sub-SKU (if multi-part assembly)
+- Target quantity OR weight-based calculation
+
+**Batch Code Generation:**
+```
+Format: PRJ-{projectCode}-SKU-{skuCode}-{YYYYMMDD}-{seq}
+Example: PRJ-ALPHA-SKU-A-20251030-001
+
+Components:
+- Project code
+- SKU identifier  
+- Sub-SKU (if applicable)
+- Date (YYYYMMDD)
+- Sequence number (auto-incremented per day per project)
+```
+
+**Quantity Capture Methods:**
+1. **Manual Count:** User enters accurate quantity
+2. **Weight-Based Calculation:**
+   ```
+   User inputs:
+   - Total weight (with container)
+   - Container weight (system asks or stored default)
+   - Individual part weight (from SKU master)
+   
+   System calculates:
+   Quantity = (Total Weight - Container Weight) / Part Weight
+   ```
+
+**Batch Creation Output:**
+- Batch record created in database
+- Material lots linked (traceability to raw materials)
+- Next station assigned
+- **Printable Handover Sheet Generated:**
+  - Project number and name
+  - SKU name, sub-SKU
+  - Batch ID with QR code
+  - Quantity
+  - Current station
+  - Next destination station
+  - Material lots used
+  - Operator/shift info
+
+---
+
+#### Phase 2: Station-to-Station Movement
+
+**Step 1: Incoming QC (IQC)**
+```
+Batch arrives at new station
+Operator scans QR code or enters batch ID
+System shows:
+- Batch details
+- Expected quantity
+- Source station
+- Material history
+
+IQC performed:
+✅ Approved → Proceeds to next process
+❌ Rejected → Rejection flow activated
+```
+
+**Step 2: Sub-Batch Creation (Container/Tray Splitting)**
+**Example: Spray Painting Station**
+
+```
+Original Batch: PRJ-ALPHA-SKU-A-20251030-001 (1000 units)
+
+Split into trays/containers:
+Sub-Batch 1: PRJ-ALPHA-SKU-A-20251030-001-T01 (250 units)
+Sub-Batch 2: PRJ-ALPHA-SKU-A-20251030-001-T02 (250 units)  
+Sub-Batch 3: PRJ-ALPHA-SKU-A-20251030-001-T03 (250 units)
+Sub-Batch 4: PRJ-ALPHA-SKU-A-20251030-001-T04 (250 units)
+
+Each sub-batch:
+- Gets unique identifier (T01, T02, etc.)
+- Links to parent batch
+- Has own quantity (count OR weight-based)
+- Gets printed label/sheet
+- Placed in physical container
+```
+
+**Step 3: Batch Movement Recording**
+```
+For each movement:
+- From station (auto-detected or selected)
+- To station (user selects from flow)
+- Quantity moved (can be partial)
+- Operator ID (logged in user or scanned)
+- Condition notes (good, damaged, rework, etc.)
+- Photos (optional, for quality/damage evidence)
+- Timestamp (automatic)
+
+System creates BatchMovement record
+Updates batch.currentStationId
+If partial move: creates new sub-batch for remaining qty
+```
+
+---
+
+#### Phase 3: Rejection & Rework Handling
+
+**Rejection Flow:**
+```
+Scenario: 4 trays rejected from spray painting
+
+System creates rejection identifiers:
+REJ-PRJ-ALPHA-SKU-A-20251030-001-T01
+REJ-PRJ-ALPHA-SKU-A-20251030-001-T02
+REJ-PRJ-ALPHA-SKU-A-20251030-001-T03
+REJ-PRJ-ALPHA-SKU-A-20251030-001-T04
+
+Rejection record includes:
+- Original batch linkage
+- Rejection reason (QC fail, damage, contamination, etc.)
+- Rejection station
+- Rejection operator
+- Photos of defects
+- Disposition: rework, scrap, return to supplier
+
+Rejection bin sheet printed:
+- Shows all rejected items
+- Rework station assignment
+- Priority level
+- Expected fix time
+```
+
+**Rework Tracking:**
+```
+Rejected batch enters rework:
+- Original batch ID maintained with REJ prefix
+- Rework station assigned
+- Rework completion logged
+- Re-inspection required
+- If passed: REJ prefix removed, batch continues
+- If failed again: escalation/scrap decision
+```
+
+---
+
+#### Phase 4: Multi-SKU Assembly
+
+**Assembly Combination:**
+```
+Example: Toy with 3 parts
+
+Component Batches:
+Part A: PRJ-ALPHA-SKU-A-20251030-001 (1000 units)
+Part B: PRJ-ALPHA-SKU-B-20251030-001 (1000 units)
+Part C: PRJ-ALPHA-SKU-C-20251030-001 (1000 units)
+
+Assembly creates new batch:
+Main SKU Batch: PRJ-ALPHA-MAIN-20251030-001 (1000 assembled units)
+
+Linkage stored in database:
+{
+  mainBatch: "PRJ-ALPHA-MAIN-20251030-001",
+  assembledFrom: [
+    "PRJ-ALPHA-SKU-A-20251030-001",
+    "PRJ-ALPHA-SKU-B-20251030-001", 
+    "PRJ-ALPHA-SKU-C-20251030-001"
+  ],
+  assemblyStation: "ASSY-001",
+  assemblyOperator: "OP-123",
+  assemblyDate: "2025-10-30T14:00:00Z"
+}
+
+Traceability: 
+- Can trace assembled product back to all component batches
+- Can trace component batches back to raw material lots
+- Full genealogy tree available
+```
+
+**Uneven Assembly Handling:**
+```
+Problem: Component SKUs at different production levels
+SKU-A: 2000 units ✅
+SKU-B: 2000 units ✅  
+SKU-C: 500 units ❌ BOTTLENECK
+
+System detects imbalance:
+⚠️ ASSEMBLY BLOCKED
+Can only assemble 500 units (limited by SKU-C)
+1500 units of SKU-A and SKU-B waiting
+
+Recommendation:
+💡 PRIORITIZE SKU-C PRODUCTION
+- Allocate more workstations to SKU-C
+- Increase SKU-C shift priority
+- Target: Balance all SKUs to enable full assembly
+```
+
+---
+
+#### Phase 5: Lot Grouping for Packing/Shipping
+
+**Lot Creation:**
+```
+Multiple batches packed together into shipping lot:
+
+LOT-PRJ-ALPHA-20251030-L01
+  ├── PRJ-ALPHA-MAIN-20251030-001 (500 units)
+  ├── PRJ-ALPHA-MAIN-20251030-002 (500 units)
+  └── PRJ-ALPHA-MAIN-20251030-003 (500 units)
+  
+Total: 1500 units in this lot
+
+Lot details:
+- Lot code (unique identifier)
+- Contains batch IDs array
+- Total quantity
+- Packing date/time
+- Packing station
+- Packing operator(s)
+- Carton details (boxes, pallets)
+- Shipping destination
+- Customer PO reference
+
+Lot label printed:
+- Lot barcode/QR code
+- Project info
+- Total quantity
+- List of batch IDs
+- Packing date
+- Destination
+```
+
+**Carton/Box Requirement Tracking:**
+```
+Example: Toy set with 8 SKUs
+Each carton requires: 125 units of EACH SKU (1000 units total)
+
+Current inventory:
+SKU 1-7: 2000 units each ✅
+SKU 8: 375 units ❌
+
+System calculation:
+Cartons possible: 3 (limited by SKU 8: 375 ÷ 125 = 3)
+Revenue blocked: 13 cartons worth
+
+System alerts:
+⚠️ PACKING BOTTLENECK
+SKU 8 shortage preventing shipment of 1625 units
+
+Recommendation:
+💡 PRIORITY SHIFT ALLOCATION
+Focus 60% capacity on SKU 8 to balance inventory
+Expected time to balance: 2 shifts
+```
+
+---
+
+### Complete Traceability Queries
+
+**1. Forward Traceability (Batch → Products):**
+```
+Query: "Where did batch PRJ-ALPHA-SKU-A-20251030-001 go?"
+
+Result:
+- Sub-batched into T01, T02, T03, T04
+- T01 rejected, reworked, passed
+- All assembled into PRJ-ALPHA-MAIN-20251030-001
+- Packed into LOT-PRJ-ALPHA-20251030-L01
+- Shipped to Customer X on Nov 2, 2025
+```
+
+**2. Backward Traceability (Product → Materials):**
+```
+Query: "What materials are in this final product?"
+
+Result:
+Main SKU: PRJ-ALPHA-MAIN-20251030-001
+  ├── Component A: PRJ-ALPHA-SKU-A-20251030-001
+  │   └── Material Lots: ABS-LOT-2025-100, Masterbatch-LOT-2025-050
+  ├── Component B: PRJ-ALPHA-SKU-B-20251030-001
+  │   └── Material Lots: PP-LOT-2025-075
+  └── Component C: PRJ-ALPHA-SKU-C-20251030-001
+      └── Material Lots: ABS-LOT-2025-101
+
+Full material genealogy traced to supplier and receipt date
+```
+
+**3. Material Lot Recall:**
+```
+Query: "Defective material lot ABS-LOT-2025-100 - what products affected?"
+
+Result:
+Material Lot: ABS-LOT-2025-100
+Used in batches:
+- PRJ-ALPHA-SKU-A-20251030-001 (1000 units)
+- PRJ-BETA-SKU-X-20251030-005 (500 units)
+- PRJ-GAMMA-SKU-Y-20251031-002 (800 units)
+
+Assembled into:
+- 1000 units of Product Alpha
+- 500 units of Product Beta  
+- 800 units of Product Gamma
+
+Shipped in lots:
+- LOT-ALPHA-001 → Customer A
+- LOT-BETA-003 → Customer B
+- LOT-GAMMA-002 → Customer C
+
+⚠️ RECALL REQUIRED: 2300 units across 3 customers
+```
+
+**4. Operator Quality Tracking:**
+```
+Query: "Show all batches handled by Operator OP-123"
+
+Result:
+Operator OP-123 involved in:
+- 45 batches in October 2025
+- Stations worked: Molding, Degating, Assembly
+- Quality metrics:
+  - 42 batches passed QC (93.3%)
+  - 3 batches had rework (6.7%)
+  - Average efficiency: 98%
+  
+Skill assessment: High performer in molding, needs training in assembly
+```
+
+---
+
+### Database Schema Updates
+
+```prisma
+model Batch {
+  id                  String          @id @default(cuid())
+  batchCode           String          @unique
+  projectId           Int
+  poNumber            String?
+  projectSkuId        Int
+  subSkuIdentifier    String?         // "A", "B", "C" for multi-part
+  
+  // Quantity tracking
+  targetQty           Int
+  currentQty          Int
+  rejectedQty         Int             @default(0)
+  
+  // Weight-based calculation
+  totalWeight         Float?
+  containerWeight     Float?
+  calculatedQty       Int?
+  quantityMethod      String          @default("count") // "count" or "weight"
+  
+  // Hierarchy
+  parentBatchId       String?         // For sub-batches
+  subBatchIdentifier  String?         // "T01", "T02" etc.
+  lotId               String?         // When packed into lot
+  
+  // Status & Location  
+  currentStationId    Int?
+  status              String          @default("in_progress") // in_progress, completed, rejected, rework
+  
+  // Rejection tracking
+  isRejection         Boolean         @default(false)
+  rejectionReason     String?
+  rejectionStationId  Int?
+  reworkRequired      Boolean         @default(false)
+  reworkCompleted     Boolean         @default(false)
+  
+  // Assembly linkage
+  assembledFrom       String[]        // Array of source batch IDs
+  assembledInto       String?         // Parent assembled batch ID
+  assemblyStation     String?
+  assemblyOperator    String?
+  assemblyDate        DateTime?
+  
+  // Traceability
+  materialLots        Json            // [{lotNumber, materialId, qty}]
+  machineId           String?
+  
+  // Metadata
+  createdBy           String
+  createdAt           DateTime        @default(now())
+  completedAt         DateTime?
+  
+  // Relations
+  Project             Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku          ProjectSku      @relation(fields: [projectSkuId], references: [id])
+  Station             Station?        @relation(fields: [currentStationId], references: [id])
+  ParentBatch         Batch?          @relation("SubBatches", fields: [parentBatchId], references: [id])
+  SubBatches          Batch[]         @relation("SubBatches")
+  Lot                 Lot?            @relation(fields: [lotId], references: [id])
+  
+  BatchMovement       BatchMovement[]
+  QCSubmission        QCSubmission[]
+  WIPLedger           WIPLedger[]
+  
+  @@index([batchCode])
+  @@index([projectId])
+  @@index([currentStationId])
+  @@index([status])
+  @@index([parentBatchId])
+  @@index([lotId])
+  @@index([isRejection])
+}
+
+model BatchMovement {
+  id                  String          @id @default(cuid())
+  batchId             String
+  fromStationId       Int?
+  toStationId         Int
+  qty                 Int
+  operatorId          String?
+  condition           String?         // "good", "damaged", "rework", etc.
+  photos              String[]
+  notes               String?
+  timestamp           DateTime        @default(now())
+  
+  Batch               Batch           @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  FromStation         Station?        @relation("MovementFrom", fields: [fromStationId], references: [id])
+  ToStation           Station         @relation("MovementTo", fields: [toStationId], references: [id])
+  
+  @@index([batchId])
+  @@index([timestamp])
+  @@index([toStationId])
+}
+
+model Lot {
+  id                  String          @id @default(cuid())
+  lotCode             String          @unique
+  projectId           Int
+  poNumber            String?
+  
+  totalQty            Int
+  cartonCount         Int?
+  palletCount         Int?
+  
+  packingStation      String?
+  packingOperators    String[]        // Array of operator IDs
+  packingDate         DateTime
+  
+  shippingDestination String?
+  customerPO          String?
+  shippingDate        DateTime?
+  
+  status              String          @default("packed") // packed, shipped, delivered
+  
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  
+  Project             Project         @relation(fields: [projectId], references: [id])
+  Batches             Batch[]
+  
+  @@index([lotCode])
+  @@index([projectId])
+  @@index([status])
+}
+```
+
+---
+
+### API Endpoints
+
+```javascript
+// Batch Creation
+POST   /api/batches
+  - Input: projectId, skuId, targetQty OR weights, materialLots
+  - Auto-generate batch code
+  - Return: batch record + printable sheet URL
+
+// Batch Retrieval
+GET    /api/batches
+  - Query params: projectId, status, stationId, date range
+  - Return: filtered batch list
+
+GET    /api/batches/:id
+  - Include: movements, QC records, sub-batches, assembly linkage
+  - Return: complete batch history
+
+// Batch Movement
+POST   /api/batches/:id/move
+  - Input: toStationId, qty, operatorId, condition, photos
+  - Create BatchMovement record
+  - Update currentStationId
+  - Handle partial moves (create sub-batch if needed)
+
+// Sub-Batch Creation
+POST   /api/batches/:id/split
+  - Input: containers array [{identifier, qty}]
+  - Create sub-batches
+  - Link to parent
+  - Generate labels for each sub-batch
+
+// Rejection Handling  
+POST   /api/batches/:id/reject
+  - Input: reason, stationId, photos, disposition
+  - Update status, add REJ prefix
+  - Create rejection record
+  - Route to rework or scrap
+
+POST   /api/batches/:id/rework-complete
+  - Mark rework done
+  - Schedule re-inspection
+  - Remove REJ prefix if passed
+
+// Assembly
+POST   /api/batches/assemble
+  - Input: sourceBatchIds[], targetSkuId, qty, stationId
+  - Validate component availability
+  - Create assembled batch
+  - Link source batches
+  - Update component batch status
+
+// Lot Management
+POST   /api/lots
+  - Input: batchIds[], cartonCount, destination
+  - Create lot record
+  - Link batches to lot
+  - Generate lot label
+
+GET    /api/lots/:id
+  - Include: all batches, total qty, status
+  
+// Traceability Queries
+GET    /api/batches/:batchCode/trace/forward
+  - Show where batch went (sub-batches, assembly, lot, shipment)
+
+GET    /api/batches/:batchCode/trace/backward  
+  - Show material lots, source batches, full genealogy
+
+GET    /api/materials/:lotNumber/batches
+  - Find all batches using this material lot (recall query)
+
+GET    /api/workers/:operatorId/batches
+  - Find all batches handled by operator (quality tracking)
+
+// Printable Documents
+GET    /api/batches/:id/handover-sheet
+  - Generate printable PDF/HTML handover sheet
+  
+GET    /api/batches/:id/label
+  - Generate QR code label for batch
+
+GET    /api/lots/:id/packing-list
+  - Generate packing list for lot
+```
+
+---
+
+## 2.2C WORKSTATION & ASSET MANAGEMENT SYSTEM (UPDATED OCT 30, 2025)
+
+### Core Concept: Everything is a Workstation
+
+**Definition:** A workstation is ANY location where work is performed, whether machine-based or manual.
+
+**Workstation Types:**
+1. **Machine-based Workstations:**
+   - Molding machines
+   - Spray booths
+   - Pad printing machines
+   - CNC machines
+   - Any powered equipment
+
+2. **Manual Workstations:**
+   - Assembly tables
+   - Inspection tables
+   - Packing stations
+   - Hand tool stations
+   - Quality check stations
+
+### Multi-Asset Workstation Model
+
+**Concept:** Some workstations require multiple assets to operate.
+
+**Example: Spray Painting Workstation**
+```
+Workstation: SPRAY-001
+Primary Asset: Spray booth (fixed)
+Secondary Assets:
+  - Spray gun (default equipment)
+  - Mask Set 1 (specific design, 2 units)
+  - Mask Set 2 (different design, 1 unit)
+  - Mask Set 3 (if needed, 1 unit)
+  
+Process Stages:
+  Stage 1: Base coat with Mask 1 (cycle time: 60 seconds)
+  Stage 2: Color coat with Mask 2 (cycle time: 30 seconds)
+  Stage 3: Clear coat with Mask 3 (cycle time: 45 seconds)
+```
+
+**Asset Mobility:**
+- **Fixed Assets:** Cannot be moved (large machines, spray booths)
+- **Movable Assets:** Can be relocated between workstations (spray guns, masks, tools, fixtures)
+- **Project-Dependent:** Asset allocation varies by project requirements
+
+---
+
+### Capacity Calculation Based on Cycle Times
+
+**Workstation Ratio Formula:**
+```
+Stage 1 cycle time: 60 seconds → Need 2 workstations
+Stage 2 cycle time: 30 seconds → Need 1 workstation
+Optimal Ratio: 2:1
+
+Logic:
+- While 1 unit is in Stage 2 (30 sec), 2 units should be in Stage 1 (60 sec each)
+- Maintains continuous flow without bottlenecks
+- Ensures Stage 2 worker always has material to work on
+```
+
+**System Calculates:**
+```
+Input:
+- Target output: 1000 units per shift
+- Shift duration: 8 hours = 28,800 seconds
+- Stage cycle times: [60s, 30s, 45s]
+
+System determines:
+- Units per hour per station: 3600 / cycle time
+- Stations needed per stage: (target / units per hour) / shift hours
+- Asset requirements: stations × assets per station
+- Workforce: stations × workers per station
+```
+
+---
+
+### Cross-SKU Production Balance Monitoring
+
+**Problem:** Multi-SKU projects with uneven production
+
+**Example Scenario:**
+```
+Product: Toy set with 8 different SKUs
+Packing requirement: 125 units of EACH SKU per carton (1000 units total)
+
+Current Production Status:
+SKU 1: 2000 units (16 cartons worth) ✅
+SKU 2: 2000 units (16 cartons worth) ✅
+SKU 3: 2000 units (16 cartons worth) ✅
+SKU 4: 2000 units (16 cartons worth) ✅
+SKU 5: 2000 units (16 cartons worth) ✅
+SKU 6: 2000 units (16 cartons worth) ✅
+SKU 7: 2000 units (16 cartons worth) ✅
+SKU 8: 375 units (3 cartons worth) ❌ BOTTLENECK
+
+Shipping Capacity: Limited to 3 cartons (by SKU 8)
+Blocked Revenue: 13 cartons × $X = $Y blocked
+Excess Inventory: 1625 units of SKUs 1-7 sitting idle
+```
+
+**System Intelligence Response:**
+
+**1. Detection:**
+```
+⚠️ PRODUCTION IMBALANCE ALERT
+
+Project: Toy Set Alpha
+Issue: SKU 8 lagging significantly behind other SKUs
+
+Current Status:
+- SKU 1-7: 100% complete (2000 units each)
+- SKU 8: 18.75% complete (375 units)
+- Imbalance ratio: 5.3:1
+
+Impact:
+- Can only ship 3 of 16 possible cartons
+- $XX,XXX revenue blocked
+- 1625 units per SKU in WIP (inventory holding cost)
+- Estimated delay: 4-5 shifts at current rate
+```
+
+**2. Root Cause Analysis:**
+```
+📊 ANALYSIS
+
+SKU 8 Bottleneck Factors:
+- Complex geometry (longer cycle time: 90s vs 60s average)
+- Requires specialized mask (only 2 available vs 4 for others)
+- QC rejection rate: 12% (vs 5% average)
+- Assigned to 2 workstations (vs 3-4 for other SKUs)
+
+Contributing Issues:
+- Mask availability limiting parallelization
+- Worker skill gap (newer operators on SKU 8)
+- Machine M-03 running slower than optimal
+```
+
+**3. Recommendation Engine:**
+```
+💡 RECOMMENDED ACTIONS (Priority Ordered)
+
+IMMEDIATE (Next Shift):
+1. WORKSTATION REALLOCATION
+   - Reassign 2 stations from SKU 1-7 to SKU 8
+   - New allocation: 4 stations on SKU 8, 2 on others
+   - Expected output boost: +60% for SKU 8
+
+2. ASSET OPTIMIZATION
+   - Procure 2 additional masks for SKU 8 (1-day lead time)
+   - Temporarily borrow masks from Project Beta (if compatible)
+   
+3. WORKER ASSIGNMENT
+   - Assign top performer (Worker ID: W-042) to SKU 8
+   - Pair inexperienced worker with mentor for training
+
+SHORT-TERM (2-3 Shifts):
+4. QUALITY IMPROVEMENT
+   - Review QC failures for SKU 8
+   - Adjust process parameters on Machine M-03
+   - Additional training for operators
+
+5. SCHEDULE EXTENSION
+   - If needed: Add overtime shift focused solely on SKU 8
+   - Cost: $X, Benefit: Unblock $Y revenue
+
+PREVENTIVE (Future Projects):
+6. PRODUCTION PLANNING
+   - Allocate more resources upfront to complex SKUs
+   - Factor in cycle time differences during initial planning
+   - Buffer stock strategy for components with high reject rates
+```
+
+**4. Impact Simulation:**
+```
+🎮 SIMULATION RESULTS
+
+If Recommendation Implemented:
+
+Scenario A: Workstation reallocation only
+- SKU 8 completion: 3.5 shifts
+- Total project delay: Reduced from 5 to 3.5 shifts
+- Cost: $0 (resource reallocation)
+
+Scenario B: Reallocation + Additional masks
+- SKU 8 completion: 2 shifts  
+- Total project delay: Reduced from 5 to 2 shifts
+- Cost: $500 (mask purchase)
+- ROI: $XX,XXX revenue unlocked vs $500 cost
+
+Scenario C: Reallocation + Masks + Overtime
+- SKU 8 completion: 1.5 shifts
+- Total project delay: Reduced from 5 to 1.5 shifts
+- Cost: $500 (masks) + $800 (overtime) = $1,300
+- ROI: $XX,XXX revenue + early delivery bonus
+
+RECOMMENDED: Scenario B (best ROI)
+```
+
+**5. Proactive Monitoring:**
+```
+✅ CONTINUOUS MONITORING ENABLED
+
+System will track:
+- SKU production velocity (units/hour per SKU)
+- Imbalance ratio (max SKU qty / min SKU qty)
+- Carton shipping readiness
+- Revenue at risk
+
+Alerts trigger when:
+- Imbalance ratio > 1.5:1
+- Any SKU falls below 70% of target while others > 90%
+- Shipping capacity < 50% of potential
+- Estimated delay > 2 shifts
+
+Rebalancing suggestions auto-generated every 4 hours
+```
+
+---
+
+### Workstation Assignment Optimization
+
+**Complex Flow Support:**
+```
+System must support ANY workflow complexity:
+
+Linear Flow:
+Molding → Degating → Painting → Assembly → Packing
+
+Branching Flow:
+Molding → Degating → {Path A: Spray Paint, Path B: Pad Print} → Assembly
+
+Merging Flow:
+{Part A: Molding → Paint, Part B: Separate Molding → Print} → Assembly → Pack
+
+Parallel Processing:
+Batch split → [Station 1, Station 2, Station 3 in parallel] → Merge → Continue
+
+Rework Loops:
+QC → If fail → Rework → QC → Continue
+```
+
+**Optimization Algorithm Inputs:**
+```
+1. Available Resources:
+   - Workstations (by type, capacity, location)
+   - Workers (by skill, shift preference, performance)
+   - Assets (masks, tools, fixtures - by availability)
+   - Materials (inventory levels, reservation status)
+
+2. Project Requirements:
+   - Target output quantity per SKU
+   - Cycle times per process stage
+   - Quality requirements
+   - Delivery deadline
+   - Priority level
+
+3. Constraints:
+   - Workstation capacity limits
+   - Worker shift schedules
+   - Asset availability windows
+   - Material lead times
+   - Dependency chains
+
+4. Historical Data:
+   - Similar project outcomes
+   - Worker performance patterns
+   - Machine reliability stats
+   - Typical bottleneck points
+```
+
+**Optimization Algorithm Outputs:**
+```
+1. Workstation Assignments:
+   - Which projects/SKUs at which stations
+   - How many stations per process stage
+   - Optimal ratios based on cycle times
+
+2. Worker Allocation:
+   - Who works at which station
+   - Shift assignments
+   - Skill-based matching
+   - Training opportunities
+
+3. Asset Distribution:
+   - Which assets at which stations
+   - Movement schedule for mobile assets
+   - Sharing across projects if needed
+
+4. Production Schedule:
+   - Start times per batch
+   - Expected completion times
+   - Buffer periods
+   - Maintenance windows
+
+5. Risk Assessment:
+   - Potential bottlenecks
+   - Resource conflicts
+   - Timing risks
+   - Mitigation strategies
+```
+
+---
+
+### Database Schema Updates
+
+```prisma
+model Workstation { // Replaces/enhances Station model
+  id                  Int             @id @default(autoincrement())
+  code                String          @unique
+  name                String
+  
+  // Location Hierarchy
+  roomId              Int
+  factoryId           Int? // Denormalized for quick filtering
+  floorId             Int? // Denormalized
+  
+  // Type & Classification
+  workstationType     String // "machine", "manual", "inspection", "assembly", "packing"
+  subType             String? // "molding_machine", "spray_booth", "assembly_table"
+  
+  // Capacity Specifications
+  cycleTime           Int? // Seconds per unit/cycle
+  capacity            Int? // Units per hour/shift
+  simultaneousOps     Int @default(1) // Parallel operations possible
+  
+  // Asset Requirements
+  primaryAssetType    String? // Main equipment type
+  requiredAssets      Json // [{assetType, quantity, mandatory: boolean}]
+  
+  // Mobility & Flexibility
+  isMovable           Boolean @default(false)
+  canRelocate         Boolean @default(false) // Can this station be reconfigured
+  
+  // Performance Tracking
+  avgOutputRate       Float?
+  avgQualityRate      Float?
+  avgCycleTime        Float? // Actual vs specification
+  totalJobsCompleted  Int @default(0)
+  
+  // Current Status
+  status              String @default("operational") // operational, maintenance, down, setup
+  currentProjectId    Int?
+  currentBatchId      String?
+  
+  // Maintenance
+  lastMaintenance     DateTime?
+  nextMaintenance     DateTime?
+  maintenanceInterval Int? // Hours between maintenance
+  
+  // Relations
+  Room                Room @relation(fields: [roomId], references: [id])
+  CurrentProject      Project? @relation("CurrentProject", fields: [currentProjectId], references: [id])
+  
+  WorkstationAssets   WorkstationAsset[]
+  Batches             Batch[]
+  BatchMovements      BatchMovement[]
+  ProcessConfigs      ProcessConfig[]
+  ProductionEntries   ProductionEntry[]
+  MaintenanceLogs     MaintenanceLog[]
+  QCSubmissions       QCSubmission[]
+  
+  @@index([code])
+  @@index([roomId])
+  @@index([workstationType])
+  @@index([status])
+  @@index([currentProjectId])
+}
+
+model Asset {
+  id                  String          @id @default(cuid())
+  assetCode           String          @unique
+  assetType           String // "spray_gun", "mask", "fixture", "tool", "machine"
+  name                String
+  description         String?
+  
+  // Specifications
+  specifications      Json // {capacity, dimensions, material, etc}
+  
+  // Mobility
+  isMovable           Boolean @default(true)
+  currentWorkstationId Int?
+  currentLocation     String? // If not at workstation
+  
+  // Status
+  status              String @default("available") // available, in_use, maintenance, broken
+  condition           String @default("good") // good, fair, needs_repair
+  
+  // Maintenance
+  lastMaintenance     DateTime?
+  nextMaintenance     DateTime?
+  maintenanceHistory  Json[]
+  
+  // Tracking
+  acquisitionDate     DateTime?
+  cost                Float?
+  depreciation        Float?
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  WorkstationAssets   WorkstationAsset[]
+  
+  @@index([assetCode])
+  @@index([assetType])
+  @@index([status])
+  @@index([currentWorkstationId])
+}
+
+model WorkstationAsset {
+  id                  String          @id @default(cuid())
+  workstationId       Int
+  assetId             String
+  
+  assignedAt          DateTime @default(now())
+  removedAt           DateTime?
+  
+  isPrimary           Boolean @default(false) // Is this the main asset for the workstation?
+  isRequired          Boolean @default(true) // Must have this to operate?
+  
+  notes               String?
+  
+  Workstation         Workstation @relation(fields: [workstationId], references: [id], onDelete: Cascade)
+  Asset               Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  
+  @@unique([workstationId, assetId, removedAt]) // Can reassign same asset later
+  @@index([workstationId])
+  @@index([assetId])
+}
+
+model ProcessConfig {
+  id                  String          @id @default(cuid())
+  projectId           Int
+  projectSkuId        Int?
+  workstationId       Int
+  
+  // Process Parameters
+  processName         String // "molding", "spray_painting_stage_1", etc
+  cycleTime           Int // Seconds
+  setupTime           Int? // Minutes
+  
+  // Asset Configuration
+  requiredAssets      Json // [{assetId, assetType, role}]
+  
+  // Output Specifications
+  unitsPerCycle       Int @default(1)
+  expectedQuality     Float? // Expected pass rate %
+  
+  // Material Usage
+  materialConsumption Json? // [{materialId, qtyPerUnit, lossPercent}]
+  
+  // Worker Requirements
+  workersRequired     Int @default(1)
+  skillsRequired      String[]
+  
+  // Validation
+  isActive            Boolean @default(true)
+  validatedBy         String?
+  validatedAt         DateTime?
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  Project             Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku          ProjectSku? @relation(fields: [projectSkuId], references: [id])
+  Workstation         Workstation @relation(fields: [workstationId], references: [id])
+  
+  @@index([projectId])
+  @@index([workstationId])
+  @@index([processName])
+}
+```
+
+---
+
+### API Endpoints
+
+```javascript
+// Workstation Management
+GET    /api/workstations
+  - Query: roomId, type, status, availability
+  - Return: filtered workstation list with current assignments
+
+GET    /api/workstations/:id
+  - Include: assets, current batch, performance metrics
+  
+POST   /api/workstations
+  - Create new workstation
+  - Input: name, type, room, capacity, assets required
+
+PUT    /api/workstations/:id
+  - Update specifications, status, location
+
+// Asset Management
+GET    /api/assets
+  - Query: type, status, workstationId, location
+  - Return: asset list with availability
+
+GET    /api/assets/:id
+  - Include: current assignment, maintenance history
+
+POST   /api/assets
+  - Create new asset
+  - Input: type, specs, initial location
+
+// Asset Assignment
+POST   /api/workstations/:id/assets/:assetId/assign
+  - Assign asset to workstation
+  - Validate compatibility
+  - Update asset location
+
+POST   /api/workstations/:id/assets/:assetId/remove
+  - Remove asset from workstation
+  - Update availability
+
+// Capacity Optimization
+POST   /api/optimization/calculate
+  - Input: projectId, targetQty, deadline, constraints
+  - Run optimization algorithm
+  - Return: recommended workstation assignments, ratios, schedules
+
+GET    /api/optimization/scenarios
+  - Generate multiple scenarios (fastest, cheapest, balanced)
+  - Return: comparison with pros/cons
+
+// Production Balance Monitoring
+GET    /api/projects/:id/balance
+  - Check cross-SKU production balance
+  - Calculate carton readiness
+  - Identify bottlenecks
+
+POST   /api/projects/:id/rebalance
+  - Generate rebalancing recommendations
+  - Simulate impact
+  - Return: action plan
+
+// Process Configuration
+POST   /api/process-configs
+  - Define process for project/SKU at workstation
+  - Input: cycle time, assets, materials, workers
+
+GET    /api/process-configs
+  - Query: projectId, workstationId, processName
+  - Return: configurations with details
+```
+
+---
+
 ## 2.3 QC CHECKLISTS (Generic, Station-Aware, Multi-Criteria)
 
 ### Overview

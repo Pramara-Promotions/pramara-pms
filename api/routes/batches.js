@@ -1,6 +1,6 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { requireAuth } = require('../middleware/authMiddleware');
+const { authenticate: requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -26,7 +26,7 @@ router.get('/', async (req, res) => {
       where,
       include: {
         Project: { select: { id: true, name: true } },
-        ProjectSku: { select: { id: true, skuCode: true, name: true } },
+        ProjectSku: { select: { id: true, code: true, name: true } },
         Station: { select: { id: true, name: true, code: true } },
         _count: {
           select: {
@@ -53,7 +53,7 @@ router.get('/:id', async (req, res) => {
       where: { id: req.params.id },
       include: {
         Project: { select: { id: true, name: true } },
-        ProjectSku: { select: { id: true, skuCode: true, name: true } },
+        ProjectSku: { select: { id: true, code: true, name: true } },
         Station: { select: { id: true, name: true, code: true } },
         BatchMovement: {
           include: {
@@ -65,10 +65,8 @@ router.get('/:id', async (req, res) => {
         QCSubmission: {
           select: {
             id: true,
-            submissionDate: true,
-            result: true,
-            status: true,
-            inspector: { select: { id: true, name: true } },
+            submittedAt: true,
+            overallPass: true,
           },
           orderBy: { submittedAt: 'desc' },
         },
@@ -97,47 +95,208 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// POST /api/batches - Create new batch
+// POST /api/batches - Create new batch (Phase 2 spec)
+const batchUtils = require('../lib/batchUtils');
 router.post('/', async (req, res) => {
   try {
     const {
       projectId,
       projectSkuId,
-      poNumber,
-      targetQty,
-      batchCode,
+      stationId,
+      quantity,
+      operatorId,
       materialLots,
-      machineId,
+      totalWeight,
+      containerWeight,
+      unitWeight,
+      quantityMethod,
+      subSkuIdentifier
     } = req.body;
 
-    const generatedBatchCode = batchCode || `BATCH-${Date.now()}`;
+    // Generate batch code using utility
+    // For demo, sequenceNumber is timestamp, replace with daily sequence logic
+    const sequenceNumber = Date.now() % 1000;
+    const projectCode = projectId ? String(projectId) : 'PRJ';
+    const skuCode = projectSkuId ? String(projectSkuId) : 'SKU';
+    const batchCode = batchUtils.generateBatchCode(projectCode, skuCode, sequenceNumber);
 
+    // Calculate quantity if weight provided
+    let calculatedQty = quantity;
+    if (quantityMethod === 'weighed' && totalWeight && containerWeight && unitWeight) {
+      calculatedQty = batchUtils.calculateQuantityFromWeight(totalWeight, containerWeight, unitWeight).calculatedQty;
+    }
+
+    // Create batch record
     const batch = await prisma.batch.create({
       data: {
         id: `B-${Date.now()}`,
-        batchCode: generatedBatchCode,
-        projectId: parseInt(projectId),
-        projectSkuId: parseInt(projectSkuId),
-        poNumber,
-        targetQty: parseInt(targetQty),
+        batchCode,
+        projectId: Number(projectId),
+        projectSkuId: Number(projectSkuId),
+        currentStationId: Number(stationId),
+        targetQty: Number(quantity),
         currentQty: 0,
         rejectedQty: 0,
-        status: 'in_progress',
+        totalWeight: totalWeight || null,
+        containerWeight: containerWeight || null,
+        calculatedQty: calculatedQty || null,
+        quantityMethod: quantityMethod || 'count',
         materialLots: materialLots || {},
-        machineId,
-        createdBy: req.user.id,
-      },
-      include: {
-        Project: { select: { id: true, name: true } },
-        ProjectSku: { select: { id: true, skuCode: true, name: true } },
+        subBatchIdentifier: subSkuIdentifier || null,
+        status: 'in_progress',
+        createdBy: operatorId || req.user?.id || 'system',
       },
     });
 
-    res.status(201).json(batch);
+    // Create initial BatchMovement record
+    await prisma.batchMovement.create({
+      data: {
+        id: `BM-${Date.now()}`,
+        batchId: batch.id,
+        fromStationId: null,
+        toStationId: Number(stationId),
+        qty: Number(quantity),
+        operatorId: operatorId || req.user?.id || 'system',
+        timestamp: new Date(),
+        condition: 'good',
+        photos: [],
+      },
+    });
+
+    // Generate handover sheet URL
+    const handoverSheetUrl = batchUtils.generateHandoverSheet(batch, stationId);
+
+    res.status(201).json({
+      success: true,
+      batch: {
+        id: batch.id,
+        batchCode,
+        projectId,
+        quantity,
+        calculatedQty,
+        quantityMethod,
+        currentStationId: stationId,
+        status: 'in_progress',
+        handoverSheetUrl
+      }
+    });
   } catch (error) {
     console.error('Error creating batch:', error);
-    res.status(500).json({ error: 'Failed to create batch' });
+    res.status(500).json({ error: 'Failed to create batch', details: error.message });
   }
+});
+
+// POST /api/batches/:id/move - Record batch movement (Phase 2 spec)
+router.post('/:id/move', async (req, res) => {
+  try {
+    const { toStationId, operatorId, quantity, condition, notes, photos, isPartialMove, remainingQuantity } = req.body;
+    const batchId = req.params.id;
+
+    // Get current station for fromStationId
+    const currentBatch = await prisma.batch.findUnique({
+      where: { id: batchId },
+      select: { currentStationId: true }
+    });
+
+    // Create movement record
+    const movement = await prisma.batchMovement.create({
+      data: {
+        id: `BM-${Date.now()}`,
+        batchId,
+        fromStationId: currentBatch?.currentStationId || null,
+        toStationId: Number(toStationId),
+        qty: Number(quantity),
+        operatorId: operatorId || req.user?.id || 'system',
+        condition,
+        notes,
+        photos: photos || [],
+        timestamp: new Date(),
+      },
+    });
+
+    // Update batch current station
+    await prisma.batch.update({
+      where: { id: batchId },
+      data: { currentStationId: Number(toStationId) },
+    });
+
+    // If partial move, create sub-batch (stub)
+    let subBatch = null;
+    if (isPartialMove && remainingQuantity) {
+      // Implement sub-batch creation logic here
+      subBatch = { id: 'sub-batch-stub', quantity: remainingQuantity };
+    }
+
+    res.json({
+      success: true,
+      movement,
+      batch: { id: batchId, currentStationId: toStationId, status: 'in_production' },
+      subBatch
+    });
+  } catch (error) {
+    console.error('Error recording batch movement:', error);
+    res.status(500).json({ error: 'Failed to record batch movement' });
+  }
+});
+
+// POST /api/batches/:id/split - Sub-batch creation (stub)
+router.post('/:id/split', async (req, res) => {
+  // Implement sub-batch creation logic as per spec
+  res.json({ success: true, message: 'Sub-batch creation endpoint stub' });
+});
+
+// POST /api/batches/:id/reject - Rejection endpoint (stub)
+router.post('/:id/reject', async (req, res) => {
+  // Implement rejection logic as per spec
+  res.json({ success: true, message: 'Rejection endpoint stub' });
+});
+
+// POST /api/batches/:id/rework-complete - Rework complete endpoint (stub)
+router.post('/:id/rework-complete', async (req, res) => {
+  // Implement rework complete logic as per spec
+  res.json({ success: true, message: 'Rework complete endpoint stub' });
+});
+
+// POST /api/batches/assemble - Assembly endpoint (stub)
+router.post('/assemble', async (req, res) => {
+  // Implement assembly logic as per spec
+  res.json({ success: true, message: 'Assembly endpoint stub' });
+});
+
+// GET /api/batches/:id/trace-forward - Traceability endpoint (stub)
+router.get('/:id/trace-forward', async (req, res) => {
+  // Implement trace-forward logic as per spec
+  res.json({ success: true, message: 'Trace-forward endpoint stub' });
+});
+
+// GET /api/batches/:id/trace-backward - Traceability endpoint (stub)
+router.get('/:id/trace-backward', async (req, res) => {
+  // Implement trace-backward logic as per spec
+  res.json({ success: true, message: 'Trace-backward endpoint stub' });
+});
+
+// GET /api/batches/material-recall - Material recall endpoint (stub)
+router.get('/material-recall', async (req, res) => {
+  // Implement material recall logic as per spec
+  res.json({ success: true, message: 'Material recall endpoint stub' });
+});
+
+// GET /api/batches/operator-tracking - Operator tracking endpoint (stub)
+router.get('/operator-tracking', async (req, res) => {
+  // Implement operator tracking logic as per spec
+  res.json({ success: true, message: 'Operator tracking endpoint stub' });
+});
+
+// GET /api/batches/:id/handover-sheet - Printable handover sheet (stub)
+router.get('/:id/handover-sheet', async (req, res) => {
+  // Implement handover sheet generation as per spec
+  res.json({ success: true, message: 'Handover sheet endpoint stub' });
+});
+
+// GET /api/batches/:id/qr-code - QR code generation (stub)
+router.get('/:id/qr-code', async (req, res) => {
+  // Implement QR code generation as per spec
+  res.json({ success: true, message: 'QR code endpoint stub' });
 });
 
 // PUT /api/batches/:id - Update batch
@@ -148,6 +307,7 @@ router.put('/:id', async (req, res) => {
       rejectedQty,
       currentStationId,
       status,
+      completedQuantity,
       machineId,
       materialLots,
     } = req.body;
@@ -159,6 +319,7 @@ router.put('/:id', async (req, res) => {
     if (status !== undefined) updateData.status = status;
     if (machineId !== undefined) updateData.machineId = machineId;
     if (materialLots !== undefined) updateData.materialLots = materialLots;
+    if (completedQuantity !== undefined) updateData.currentQty = parseInt(completedQuantity);
 
     if (status === 'completed' || status === 'closed') {
       updateData.completedAt = new Date();
@@ -169,7 +330,7 @@ router.put('/:id', async (req, res) => {
       data: updateData,
       include: {
         Project: { select: { id: true, name: true } },
-        ProjectSku: { select: { id: true, skuCode: true, name: true } },
+        ProjectSku: { select: { id: true, code: true, name: true } },
         Station: { select: { id: true, name: true } },
       },
     });

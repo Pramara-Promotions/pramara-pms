@@ -8,7 +8,7 @@ export default function SecurityAlertBanner() {
     // Fetch current user to check passwordResetAt
     const fetchUser = async () => {
       try {
-        const response = await fetch('http://localhost:4000/api/auth/me', {
+        const response = await fetch('/api/me', {
           credentials: 'include'
         });
         

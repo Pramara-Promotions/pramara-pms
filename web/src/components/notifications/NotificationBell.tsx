@@ -10,7 +10,7 @@ interface NotificationBellProps {
 }
 
 export default function NotificationBell({ onOpen }: NotificationBellProps) {
-  const { unreadCount, connected, notifications } = useNotifications();
+  const { unreadCount, connected, notifications, error } = useNotifications();
   const [shake, setShake] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const prevUnreadCountRef = useRef(unreadCount);
@@ -41,8 +41,11 @@ export default function NotificationBell({ onOpen }: NotificationBellProps) {
   }, [showTooltip]);
 
   const getConnectionStatus = () => {
-    if (connected) return 'Connected';
-    return 'Reconnecting...';
+    if (error && error.includes('Not authenticated')) {
+      return 'Please login';
+    }
+    if (connected) return 'Real-time updates';
+    return 'Connecting...';
   };
 
   const getBadgeColor = () => {
@@ -113,15 +116,20 @@ export default function NotificationBell({ onOpen }: NotificationBellProps) {
             </div>
             
             <div className="flex items-center gap-2 text-xs text-gray-300 pt-2 border-t border-gray-700">
-              {connected ? (
+              {error && error.includes('Not authenticated') ? (
+                <>
+                  <WifiOff className="h-3 w-3 text-gray-500" />
+                  <span>Please login first</span>
+                </>
+              ) : connected ? (
                 <>
                   <Wifi className="h-3 w-3 text-green-500" />
-                  <span>Connected</span>
+                  <span>Real-time updates</span>
                 </>
               ) : (
                 <>
-                  <WifiOff className="h-3 w-3 text-yellow-500" />
-                  <span>Reconnecting...</span>
+                  <WifiOff className="h-3 w-3 text-yellow-500 animate-pulse" />
+                  <span>Connecting...</span>
                 </>
               )}
             </div>

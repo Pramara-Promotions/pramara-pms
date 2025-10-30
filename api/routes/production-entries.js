@@ -1,6 +1,6 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { requireAuth } = require('../middleware/authMiddleware');
+const { authenticate: requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -78,6 +78,11 @@ router.post('/', async (req, res) => {
       stationId,
       shiftId,
       batchCode,
+      batchId,
+      workerId,
+      quantityProduced,
+      defectQuantity,
+      stage,
       startTime,
       endTime,
       targetQty,
@@ -88,26 +93,56 @@ router.post('/', async (req, res) => {
       operatorId,
     } = req.body;
 
-    const outputVariance = targetQty > 0 
-      ? ((actualQty - targetQty) / targetQty) * 100 
+    const resolvedProjectId = Number(projectId);
+    const resolvedStationId = Number(stationId);
+    const resolvedBatchCode = batchCode || batchId || `BATCH-${Date.now()}`;
+    const resolvedTargetQty = Number(targetQty ?? quantityProduced ?? 0);
+    const resolvedActualQty = Number(actualQty ?? quantityProduced ?? 0);
+    const resolvedRejectedQty = Number(rejectedQty ?? defectQuantity ?? 0);
+    const resolvedOperatorId = operatorId || workerId || req.user.id;
+
+    // Ensure a shift exists - create default if none provided
+    let resolvedShiftId = shiftId;
+    if (!resolvedShiftId) {
+      const existingShift = await prisma.shift.findFirst({ where: { active: true } });
+      if (existingShift) {
+        resolvedShiftId = existingShift.id;
+      } else {
+        const defaultShift = await prisma.shift.create({
+          data: {
+            id: `SHIFT-${Date.now()}`,
+            name: 'Default Shift',
+            startTime: '08:00',
+            endTime: '16:00',
+            breakDuration: 30,
+            active: true,
+            updatedAt: new Date(),
+          },
+        });
+        resolvedShiftId = defaultShift.id;
+      }
+    }
+
+    const outputVariance = resolvedTargetQty > 0 
+      ? ((resolvedActualQty - resolvedTargetQty) / resolvedTargetQty) * 100 
       : 0;
 
     const entry = await prisma.productionEntry.create({
       data: {
         id: `PE-${Date.now()}`,
-        projectId: parseInt(projectId),
-        stationId: parseInt(stationId),
-        shiftId,
-        batchCode,
-        startTime: new Date(startTime),
+        projectId: resolvedProjectId,
+        stationId: resolvedStationId,
+        shiftId: resolvedShiftId,
+        batchCode: resolvedBatchCode,
+        startTime: startTime ? new Date(startTime) : new Date(),
         endTime: endTime ? new Date(endTime) : null,
-        targetQty: parseInt(targetQty),
-        actualQty: parseInt(actualQty),
-        rejectedQty: rejectedQty ? parseInt(rejectedQty) : 0,
+        targetQty: resolvedTargetQty,
+        actualQty: resolvedActualQty,
+        rejectedQty: resolvedRejectedQty,
         materialUsed: materialUsed || {},
         outputVariance,
-        notes,
-        operatorId,
+        notes: notes || (stage ? `Stage: ${stage}` : null),
+        operatorId: resolvedOperatorId,
       },
       include: {
         Project: { select: { id: true, name: true } },

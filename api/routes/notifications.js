@@ -105,31 +105,89 @@ router.delete('/notifications/:id', authGuard, async (req, res) => {
   }
 });
 
-// Helper function to create a notification (for internal use)
-async function createNotification({ userId, type, title, message, link = null }) {
+// Create test notification (for development/testing)
+router.post('/notifications/test', authGuard, async (req, res) => {
   try {
-    return await prisma.notification.create({
-      data: { userId, type, title, message, link }
+    const userId = req.auth.user.id;
+    const { type = 'info', title = 'Test Notification', message = 'This is a test notification' } = req.body;
+    
+    const notification = await prisma.notification.create({
+      data: {
+        userId,
+        type,
+        title,
+        message,
+        read: false,
+        dismissed: false,
+        priority: 'medium',
+      }
     });
+
+    // Emit real-time notification via Socket.IO
+    const io = req.app.get('io');
+    console.log('[TEST NOTIFICATION] io instance:', io ? 'Available' : 'NOT AVAILABLE');
+    console.log('[TEST NOTIFICATION] Target room:', `user:${userId}`);
+    console.log('[TEST NOTIFICATION] Notification data:', notification);
+    
+    if (io) {
+      io.to(`user:${userId}`).emit('notification', notification);
+      console.log(`📬 Real-time notification sent to user:${userId}`);
+    } else {
+      console.warn('⚠️ Socket.IO instance not available - real-time notification not sent');
+    }
+    
+    res.status(201).json(notification);
+  } catch (error) {
+    console.error('Error creating test notification:', error);
+    res.status(500).json({ error: 'Failed to create test notification', details: error.message });
+  }
+});
+
+// Helper function to create a notification (for internal use)
+async function createNotification({ userId, type, title, message, link = null }, io = null) {
+  try {
+    const notification = await prisma.notification.create({
+      data: { userId, type, title, message, link, read: false, dismissed: false }
+    });
+
+    // Emit real-time notification via Socket.IO if io instance is provided
+    if (io) {
+      io.to(`user:${userId}`).emit('notification', notification);
+      console.log(`📬 Real-time notification sent to user:${userId}`);
+    }
+
+    return notification;
   } catch (error) {
     console.error('Error creating notification:', error);
   }
 }
 
 // Helper function to notify multiple users
-async function notifyUsers(userIds, { type, title, message, link = null }) {
+async function notifyUsers(userIds, { type, title, message, link = null }, io = null) {
   try {
     const notifications = userIds.map(userId => ({
       userId,
       type,
       title,
       message,
-      link
+      link,
+      read: false,
+      dismissed: false,
     }));
     
-    return await prisma.notification.createMany({
+    const result = await prisma.notification.createMany({
       data: notifications
     });
+
+    // Emit real-time notifications via Socket.IO if io instance is provided
+    if (io) {
+      for (const notif of notifications) {
+        io.to(`user:${notif.userId}`).emit('notification', notif);
+      }
+      console.log(`📬 Real-time notifications sent to ${userIds.length} users`);
+    }
+
+    return result;
   } catch (error) {
     console.error('Error notifying users:', error);
   }

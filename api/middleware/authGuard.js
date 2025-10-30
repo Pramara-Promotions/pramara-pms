@@ -37,7 +37,7 @@ async function authGuard(req, res, next) {
     // ═══════════════════════════════════════════════════════════
     if (token.startsWith(DEV_TOKEN_PREFIX)) {
       req.user = {
-        id: 'dev-user',
+        id: 'cmhbrbzgq006oawxyjyh0ge9h', // Actual admin user ID from database
         email: process.env.DEV_AUTH_EMAIL || 'admin@pramara.local',
         roles: ['admin'],
         tokenSource: 'dev-cookie',

@@ -7,6 +7,81 @@ const prisma = new PrismaClient();
 
 router.use(requireAuth);
 
+// GET /api/qc-submissions/analytics/summary - QC analytics
+// MUST be before /:id route to avoid treating "analytics" as an ID
+router.get('/analytics/summary', async (req, res) => {
+  try {
+    const { projectId, stationId, startDate, endDate } = req.query;
+    
+    const where = {};
+    if (projectId) where.projectId = parseInt(projectId);
+    if (stationId) where.stationId = parseInt(stationId);
+    
+    const dateFilter = {};
+    if (startDate) dateFilter.gte = new Date(startDate);
+    if (endDate) dateFilter.lte = new Date(endDate);
+    if (Object.keys(dateFilter).length > 0) where.submissionDate = dateFilter;
+
+    const [totalSubmissions, byResult, byStatus, qualityStats] = await Promise.all([
+      prisma.qCSubmission.count({ where }),
+      prisma.qCSubmission.groupBy({
+        by: ['result'],
+        where,
+        _count: true,
+      }),
+      prisma.qCSubmission.groupBy({
+        by: ['status'],
+        where,
+        _count: true,
+      }),
+      prisma.qCSubmission.aggregate({
+        where,
+        _sum: {
+          sampleSize: true,
+          passedQty: true,
+          failedQty: true,
+          defectQty: true,
+        },
+        _avg: {
+          sampleSize: true,
+        },
+      }),
+    ]);
+
+    const resultCounts = byResult.reduce((acc, item) => {
+      acc[item.result] = item._count;
+      return acc;
+    }, {});
+
+    const statusCounts = byStatus.reduce((acc, item) => {
+      acc[item.status] = item._count;
+      return acc;
+    }, {});
+
+    const totalPassed = qualityStats._sum.passedQty || 0;
+    const totalFailed = qualityStats._sum.failedQty || 0;
+    const totalDefects = qualityStats._sum.defectQty || 0;
+    const totalInspected = totalPassed + totalFailed;
+
+    res.json({
+      totalSubmissions,
+      passRate: totalInspected > 0 ? ((totalPassed / totalInspected) * 100).toFixed(2) : 0,
+      failRate: totalInspected > 0 ? ((totalFailed / totalInspected) * 100).toFixed(2) : 0,
+      defectRate: totalInspected > 0 ? ((totalDefects / totalInspected) * 100).toFixed(2) : 0,
+      byResult: resultCounts,
+      byStatus: statusCounts,
+      totalInspected,
+      totalPassed,
+      totalFailed,
+      totalDefects,
+      avgSampleSize: qualityStats._avg.sampleSize?.toFixed(2) || 0,
+    });
+  } catch (error) {
+    console.error('Error fetching QC analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch QC analytics' });
+  }
+});
+
 // GET /api/qc-submissions - List all QC submissions with filters
 router.get('/', async (req, res) => {
   try {
@@ -288,80 +363,6 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting QC submission:', error);
     res.status(500).json({ error: 'Failed to delete QC submission' });
-  }
-});
-
-// GET /api/qc-submissions/analytics/summary - QC analytics
-router.get('/analytics/summary', async (req, res) => {
-  try {
-    const { projectId, stationId, startDate, endDate } = req.query;
-    
-    const where = {};
-    if (projectId) where.projectId = parseInt(projectId);
-    if (stationId) where.stationId = parseInt(stationId);
-    
-    const dateFilter = {};
-    if (startDate) dateFilter.gte = new Date(startDate);
-    if (endDate) dateFilter.lte = new Date(endDate);
-    if (Object.keys(dateFilter).length > 0) where.submissionDate = dateFilter;
-
-    const [totalSubmissions, byResult, byStatus, qualityStats] = await Promise.all([
-      prisma.qCSubmission.count({ where }),
-      prisma.qCSubmission.groupBy({
-        by: ['result'],
-        where,
-        _count: true,
-      }),
-      prisma.qCSubmission.groupBy({
-        by: ['status'],
-        where,
-        _count: true,
-      }),
-      prisma.qCSubmission.aggregate({
-        where,
-        _sum: {
-          sampleSize: true,
-          passedQty: true,
-          failedQty: true,
-          defectQty: true,
-        },
-        _avg: {
-          sampleSize: true,
-        },
-      }),
-    ]);
-
-    const resultCounts = byResult.reduce((acc, item) => {
-      acc[item.result] = item._count;
-      return acc;
-    }, {});
-
-    const statusCounts = byStatus.reduce((acc, item) => {
-      acc[item.status] = item._count;
-      return acc;
-    }, {});
-
-    const totalChecked = qualityStats._sum.sampleSize || 0;
-    const totalPassed = qualityStats._sum.passedQty || 0;
-    const totalFailed = qualityStats._sum.failedQty || 0;
-    const passRate = totalChecked > 0 ? (totalPassed / totalChecked) * 100 : 0;
-
-    res.json({
-      totalSubmissions,
-      byResult: resultCounts,
-      byStatus: statusCounts,
-      quality: {
-        totalChecked,
-        totalPassed,
-        totalFailed,
-        totalDefects: qualityStats._sum.defectQty || 0,
-        passRate,
-        avgSampleSize: qualityStats._avg.sampleSize || 0,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching QC analytics:', error);
-    res.status(500).json({ error: 'Failed to fetch analytics' });
   }
 });
 

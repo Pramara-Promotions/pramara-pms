@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useMemo, useRef, useState } from "react";
+import { createApproval } from "../../../lib/services/approvals";
 import { useProjectDocuments } from "../hooks/useProjectDocuments";
 import { useStations } from "../hooks/useStations";
 import { useProjectContext } from "../ProjectContext";
@@ -9,6 +10,12 @@ export default function FilesTab() {
   if (!project) return <div className="text-sm text-gray-500">Loading project…</div>;
   const projectId = useMemo(() => Number(project?.id), [project?.id]);
   const { documents, loading, error, reload, updateDocument, deleteDocument } = useProjectDocuments(projectId);
+  const [complianceDocs, setComplianceDocs] = useState<any[]>([]);
+  const [showComplianceDocs, setShowComplianceDocs] = useState(false);
+  const [aggregatedFiles, setAggregatedFiles] = useState<any[]>([]);
+  const [showAggregated, setShowAggregated] = useState(false);
+  const [moduleFilter, setModuleFilter] = useState<string>('all');
+  const [aggregatedLoading, setAggregatedLoading] = useState(false);
   const { stations } = useStations(projectId);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editDoc, setEditDoc] = useState(null);
@@ -19,6 +26,18 @@ export default function FilesTab() {
   const [deleteDoc, setDeleteDoc] = useState(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareTargets, setShareTargets] = useState([]);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [approvalDoc, setApprovalDoc] = useState<any>(null);
+  const [approvalForm, setApprovalForm] = useState({
+    title: '',
+    contactPerson: '',
+    contactEmail: '',
+    contactPhone: '',
+    dueDate: '',
+    expectedDate: '',
+    priority: 'medium',
+    notes: ''
+  });
   
   // Enhanced delete: ask if user wants to delete all versions or just this one
   const [deleteMode, setDeleteMode] = useState<'single'|'all'>('single');
@@ -105,6 +124,39 @@ export default function FilesTab() {
     }
   }
 
+  // Load compliance documents when toggled on
+  useEffect(() => {
+    if (!showComplianceDocs) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/compliance/documents/by-project?projectId=${projectId}`, { credentials: 'include' });
+        if (res.ok) {
+          const js = await res.json();
+          setComplianceDocs(Array.isArray(js) ? js : []);
+        }
+      } catch {}
+    })();
+  }, [showComplianceDocs, projectId]);
+
+  // Load aggregated files when toggled on
+  useEffect(() => {
+    if (!showAggregated) return;
+    (async () => {
+      try {
+        setAggregatedLoading(true);
+        const res = await fetch(`/api/documents/by-project/${projectId}?module=${moduleFilter}`, { credentials: 'include' });
+        if (res.ok) {
+          const js = await res.json();
+          setAggregatedFiles(Array.isArray(js) ? js : []);
+        }
+      } catch {
+        setAggregatedFiles([]);
+      } finally {
+        setAggregatedLoading(false);
+      }
+    })();
+  }, [showAggregated, projectId, moduleFilter]);
+
   async function openHistory(doc) {
     setHistoryDoc(doc);
     setShowHistoryModal(true);
@@ -126,6 +178,15 @@ export default function FilesTab() {
   function openEdit(doc) {
     setEditDoc(doc);
     setShowEditModal(true);
+  }
+
+  function openApproval(doc) {
+    setApprovalDoc(doc);
+    setApprovalForm((prev) => ({
+      ...prev,
+      title: doc?.title || 'Approval Request',
+    }));
+    setShowApprovalModal(true);
   }
 
   async function handleRevise(doc, values) {
@@ -343,6 +404,8 @@ export default function FilesTab() {
       referenceUrl: doc.referenceUrl || '',
       notes: doc.notes || '',
       stationIds: doc.documentStations?.map(ds => ds.stationId) || [],
+      owner: (doc.tags && (doc.tags.owner || '')) || '',
+      rolesCsv: (doc.tags && Array.isArray(doc.tags.roles) ? doc.tags.roles.join(', ') : '')
     });
     
     // Update form.version whenever nextVersion changes
@@ -463,6 +526,12 @@ export default function FilesTab() {
       setEditError(null);
       try {
         let payload: any = { ...form, stations: form.stationIds };
+        // Build ACL tags
+        const roles = String(form.rolesCsv || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean);
+        payload.tags = { ...(doc.tags || {}), owner: form.owner || null, roles };
         
         // If a file is selected, upload it first
         if (editSelectedFile) {
@@ -549,6 +618,16 @@ export default function FilesTab() {
             <input className="w-full border rounded px-2 py-1" name="referenceUrl" value={form.referenceUrl} onChange={handleChange} placeholder="Reference URL" />
             <textarea className="w-full border rounded px-2 py-1" name="revisionNote" value={form.revisionNote} onChange={handleChange} placeholder="Revision Note (reason for change)" />
             <textarea className="w-full border rounded px-2 py-1" name="notes" value={form.notes} onChange={handleChange} placeholder="Notes" />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-sm mb-1">Owner (user id/email)</label>
+                <input className="w-full border rounded px-2 py-1" name="owner" value={form.owner} onChange={handleChange} placeholder="e.g., user@example.com" />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Visible Roles (comma)</label>
+                <input className="w-full border rounded px-2 py-1" name="rolesCsv" value={form.rolesCsv} onChange={handleChange} placeholder="manager, supervisor" />
+              </div>
+            </div>
             <div>
               <div className="font-semibold mb-1">Tag Stations</div>
               <div className="flex flex-wrap gap-2">
@@ -1054,6 +1133,7 @@ export default function FilesTab() {
                     )}
                     <button className="px-2 py-1 border rounded" onClick={() => openEdit(d)}>Edit</button>
                     <button className="px-2 py-1 border rounded" onClick={() => openHistory(d)}>History</button>
+                    <button className="px-2 py-1 border rounded text-blue-600 hover:bg-blue-50" onClick={() => openApproval(d)}>Request Approval</button>
                     <button 
                       className="px-2 py-1 border rounded text-red-600 hover:bg-red-50" 
                       onClick={() => confirmDelete(d)}
@@ -1085,6 +1165,156 @@ export default function FilesTab() {
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+      <div className="mt-6">
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={showAggregated} onChange={(e)=>setShowAggregated(e.target.checked)} />
+          <span className="text-sm font-medium">Show All Files (Aggregated from all modules)</span>
+        </label>
+        {showAggregated && (
+          <div className="mt-3 border rounded-lg dark:border-neutral-700">
+            <div className="px-3 py-2 bg-gray-50 dark:bg-neutral-800 border-b dark:border-neutral-700 flex items-center justify-between">
+              <span className="font-medium text-sm">Aggregated Files ({aggregatedFiles.length})</span>
+              <select 
+                className="text-xs border rounded px-2 py-1 dark:bg-neutral-900 dark:border-neutral-600"
+                value={moduleFilter}
+                onChange={(e) => setModuleFilter(e.target.value)}
+              >
+                <option value="all">All Modules</option>
+                <option value="documents">Documents</option>
+                <option value="compliance">Compliance</option>
+                <option value="preproduction">PreProduction</option>
+                <option value="planning">Planning</option>
+                <option value="board">Board</option>
+              </select>
+            </div>
+            {aggregatedLoading ? (
+              <div className="p-4 text-center text-sm text-gray-500">Loading files...</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-left text-gray-500 dark:text-gray-400">
+                    <tr>
+                      <th className="px-3 py-2">Module</th>
+                      <th className="px-3 py-2">Title</th>
+                      <th className="px-3 py-2">Type</th>
+                      <th className="px-3 py-2">Created</th>
+                      <th className="px-3 py-2">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aggregatedFiles.map((file) => (
+                      <tr key={file.id} className="border-t dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800">
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            file.module === 'documents' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                            file.module === 'compliance' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                            file.module === 'preproduction' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
+                            file.module === 'planning' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' :
+                            'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300'
+                          }`}>
+                            {file.module}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">{file.title}</div>
+                            {file.metadata && Object.keys(file.metadata).length > 0 && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                {file.metadata.complianceName && `Compliance: ${file.metadata.complianceName}`}
+                                {file.metadata.flowName && `Flow: ${file.metadata.flowName}`}
+                                {file.metadata.taskTitle && `Task: ${file.metadata.taskTitle}`}
+                                {file.metadata.planDate && `Plan: ${new Date(file.metadata.planDate).toLocaleDateString()}`}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-gray-600 dark:text-gray-300">{file.type}</td>
+                        <td className="px-3 py-2 text-gray-500 dark:text-gray-400 text-xs">
+                          {new Date(file.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="px-3 py-2 space-x-2">
+                          {file.url ? (
+                            <a 
+                              href={file.url} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="px-2 py-1 border rounded text-xs hover:bg-gray-100 dark:hover:bg-neutral-700"
+                            >
+                              View
+                            </a>
+                          ) : file.module === 'documents' && (
+                            <button
+                              className="px-2 py-1 border rounded text-xs hover:bg-gray-100 dark:hover:bg-neutral-700"
+                              onClick={async () => {
+                                try {
+                                  const r = await fetch(`/api/documents/${file.sourceId}/url`, { credentials: 'include' });
+                                  const js = await r.json();
+                                  if (r.ok && js?.url) window.open(js.url, '_blank', 'noopener');
+                                } catch {}
+                              }}
+                            >
+                              View
+                            </button>
+                          )}
+                          <a
+                            href={file.contextUrl}
+                            className="px-2 py-1 border rounded text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20"
+                          >
+                            View in Context
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                    {aggregatedFiles.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="text-center text-gray-500 dark:text-gray-400 py-8">
+                          No files found for selected module
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="mt-6">
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={showComplianceDocs} onChange={(e)=>setShowComplianceDocs(e.target.checked)} />
+          <span className="text-sm">Show Compliance Documents for this project</span>
+        </label>
+        {showComplianceDocs && (
+          <div className="mt-3 border rounded-lg">
+            <div className="px-3 py-2 bg-gray-50 font-medium text-sm">Compliance Documents</div>
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-500">
+                <tr><th>Type</th><th>Name</th><th>Compliance</th><th>Uploaded</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                {complianceDocs.map((cd) => (
+                  <div key={cd.id} className="contents">
+                    <tr className="border-t">
+                      <td className="py-2">{cd.documentType}</td>
+                      <td>{cd.documentName}</td>
+                      <td>{cd.compliance?.complianceName || '-'}</td>
+                      <td>{new Date(cd.uploadedAt).toLocaleDateString()}</td>
+                      <td>
+                        {cd.fileUrl && (
+                          <a href={cd.fileUrl} target="_blank" rel="noreferrer" className="px-2 py-1 border rounded">View</a>
+                        )}
+                      </td>
+                    </tr>
+                  </div>
+                ))}
+                {complianceDocs.length === 0 && (
+                  <tr><td colSpan={5} className="text-center text-gray-500 py-3">No compliance documents</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
       {/* Edit Modal and History Modal rendered outside table for valid HTML */}
@@ -1119,6 +1349,73 @@ export default function FilesTab() {
           targets={shareTargets} 
           onClose={closeShareModal} 
         />
+      )}
+      {showApprovalModal && approvalDoc && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg">
+            <h3 className="text-lg font-semibold mb-3">Request Approval</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Title</label>
+                <input className="w-full border rounded px-3 py-2" value={approvalForm.title} onChange={(e)=>setApprovalForm({...approvalForm, title: e.target.value})} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Approver Name</label>
+                  <input className="w-full border rounded px-3 py-2" value={approvalForm.contactPerson} onChange={(e)=>setApprovalForm({...approvalForm, contactPerson: e.target.value})} />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Approver Email</label>
+                  <input type="email" className="w-full border rounded px-3 py-2" value={approvalForm.contactEmail} onChange={(e)=>setApprovalForm({...approvalForm, contactEmail: e.target.value})} />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Due Date</label>
+                  <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.dueDate} onChange={(e)=>setApprovalForm({...approvalForm, dueDate: e.target.value})} />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Expected Date</label>
+                  <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.expectedDate} onChange={(e)=>setApprovalForm({...approvalForm, expectedDate: e.target.value})} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Priority</label>
+                <select className="w-full border rounded px-3 py-2" value={approvalForm.priority} onChange={(e)=>setApprovalForm({...approvalForm, priority: e.target.value as any})}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Notes</label>
+                <textarea className="w-full border rounded px-3 py-2" rows={3} value={approvalForm.notes} onChange={(e)=>setApprovalForm({...approvalForm, notes: e.target.value})} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className="px-4 py-2 border rounded" onClick={()=>setShowApprovalModal(false)}>Cancel</button>
+              <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={async ()=>{
+                try {
+                  await createApproval({
+                    projectId,
+                    approvalType: 'document',
+                    title: approvalForm.title || approvalDoc.title || 'Document Approval',
+                    description: `Approval requested for document #${approvalDoc.id} - ${approvalDoc.title}`,
+                    contactPerson: approvalForm.contactPerson || undefined,
+                    contactEmail: approvalForm.contactEmail || undefined,
+                    contactPhone: approvalForm.contactPhone || undefined,
+                    dueDate: approvalForm.dueDate || undefined,
+                    expectedDate: approvalForm.expectedDate || undefined,
+                    priority: approvalForm.priority as any,
+                  });
+                  setShowApprovalModal(false);
+                  alert('Approval request created');
+                } catch (e) {
+                  console.error(e);
+                  alert('Failed to create approval');
+                }
+              }}>Create</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

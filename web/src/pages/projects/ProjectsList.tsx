@@ -349,41 +349,9 @@ export default function ProjectsList() {
         </div>
       </div>
 
-      {/* Role-Specific Quick Actions */}
-      {isAdmin && (
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl shadow-lg p-6 mb-6 text-white">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Users size={20} />
-            Admin Quick Actions
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <button
-              onClick={() => navigate({ to: "/projects/new" })}
-              className="bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-lg p-4 text-left transition-all"
-            >
-              <Plus size={24} className="mb-2" />
-              <p className="font-medium">Create Project</p>
-              <p className="text-sm text-white/80">Start a new project</p>
-            </button>
-            <button
-              onClick={() => navigate({ to: "/admin" })}
-              className="bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-lg p-4 text-left transition-all"
-            >
-              <Users size={24} className="mb-2" />
-              <p className="font-medium">Manage Users</p>
-              <p className="text-sm text-white/80">View all users & roles</p>
-            </button>
-            <button
-              onClick={() => setStatusFilter('critical')}
-              className="bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-lg p-4 text-left transition-all"
-            >
-              <AlertTriangle size={24} className="mb-2" />
-              <p className="font-medium">Critical Projects</p>
-              <p className="text-sm text-white/80">{stats.critical} need attention</p>
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Role-Specific Quick Actions (moved to avatar menu) */}
+      {/* Admin Quick Actions were relocated to the user avatar menu in AppLayout.
+          Keeping this section intentionally removed to avoid duplication on the Projects page. */}
 
       {isManager && !isAdmin && (
         <div className="bg-gradient-to-r from-blue-500 to-cyan-600 rounded-xl shadow-lg p-6 mb-6 text-white">

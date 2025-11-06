@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiPost, apiPut } from '../lib/api';
+import { useProjectContextSafe } from './projects/ProjectContext';
 
 interface DailyPlan {
   id: string;
@@ -12,6 +13,7 @@ interface DailyPlan {
 }
 
 export default function DailyPlanningPage() {
+  const projectContext = useProjectContextSafe();
   const [plans, setPlans] = useState<DailyPlan[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [scenarios, setScenarios] = useState<any[]>([]);
@@ -25,6 +27,13 @@ export default function DailyPlanningPage() {
     date: new Date().toISOString().split('T')[0],
     targetQty: ''
   });
+
+  // Auto-set project from context if available
+  useEffect(() => {
+    if (projectContext) {
+      setFormData(prev => ({ ...prev, projectId: String(projectContext.id) }));
+    }
+  }, [projectContext]);
 
   const [adaptData, setAdaptData] = useState({
     adaptationType: 'worker_change',
@@ -156,19 +165,22 @@ export default function DailyPlanningPage() {
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h2 className="text-lg font-bold mb-4">Generate New Plan</h2>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Project *</label>
-            <select
-              value={formData.projectId}
-              onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
-              className="w-full border rounded px-3 py-2"
-            >
-              <option value="">Select Project</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.projectCode}</option>
-              ))}
-            </select>
-          </div>
+          {/* Hide project selector when inside project context */}
+          {!projectContext && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Project *</label>
+              <select
+                value={formData.projectId}
+                onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
+                className="w-full border rounded px-3 py-2"
+              >
+                <option value="">Select Project</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.projectCode}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium mb-1">Date *</label>
             <input

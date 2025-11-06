@@ -2,7 +2,8 @@ const express = require('express')
 const router = express.Router()
 const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
-const { addDays, isPast, isBefore } = require('date-fns')
+const { addDays, isPast, isBefore, subDays, startOfDay, endOfDay } = require('date-fns')
+const authGuard = require('../middleware/authGuard')
 
 // Middleware to require authentication
 const requireAuth = (req, res, next) => {
@@ -16,7 +17,7 @@ const requireAuth = (req, res, next) => {
  * GET /api/dashboard/action-items
  * Returns role-based actionable items for the home page
  */
-router.get('/action-items', requireAuth, async (req, res) => {
+router.get('/action-items', authGuard, async (req, res) => {
   try {
     const userId = req.user.id
     const userRoles = req.user.roles || []
@@ -275,5 +276,163 @@ router.get('/action-items', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch action items' })
   }
 })
+
+/**
+ * GET /api/dashboard/overview
+ * Comprehensive dashboard analytics for home page
+ */
+router.get('/overview', authGuard, async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const daysNum = parseInt(days);
+    const startDate = subDays(new Date(), daysNum);
+    
+    // Production Analytics
+    const [productionStats, productionTrend] = await Promise.all([
+      prisma.productionEntry.aggregate({
+        where: { entryDate: { gte: startDate } },
+        _sum: { totalProduced: true, approvedQty: true, rejectedQty: true },
+        _count: true,
+      }),
+      prisma.productionEntry.groupBy({
+        by: ['entryDate'],
+        where: { entryDate: { gte: startDate } },
+        _sum: { totalProduced: true, approvedQty: true },
+        orderBy: { entryDate: 'asc' },
+      }),
+    ]);
+
+    // Quality Analytics
+    const [qcStats, qcByResult] = await Promise.all([
+      prisma.qCSubmission.aggregate({
+        where: { submissionDate: { gte: startDate } },
+        _sum: { sampleSize: true, passedQty: true, failedQty: true },
+        _count: true,
+      }),
+      prisma.qCSubmission.groupBy({
+        by: ['result'],
+        where: { submissionDate: { gte: startDate } },
+        _count: true,
+      }),
+    ]);
+
+    const totalChecked = (qcStats._sum.sampleSize || 0);
+    const totalPassed = (qcStats._sum.passedQty || 0);
+    const passRate = totalChecked > 0 ? (totalPassed / totalChecked) * 100 : 0;
+
+    // Workforce Analytics
+    const [shiftStats, topPerformers] = await Promise.all([
+      prisma.shiftEntry.groupBy({
+        by: ['shiftType'],
+        where: { shiftDate: { gte: startDate } },
+        _sum: { workersPresent: true, totalProduced: true },
+        _avg: { efficiency: true },
+      }),
+      prisma.wIPLedger.groupBy({
+        by: ['operatorId'],
+        where: {
+          transactionType: 'output',
+          status: 'active',
+          operatorId: { not: null },
+          transactionDate: { gte: startDate },
+        },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: 'desc' } },
+        take: 10,
+      }),
+    ]);
+
+    // Fetch operator names
+    const operatorIds = topPerformers.map(op => op.operatorId).filter(Boolean);
+    const operators = operatorIds.length > 0 
+      ? await prisma.user.findMany({
+          where: { id: { in: operatorIds } },
+          select: { id: true, name: true, firstName: true, lastName: true },
+        })
+      : [];
+
+    const topPerformersWithNames = topPerformers.map(op => {
+      const operator = operators.find(u => u.id === op.operatorId);
+      return {
+        operatorId: op.operatorId,
+        operatorName: operator 
+          ? (operator.name || `${operator.firstName || ''} ${operator.lastName || ''}`.trim() || 'Unknown')
+          : 'Unknown',
+        totalOutput: op._sum.quantity || 0,
+      };
+    });
+
+    // Project Analytics
+    const [projectStats, projectsByStatus] = await Promise.all([
+      prisma.project.aggregate({
+        _count: true,
+      }),
+      prisma.project.groupBy({
+        by: ['status'],
+        _count: true,
+      }),
+    ]);
+
+    // Active workers today
+    const today = startOfDay(new Date());
+    const activeWorkersToday = await prisma.shiftEntry.aggregate({
+      where: {
+        shiftDate: { gte: today, lte: endOfDay(new Date()) },
+      },
+      _sum: { workersPresent: true },
+    });
+
+    res.json({
+      period: {
+        days: daysNum,
+        startDate: startDate.toISOString(),
+        endDate: new Date().toISOString(),
+      },
+      production: {
+        totalOutput: productionStats._sum.totalProduced || 0,
+        approved: productionStats._sum.approvedQty || 0,
+        rejected: productionStats._sum.rejectedQty || 0,
+        entries: productionStats._count,
+        trend: productionTrend.map(t => ({
+          date: t.entryDate,
+          output: t._sum.totalProduced || 0,
+          approved: t._sum.approvedQty || 0,
+        })),
+      },
+      quality: {
+        totalSubmissions: qcStats._count,
+        totalChecked,
+        totalPassed,
+        totalFailed: (qcStats._sum.failedQty || 0),
+        passRate: Math.round(passRate * 100) / 100,
+        byResult: qcByResult.map(r => ({
+          result: r.result,
+          count: r._count,
+        })),
+      },
+      workforce: {
+        activeToday: activeWorkersToday._sum.workersPresent || 0,
+        byShift: shiftStats.map(s => ({
+          shift: s.shiftType,
+          workers: s._sum.workersPresent || 0,
+          output: s._sum.totalProduced || 0,
+          avgEfficiency: Math.round((s._avg.efficiency || 0) * 100) / 100,
+        })),
+        topPerformers: topPerformersWithNames,
+      },
+      projects: {
+        total: projectStats._count,
+        byStatus: projectsByStatus.map(p => ({
+          status: p.status,
+          count: p._count,
+        })),
+      },
+    });
+    
+  } catch (error) {
+    console.error('Error fetching dashboard overview:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard overview' });
+  }
+});
 
 module.exports = router

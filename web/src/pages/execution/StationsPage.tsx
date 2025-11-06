@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { listProjects } from '../../lib/services/projects';
 import { listStations, listStationTypes, getStationAnalytics, createStation, updateStation } from '../../lib/services/stations';
-import { Plus, Factory, TrendingUp, Clock, AlertCircle, CheckCircle, Wrench, Search, BarChart3 } from 'lucide-react';
+import { listFactories, listFloors, listSections, listRooms } from '../../lib/services/facilities';
+import { Plus, Factory, TrendingUp, Clock, AlertCircle, CheckCircle, Wrench, Search, BarChart3, ChevronRight, Building2, Layers, Grid3x3, DoorOpen } from 'lucide-react';
+import { useProjectContextSafe } from '../projects/ProjectContext';
 
 interface Station {
   id: number;
@@ -16,7 +18,22 @@ interface Station {
   totalJobsCompleted: number;
   project: { id: number; name: string } | null;
   StationType: { id: number; name: string } | null;
-  Room: { id: number; name: string } | null;
+  Room: { 
+    id: number; 
+    name: string;
+    section: {
+      id: number;
+      name: string;
+      floor: {
+        id: number;
+        name: string;
+        factory: {
+          id: number;
+          name: string;
+        };
+      };
+    };
+  } | null;
   _count: {
     ProductionEntry: number;
     QCSubmission: number;
@@ -50,9 +67,14 @@ interface StationAnalytics {
 }
 
 const StationsPage = () => {
+  const projectContext = useProjectContextSafe();
   const [stations, setStations] = useState<Station[]>([]);
   const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
   const [stationTypes, setStationTypes] = useState<Array<{ id: number; name: string }>>([]);
+  const [factories, setFactories] = useState<Array<{ id: number; name: string }>>([]);
+  const [floors, setFloors] = useState<Array<{ id: number; name: string; factoryId: number }>>([]);
+  const [sections, setSections] = useState<Array<{ id: number; name: string; floorId: number }>>([]);
+  const [rooms, setRooms] = useState<Array<{ id: number; name: string; sectionId: number }>>([]);
   const [selectedStation, setSelectedStation] = useState<Station | null>(null);
   const [analytics, setAnalytics] = useState<StationAnalytics | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -60,7 +82,15 @@ const StationsPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
+  const [factoryFilter, setFactoryFilter] = useState('');
   const [search, setSearch] = useState('');
+
+  // Auto-set project filter from context if available
+  useEffect(() => {
+    if (projectContext) {
+      setProjectFilter(String(projectContext.id));
+    }
+  }, [projectContext]);
 
   const [formData, setFormData] = useState({
     projectId: '',
@@ -71,6 +101,10 @@ const StationsPage = () => {
     capacity: 1,
     status: 'operational',
     active: true,
+    factoryId: '',
+    floorId: '',
+    sectionId: '',
+    roomId: '',
   });
 
   const statusOptions = [
@@ -84,7 +118,41 @@ const StationsPage = () => {
     fetchStations();
     fetchProjects();
     fetchStationTypes();
-  }, [statusFilter, projectFilter]);
+    fetchFactories();
+  }, [statusFilter, projectFilter, factoryFilter]);
+
+  // Cascade effect: When factory changes, load floors
+  useEffect(() => {
+    if (formData.factoryId) {
+      fetchFloors(parseInt(formData.factoryId));
+    } else {
+      setFloors([]);
+      setSections([]);
+      setRooms([]);
+      setFormData(prev => ({ ...prev, floorId: '', sectionId: '', roomId: '' }));
+    }
+  }, [formData.factoryId]);
+
+  // Cascade effect: When floor changes, load sections
+  useEffect(() => {
+    if (formData.floorId) {
+      fetchSections(parseInt(formData.floorId));
+    } else {
+      setSections([]);
+      setRooms([]);
+      setFormData(prev => ({ ...prev, sectionId: '', roomId: '' }));
+    }
+  }, [formData.floorId]);
+
+  // Cascade effect: When section changes, load rooms
+  useEffect(() => {
+    if (formData.sectionId) {
+      fetchRooms(parseInt(formData.sectionId));
+    } else {
+      setRooms([]);
+      setFormData(prev => ({ ...prev, roomId: '' }));
+    }
+  }, [formData.sectionId]);
 
   const fetchStations = async () => {
     setIsLoading(true);
@@ -113,6 +181,42 @@ const StationsPage = () => {
       setStationTypes(rows || []);
     } catch (error) {
       console.error('Error fetching station types:', error);
+    }
+  };
+
+  const fetchFactories = async () => {
+    try {
+      const rows = await listFactories();
+      setFactories(rows || []);
+    } catch (error) {
+      console.error('Error fetching factories:', error);
+    }
+  };
+
+  const fetchFloors = async (factoryId: number) => {
+    try {
+      const rows = await listFloors(factoryId);
+      setFloors(rows || []);
+    } catch (error) {
+      console.error('Error fetching floors:', error);
+    }
+  };
+
+  const fetchSections = async (floorId: number) => {
+    try {
+      const rows = await listSections(floorId);
+      setSections(rows || []);
+    } catch (error) {
+      console.error('Error fetching sections:', error);
+    }
+  };
+
+  const fetchRooms = async (sectionId: number) => {
+    try {
+      const rows = await listRooms({ sectionId });
+      setRooms(rows || []);
+    } catch (error) {
+      console.error('Error fetching rooms:', error);
     }
   };
 
@@ -159,6 +263,10 @@ const StationsPage = () => {
       capacity: 1,
       status: 'operational',
       active: true,
+      factoryId: '',
+      floorId: '',
+      sectionId: '',
+      roomId: '',
     });
     setSelectedStation(null);
   };
@@ -174,6 +282,10 @@ const StationsPage = () => {
       capacity: station.capacity,
       status: station.status,
       active: station.active,
+      factoryId: station.Room?.section.floor.factory.id.toString() || '',
+      floorId: station.Room?.section.floor.id.toString() || '',
+      sectionId: station.Room?.section.id.toString() || '',
+      roomId: station.Room?.id.toString() || '',
     });
     setIsModalOpen(true);
   };
@@ -213,13 +325,24 @@ const StationsPage = () => {
             className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg"
           />
         </div>
+        {/* Hide project filter when inside project context */}
+        {!projectContext && (
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg"
+          >
+            <option value="">All Projects</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
         <select
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
+          value={factoryFilter}
+          onChange={(e) => setFactoryFilter(e.target.value)}
           className="px-3 py-2 border border-gray-300 rounded-lg"
         >
-          <option value="">All Projects</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <option value="">All Factories</option>
+          {factories.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
         <select
           value={statusFilter}
@@ -266,6 +389,26 @@ const StationsPage = () => {
 
                   {station.description && (
                     <p className="text-gray-700 mb-4 text-sm line-clamp-2">{station.description}</p>
+                  )}
+
+                  {/* Location Breadcrumb */}
+                  {station.Room && (
+                    <div className="mb-4 p-2 bg-blue-50 rounded-lg">
+                      <p className="text-xs text-gray-600 mb-1">Location</p>
+                      <div className="flex items-center gap-1 text-xs text-gray-700 flex-wrap">
+                        <Building2 className="h-3 w-3 text-blue-600" />
+                        <span className="font-medium">{station.Room.section.floor.factory.name}</span>
+                        <ChevronRight className="h-3 w-3 text-gray-400" />
+                        <Layers className="h-3 w-3 text-green-600" />
+                        <span>{station.Room.section.floor.name}</span>
+                        <ChevronRight className="h-3 w-3 text-gray-400" />
+                        <Grid3x3 className="h-3 w-3 text-purple-600" />
+                        <span>{station.Room.section.name}</span>
+                        <ChevronRight className="h-3 w-3 text-gray-400" />
+                        <DoorOpen className="h-3 w-3 text-orange-600" />
+                        <span>{station.Room.name}</span>
+                      </div>
+                    </div>
                   )}
 
                   <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
@@ -344,6 +487,64 @@ const StationsPage = () => {
                       {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
+
+                  {/* Location Hierarchy Section */}
+                  <div className="col-span-2 p-4 bg-blue-50 rounded-lg">
+                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <Building2 className="h-4 w-4 text-blue-600" />
+                      Station Location (Optional)
+                    </h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium mb-2 text-gray-700">Factory</label>
+                        <select 
+                          value={formData.factoryId} 
+                          onChange={(e) => setFormData({ ...formData, factoryId: e.target.value, floorId: '', sectionId: '', roomId: '' })} 
+                          className="w-full px-3 py-2 border rounded-lg text-sm"
+                        >
+                          <option value="">Select Factory</option>
+                          {factories.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-2 text-gray-700">Floor</label>
+                        <select 
+                          value={formData.floorId} 
+                          onChange={(e) => setFormData({ ...formData, floorId: e.target.value, sectionId: '', roomId: '' })} 
+                          className="w-full px-3 py-2 border rounded-lg text-sm"
+                          disabled={!formData.factoryId}
+                        >
+                          <option value="">Select Floor</option>
+                          {floors.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-2 text-gray-700">Section</label>
+                        <select 
+                          value={formData.sectionId} 
+                          onChange={(e) => setFormData({ ...formData, sectionId: e.target.value, roomId: '' })} 
+                          className="w-full px-3 py-2 border rounded-lg text-sm"
+                          disabled={!formData.floorId}
+                        >
+                          <option value="">Select Section</option>
+                          {sections.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-2 text-gray-700">Room</label>
+                        <select 
+                          value={formData.roomId} 
+                          onChange={(e) => setFormData({ ...formData, roomId: e.target.value })} 
+                          className="w-full px-3 py-2 border rounded-lg text-sm"
+                          disabled={!formData.sectionId}
+                        >
+                          <option value="">Select Room</option>
+                          {rooms.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium mb-2">Name *</label>
                     <input required type="text" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full px-3 py-2 border rounded-lg" />

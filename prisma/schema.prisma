@@ -89,6 +89,10 @@ model User {
   wipOperations    WIPLedger[] @relation("WIPOperator")
   wipCancellations WIPLedger[] @relation("WIPCanceller")
   wipCreated       WIPLedger[] @relation("WIPCreator")
+
+  // Reminder Relations
+  assignedReminders Reminder[] @relation("AssignedReminders")
+  createdReminders  Reminder[] @relation("CreatedReminders")
 }
 
 model Role {
@@ -1815,7 +1819,7 @@ model BoardColumn {
   color      String?
   isDefault  Boolean     @default(false)
   createdAt  DateTime    @default(now())
-  updatedAt  DateTime
+  updatedAt  DateTime    @updatedAt
   Project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, section])
@@ -1838,37 +1842,90 @@ model Task {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime
   Project     Project?     @relation(fields: [projectId], references: [id])
+  Reminder    Reminder[]
 
   @@index([projectId])
   @@index([section, position])
 }
 
+model Reminder {
+  id            String          @id @default(cuid())
+  taskId        String?
+  title         String
+  description   String?
+  dueAt         DateTime
+  status        ReminderStatus  @default(pending)
+  assignedToId  String?
+  createdById   String
+  snoozeUntil   DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  
+  Task          Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  assignedTo    User?           @relation("AssignedReminders", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdBy     User            @relation("CreatedReminders", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([assignedToId])
+  @@index([createdById])
+  @@index([status, dueAt])
+}
+
+enum ReminderStatus {
+  pending
+  snoozed
+  completed
+  dismissed
+}
+
 model ThirdPartyProvider {
-  id                String    @id
-  name              String
-  contactPerson     String?
-  phone             String?
-  email             String?
-  location          String?
-  contractStart     DateTime?
-  contractEnd       DateTime?
-  rateStructure     String?
-  turnoverRate      Float?    @default(0)
-  attendanceRate    Float?    @default(100)
-  performanceScore  Float?    @default(0)
-  consistencyRating Float?    @default(0)
-  stabilityScore    Float?    @default(0)
-  active            Boolean   @default(true)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime
-  Worker            Worker[]
+  id                  String                @id
+  name                String
+  contactPerson       String?
+  phone               String?
+  email               String?
+  location            String?
+  contractStart       DateTime?
+  contractEnd         DateTime?
+  rateStructure       String?
+  turnoverRate        Float?                @default(0)
+  attendanceRate      Float?                @default(100)
+  performanceScore    Float?                @default(0)
+  consistencyRating   Float?                @default(0)
+  stabilityScore      Float?                @default(0)
+  active              Boolean               @default(true)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime
+  Worker              Worker[]
+  ProviderPerformance ProviderPerformance[]
 
   @@index([stabilityScore])
+}
+
+model ProviderPerformance {
+  id                 String              @id
+  providerId         String
+  monthYear          String
+  totalWorkers       Int                 @default(0)
+  avgAttendance      Float               @default(0)
+  stabilityScore     Float               @default(0)
+  qualityScore       Float               @default(0)
+  incidents          Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime
+  ThirdPartyProvider ThirdPartyProvider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([monthYear])
 }
 
 model Worker {
   id                 String              @id
   name               String
+  employeeCode       String?             @unique
+  email              String?
+  phone              String?
   workerType         String
   providerId         String?
   skills             String[]
@@ -1877,6 +1934,7 @@ model Worker {
   hireDate           DateTime?
   contractEnd        DateTime?
   hourlyRate         Float?
+  overtimeRate       Float?
   status             String              @default("active")
   createdAt          DateTime            @default(now())
   updatedAt          DateTime
@@ -1887,25 +1945,29 @@ model Worker {
   @@index([providerId])
   @@index([status])
   @@index([workerType])
+  @@index([employeeCode])
 }
 
 model WorkerPerformance {
-  id             String   @id
-  workerId       String
-  projectId      Int
-  stationId      Int
-  date           DateTime
-  shiftId        String
-  targetQty      Int
-  actualQty      Int
-  rejectedQty    Int
-  efficiency     Float
-  qualityRate    Float
-  completionTime Int?
-  createdAt      DateTime @default(now())
-  Project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  Station        Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
-  Worker         Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  id              String   @id
+  workerId        String
+  projectId       Int
+  stationId       Int
+  date            DateTime
+  shiftId         String
+  shiftType       String?
+  hoursWorked     Float?
+  tasksCompleted  Int?
+  targetQty       Int
+  actualQty       Int
+  rejectedQty     Int
+  efficiency      Float
+  qualityRate     Float
+  completionTime  Int?
+  createdAt       DateTime @default(now())
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  Station         Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  Worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
 
   @@index([date])
   @@index([projectId])

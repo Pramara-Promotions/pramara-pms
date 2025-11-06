@@ -10,8 +10,28 @@ import {
   AlertTriangle,
   FileText,
   Users,
-  ArrowRight
+  ArrowRight,
+  Activity,
+  BarChart3,
+  PieChart as PieChartIcon
 } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  RadialBarChart,
+  RadialBar
+} from 'recharts';
 
 type Project = { 
   id: number; 
@@ -32,6 +52,38 @@ type ActionItem = {
   blockedTasks?: number;
 };
 
+type DashboardOverview = {
+  period: {
+    days: number;
+    startDate: string;
+    endDate: string;
+  };
+  production: {
+    totalOutput: number;
+    approved: number;
+    rejected: number;
+    entries: number;
+    trend: Array<{ date: string; output: number; approved: number }>;
+  };
+  quality: {
+    totalSubmissions: number;
+    totalChecked: number;
+    totalPassed: number;
+    totalFailed: number;
+    passRate: number;
+    byResult: Array<{ result: string; count: number }>;
+  };
+  workforce: {
+    activeToday: number;
+    byShift: Array<{ shift: string; workers: number; output: number; avgEfficiency: number }>;
+    topPerformers: Array<{ operatorId: number; operatorName: string; totalOutput: number }>;
+  };
+  projects: {
+    total: number;
+    byStatus: Array<{ status: string; count: number }>;
+  };
+};
+
 async function getProjects() {
   const res = await http('/api/projects');
   if (!res.ok) return [] as any[];
@@ -48,10 +100,22 @@ async function getActionItems(): Promise<ActionItem[]> {
   }
 }
 
+async function getDashboardOverview(days = 30): Promise<DashboardOverview | null> {
+  try {
+    const res = await http(`/api/dashboard/overview?days=${days}`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [actionItems, setActionItems] = useState<ActionItem[]>([]);
+  const [dashboardData, setDashboardData] = useState<DashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -70,6 +134,28 @@ export default function Home() {
         setLoading(false);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setAnalyticsLoading(true);
+        const data = await getDashboardOverview(30);
+        setDashboardData(data);
+      } catch {
+        setDashboardData(null);
+      } finally {
+        setAnalyticsLoading(false);
+      }
+    })();
+
+    // Auto-refresh every 60 seconds
+    const interval = setInterval(async () => {
+      const data = await getDashboardOverview(30);
+      setDashboardData(data);
+    }, 60000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const recent = useMemo(() => projects.slice(0, 6), [projects]);
@@ -99,21 +185,22 @@ export default function Home() {
   };
 
   return (
-    <div className='space-y-6'>
-      <div className='flex items-center justify-between'>
-        <div>
-          <div className='text-xs text-gray-500 dark:text-gray-400'>
-            {new Date().toLocaleDateString(undefined, {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
-            })}
+    <div className='min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 dark:from-neutral-900 dark:via-neutral-900 dark:to-indigo-950'>
+      <div className='space-y-6'>
+        <div className='flex items-center justify-between'>
+          <div>
+            <div className='text-xs text-gray-500 dark:text-gray-400'>
+              {new Date().toLocaleDateString(undefined, {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+              })}
+            </div>
+            <h1 className='text-2xl font-semibold mt-1 text-gray-900 dark:text-white'>
+              {getGreeting()}!
+            </h1>
           </div>
-          <h1 className='text-2xl font-semibold mt-1 text-gray-900 dark:text-white'>
-            {getGreeting()}!
-          </h1>
         </div>
-      </div>
 
       {criticalItems.length > 0 && (
         <div className='rounded-xl border-2 border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 p-4'>
@@ -347,6 +434,319 @@ export default function Home() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Analytics Dashboard */}
+      {dashboardData && (
+        <div className='space-y-6 mt-8'>
+          <div className='flex items-center justify-between'>
+            <h2 className='text-xl font-semibold text-gray-900 dark:text-white flex items-center gap-2'>
+              <Activity className='h-5 w-5' />
+              Analytics Overview
+            </h2>
+            <span className='text-xs text-gray-500 dark:text-gray-400'>
+              Last {dashboardData.period.days} days
+            </span>
+          </div>
+
+          {/* Production & Quality Row */}
+          <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+            {/* Production Section */}
+            <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
+              <div className='flex items-center justify-between mb-6'>
+                <div className='flex items-center gap-2'>
+                  <div className='p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20'>
+                    <BarChart3 className='h-5 w-5 text-blue-600 dark:text-blue-400' />
+                  </div>
+                  <h3 className='font-semibold text-gray-900 dark:text-white'>Production</h3>
+                </div>
+                <div className='text-right'>
+                  <p className='text-2xl font-bold text-gray-900 dark:text-white'>
+                    {dashboardData.production.totalOutput.toLocaleString()}
+                  </p>
+                  <p className='text-xs text-gray-500 dark:text-gray-400'>Total Output</p>
+                </div>
+              </div>
+              
+              <div className='grid grid-cols-3 gap-4 mb-4'>
+                <div className='text-center p-3 rounded-lg bg-green-50 dark:bg-green-900/20'>
+                  <p className='text-lg font-semibold text-green-700 dark:text-green-400'>
+                    {dashboardData.production.approved.toLocaleString()}
+                  </p>
+                  <p className='text-xs text-gray-600 dark:text-gray-400'>Approved</p>
+                </div>
+                <div className='text-center p-3 rounded-lg bg-red-50 dark:bg-red-900/20'>
+                  <p className='text-lg font-semibold text-red-700 dark:text-red-400'>
+                    {dashboardData.production.rejected.toLocaleString()}
+                  </p>
+                  <p className='text-xs text-gray-600 dark:text-gray-400'>Rejected</p>
+                </div>
+                <div className='text-center p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20'>
+                  <p className='text-lg font-semibold text-blue-700 dark:text-blue-400'>
+                    {dashboardData.production.entries.toLocaleString()}
+                  </p>
+                  <p className='text-xs text-gray-600 dark:text-gray-400'>Entries</p>
+                </div>
+              </div>
+
+              {dashboardData.production.trend && dashboardData.production.trend.length > 0 && (
+                <div className='h-64'>
+                  <ResponsiveContainer width='100%' height='100%'>
+                    <LineChart data={dashboardData.production.trend}>
+                      <CartesianGrid strokeDasharray='3 3' stroke='#374151' opacity={0.1} />
+                      <XAxis 
+                        dataKey='date' 
+                        stroke='#9CA3AF' 
+                        fontSize={12}
+                        tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      />
+                      <YAxis stroke='#9CA3AF' fontSize={12} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+                          border: 'none', 
+                          borderRadius: '8px',
+                          color: '#fff'
+                        }}
+                        labelFormatter={(val) => new Date(val).toLocaleDateString()}
+                      />
+                      <Legend />
+                      <Line 
+                        type='monotone' 
+                        dataKey='output' 
+                        stroke='#3B82F6' 
+                        strokeWidth={2}
+                        name='Output'
+                        dot={{ fill: '#3B82F6', r: 4 }}
+                      />
+                      <Line 
+                        type='monotone' 
+                        dataKey='approved' 
+                        stroke='#10B981' 
+                        strokeWidth={2}
+                        name='Approved'
+                        dot={{ fill: '#10B981', r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            {/* Quality Section */}
+            <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
+              <div className='flex items-center justify-between mb-6'>
+                <div className='flex items-center gap-2'>
+                  <div className='p-2 rounded-lg bg-green-50 dark:bg-green-900/20'>
+                    <CheckCircle2 className='h-5 w-5 text-green-600 dark:text-green-400' />
+                  </div>
+                  <h3 className='font-semibold text-gray-900 dark:text-white'>Quality</h3>
+                </div>
+                <div className='text-right'>
+                  <p className='text-2xl font-bold text-gray-900 dark:text-white'>
+                    {dashboardData.quality.passRate.toFixed(1)}%
+                  </p>
+                  <p className='text-xs text-gray-500 dark:text-gray-400'>Pass Rate</p>
+                </div>
+              </div>
+
+              <div className='grid grid-cols-2 gap-4 mb-4'>
+                <div className='text-center p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20'>
+                  <p className='text-lg font-semibold text-blue-700 dark:text-blue-400'>
+                    {dashboardData.quality.totalSubmissions.toLocaleString()}
+                  </p>
+                  <p className='text-xs text-gray-600 dark:text-gray-400'>Submissions</p>
+                </div>
+                <div className='text-center p-3 rounded-lg bg-green-50 dark:bg-green-900/20'>
+                  <p className='text-lg font-semibold text-green-700 dark:text-green-400'>
+                    {dashboardData.quality.totalPassed.toLocaleString()}
+                  </p>
+                  <p className='text-xs text-gray-600 dark:text-gray-400'>Passed</p>
+                </div>
+              </div>
+
+              <div className='flex items-center justify-center h-64'>
+                {dashboardData.quality.byResult && dashboardData.quality.byResult.length > 0 ? (
+                  <ResponsiveContainer width='100%' height='100%'>
+                    <PieChart>
+                      <Pie
+                        data={dashboardData.quality.byResult}
+                        cx='50%'
+                        cy='50%'
+                        labelLine={false}
+                        label={({ result, count }) => `${result}: ${count}`}
+                        outerRadius={80}
+                        fill='#8884d8'
+                        dataKey='count'
+                      >
+                        {dashboardData.quality.byResult.map((entry, index) => {
+                          const colors = {
+                            pass: '#10B981',
+                            fail: '#EF4444',
+                            conditional: '#F59E0B',
+                            pending: '#6B7280'
+                          };
+                          const color = colors[entry.result.toLowerCase()] || '#8B5CF6';
+                          return <Cell key={`cell-${index}`} fill={color} />;
+                        })}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+                          border: 'none', 
+                          borderRadius: '8px',
+                          color: '#fff'
+                        }}
+                      />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className='text-sm text-gray-500 dark:text-gray-400'>No quality data available</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Workforce & Projects Row */}
+          <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+            {/* Workforce Section */}
+            <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
+              <div className='flex items-center justify-between mb-6'>
+                <div className='flex items-center gap-2'>
+                  <div className='p-2 rounded-lg bg-purple-50 dark:bg-purple-900/20'>
+                    <Users className='h-5 w-5 text-purple-600 dark:text-purple-400' />
+                  </div>
+                  <h3 className='font-semibold text-gray-900 dark:text-white'>Workforce</h3>
+                </div>
+                <div className='text-right'>
+                  <p className='text-2xl font-bold text-gray-900 dark:text-white'>
+                    {dashboardData.workforce.activeToday}
+                  </p>
+                  <p className='text-xs text-gray-500 dark:text-gray-400'>Active Today</p>
+                </div>
+              </div>
+
+              {dashboardData.workforce.byShift && dashboardData.workforce.byShift.length > 0 && (
+                <>
+                  <div className='h-48 mb-4'>
+                    <ResponsiveContainer width='100%' height='100%'>
+                      <BarChart data={dashboardData.workforce.byShift}>
+                        <CartesianGrid strokeDasharray='3 3' stroke='#374151' opacity={0.1} />
+                        <XAxis dataKey='shift' stroke='#9CA3AF' fontSize={12} />
+                        <YAxis stroke='#9CA3AF' fontSize={12} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+                            border: 'none', 
+                            borderRadius: '8px',
+                            color: '#fff'
+                          }}
+                        />
+                        <Legend />
+                        <Bar dataKey='workers' fill='#8B5CF6' name='Workers' />
+                        <Bar dataKey='output' fill='#3B82F6' name='Output' />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {dashboardData.workforce.topPerformers && dashboardData.workforce.topPerformers.length > 0 && (
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                        Top Performers
+                      </h4>
+                      <div className='space-y-2 max-h-40 overflow-y-auto'>
+                        {dashboardData.workforce.topPerformers.slice(0, 5).map((performer, idx) => (
+                          <div key={performer.operatorId} className='flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-neutral-800'>
+                            <div className='flex items-center gap-2'>
+                              <span className='text-xs font-semibold text-gray-500 dark:text-gray-400 w-6'>
+                                #{idx + 1}
+                              </span>
+                              <span className='text-sm text-gray-900 dark:text-white'>
+                                {performer.operatorName}
+                              </span>
+                            </div>
+                            <span className='text-sm font-semibold text-indigo-600 dark:text-indigo-400'>
+                              {performer.totalOutput.toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Projects Section */}
+            <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
+              <div className='flex items-center justify-between mb-6'>
+                <div className='flex items-center gap-2'>
+                  <div className='p-2 rounded-lg bg-orange-50 dark:bg-orange-900/20'>
+                    <PieChartIcon className='h-5 w-5 text-orange-600 dark:text-orange-400' />
+                  </div>
+                  <h3 className='font-semibold text-gray-900 dark:text-white'>Projects</h3>
+                </div>
+                <div className='text-right'>
+                  <p className='text-2xl font-bold text-gray-900 dark:text-white'>
+                    {dashboardData.projects.total}
+                  </p>
+                  <p className='text-xs text-gray-500 dark:text-gray-400'>Total Projects</p>
+                </div>
+              </div>
+
+              <div className='flex items-center justify-center h-64'>
+                {dashboardData.projects.byStatus && dashboardData.projects.byStatus.length > 0 ? (
+                  <ResponsiveContainer width='100%' height='100%'>
+                    <PieChart>
+                      <Pie
+                        data={dashboardData.projects.byStatus}
+                        cx='50%'
+                        cy='50%'
+                        labelLine={false}
+                        label={({ status, count }) => `${status}: ${count}`}
+                        outerRadius={80}
+                        fill='#8884d8'
+                        dataKey='count'
+                      >
+                        {dashboardData.projects.byStatus.map((entry, index) => {
+                          const colors = {
+                            active: '#10B981',
+                            'on hold': '#F59E0B',
+                            completed: '#3B82F6',
+                            pending: '#6B7280',
+                            cancelled: '#EF4444'
+                          };
+                          const color = colors[entry.status.toLowerCase()] || '#8B5CF6';
+                          return <Cell key={`cell-${index}`} fill={color} />;
+                        })}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+                          border: 'none', 
+                          borderRadius: '8px',
+                          color: '#fff'
+                        }}
+                      />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className='text-sm text-gray-500 dark:text-gray-400'>No project data available</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {analyticsLoading && (
+        <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-8 text-center'>
+          <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto mb-2'></div>
+          <p className='text-sm text-gray-500 dark:text-gray-400'>Loading analytics...</p>
+        </div>
+      )}
       </div>
     </div>
   );

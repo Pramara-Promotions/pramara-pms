@@ -22,18 +22,6 @@ async function calculateProjectHealth(projectId) {
             // completedAt removed to align with current Prisma schema
           }
         },
-        Stage: {
-          select: {
-            id: true,
-            name: true,
-            Task: {
-              select: {
-                id: true,
-                status: true
-              }
-            }
-          }
-        },
         Batch: {
           select: {
             id: true,

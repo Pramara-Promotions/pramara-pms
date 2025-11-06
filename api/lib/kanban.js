@@ -63,9 +63,11 @@ async function getBoardConfig(projectId) {
  * @returns {Promise<Array>} Created columns
  */
 async function createDefaultColumns(projectId) {
+  const now = new Date();
   const columnsData = DEFAULT_COLUMNS.map(col => ({
     ...col,
-    projectId
+    projectId,
+    updatedAt: now
   }));
 
   await prisma.boardColumn.createMany({
@@ -176,7 +178,8 @@ async function createBoardColumn(projectId, columnData) {
       ...columnData,
       projectId,
       position,
-      isDefault: false
+      isDefault: false,
+      updatedAt: new Date()
     }
   });
 }

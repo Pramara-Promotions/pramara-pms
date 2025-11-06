@@ -1,11 +1,134 @@
 const express = require('express');
 const router = express.Router();
 const authGuard = require('../middleware/authGuard');
+const { permissionGuard } = require('../middleware/permissionGuard');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // ============================================================================
-// COMPANY CERTIFICATIONS
+// CERTIFICATIONS ALIAS ROUTES
+// Frontend calls /api/compliance/certifications, backend uses /company-certifications
+// Add aliases to support both paths
+// ============================================================================
+
+// GET /api/compliance/certifications (alias)
+router.get('/certifications', authGuard, async (req, res) => {
+  try {
+    const { status, certificationType } = req.query;
+    
+    const where = {};
+    if (status) where.status = status;
+    if (certificationType) where.certificationType = certificationType;
+    
+    const certifications = await prisma.companyCertification.findMany({
+      where,
+      include: {
+        responsible: { select: { id: true, name: true, email: true } },
+        _count: { select: { audits: true, reminders: true } },
+      },
+      orderBy: { expiryDate: 'asc' },
+    });
+    
+    res.json(certifications);
+  } catch (error) {
+    console.error('[compliance] Error fetching certifications:', error);
+    res.status(500).json({ error: 'Failed to fetch certifications' });
+  }
+});
+
+// POST /api/compliance/certifications (alias)
+router.post('/certifications', authGuard, async (req, res) => {
+  try {
+    const {
+      certificationType,
+      certificationName,
+      certificationBody,
+      certificateNumber,
+      certificateFileUrl,
+      issueDate,
+      expiryDate,
+      lastAuditDate,
+      nextAuditDate,
+      scope,
+      responsiblePerson,
+      reminderDays,
+      notes,
+    } = req.body;
+    
+    const certification = await prisma.companyCertification.create({
+      data: {
+        certificationType,
+        certificationName,
+        certificationBody,
+        certificateNumber,
+        certificateFileUrl,
+        issueDate: new Date(issueDate),
+        expiryDate: new Date(expiryDate),
+        lastAuditDate: lastAuditDate ? new Date(lastAuditDate) : null,
+        nextAuditDate: nextAuditDate ? new Date(nextAuditDate) : null,
+        scope,
+        responsiblePerson,
+        reminderDays: reminderDays || 90,
+        notes,
+      },
+      include: {
+        responsible: { select: { id: true, name: true, email: true } },
+      },
+    });
+    
+    console.log(`[compliance] Certification created: ${certificationName} by ${req.user.email}`);
+    res.status(201).json(certification);
+  } catch (error) {
+    console.error('[compliance] Error creating certification:', error);
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'Certification with this type and number already exists' });
+    }
+    res.status(500).json({ error: 'Failed to create certification' });
+  }
+});
+
+// PUT /api/compliance/certifications/:id (alias)
+router.put('/certifications/:id', authGuard, async (req, res) => {
+  try {
+    const certification = await prisma.companyCertification.update({
+      where: { id: req.params.id },
+      data: {
+        ...req.body,
+        issueDate: req.body.issueDate ? new Date(req.body.issueDate) : undefined,
+        expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : undefined,
+        lastAuditDate: req.body.lastAuditDate ? new Date(req.body.lastAuditDate) : undefined,
+        nextAuditDate: req.body.nextAuditDate ? new Date(req.body.nextAuditDate) : undefined,
+      },
+      include: {
+        responsible: { select: { id: true, name: true } },
+      },
+    });
+    
+    console.log(`[compliance] Certification updated: ${req.params.id} by ${req.user.email}`);
+    res.json(certification);
+  } catch (error) {
+    console.error('[compliance] Error updating certification:', error);
+    res.status(500).json({ error: 'Failed to update certification' });
+  }
+});
+
+// DELETE /api/compliance/certifications/:id (alias)
+router.delete('/certifications/:id', authGuard, async (req, res) => {
+  try {
+    await prisma.companyCertification.delete({
+      where: { id: req.params.id },
+    });
+    
+    console.log(`[compliance] Certification deleted: ${req.params.id} by ${req.user.email}`);
+    res.json({ message: 'Certification deleted successfully' });
+  } catch (error) {
+    console.error('[compliance] Error deleting certification:', error);
+    res.status(500).json({ error: 'Failed to delete certification' });
+  }
+});
+
+// ============================================================================
+// COMPANY CERTIFICATIONS (Original routes)
 // ============================================================================
 
 /**
@@ -228,6 +351,41 @@ router.post('/audits', authGuard, async (req, res) => {
 // ============================================================================
 
 /**
+ * GET /api/compliance?projectId=X
+ * Alias for project compliance (frontend compatibility)
+ */
+router.get('/', authGuard, async (req, res) => {
+  try {
+    const { projectId, status, complianceType } = req.query;
+    
+    // If no filters, return empty array (don't list all compliance)
+    if (!projectId && !status && !complianceType) {
+      return res.json([]);
+    }
+    
+    const where = {};
+    if (projectId) where.projectId = parseInt(projectId);
+    if (status) where.status = status;
+    if (complianceType) where.complianceType = complianceType;
+    
+    const compliance = await prisma.projectCompliance.findMany({
+      where,
+      include: {
+        project: { select: { id: true, code: true, name: true } },
+        responsible: { select: { id: true, name: true, email: true } },
+        _count: { select: { requirements: true, documents: true, labTests: true } },
+      },
+      orderBy: { requiredBy: 'asc' },
+    });
+    
+    res.json(compliance);
+  } catch (error) {
+    console.error('[compliance] Error fetching compliance:', error);
+    res.status(500).json({ error: 'Failed to fetch compliance' });
+  }
+});
+
+/**
  * GET /api/compliance/project-compliance
  * List compliance requirements for projects
  */
@@ -254,6 +412,54 @@ router.get('/project-compliance', authGuard, async (req, res) => {
   } catch (error) {
     console.error('[compliance] Error fetching project compliance:', error);
     res.status(500).json({ error: 'Failed to fetch project compliance' });
+  }
+});
+
+/**
+ * POST /api/compliance
+ * Create project compliance requirement (alias for frontend compatibility)
+ */
+router.post('/', authGuard, async (req, res) => {
+  try {
+    const {
+      projectId,
+      complianceType,
+      complianceName,
+      required,
+      priority,
+      requiredBy,
+      certificationBody,
+      responsiblePerson,
+      blocksProduction,
+      blocksShipment,
+      notes,
+    } = req.body;
+    
+    const compliance = await prisma.projectCompliance.create({
+      data: {
+        projectId: parseInt(projectId),
+        complianceType,
+        complianceName,
+        required: required !== false,
+        priority: priority || 'medium',
+        requiredBy: requiredBy ? new Date(requiredBy) : null,
+        certificationBody,
+        responsiblePerson,
+        blocksProduction: blocksProduction || false,
+        blocksShipment: blocksShipment || false,
+        notes,
+      },
+      include: {
+        project: { select: { id: true, code: true, name: true } },
+        responsible: { select: { id: true, name: true } },
+      },
+    });
+    
+    console.log(`[compliance] Project compliance created: ${complianceName} for project ${projectId} by ${req.user.email}`);
+    res.status(201).json(compliance);
+  } catch (error) {
+    console.error('[compliance] Error creating project compliance:', error);
+    res.status(500).json({ error: 'Failed to create project compliance' });
   }
 });
 
@@ -302,6 +508,50 @@ router.post('/project-compliance', authGuard, async (req, res) => {
   } catch (error) {
     console.error('[compliance] Error creating project compliance:', error);
     res.status(500).json({ error: 'Failed to create project compliance' });
+  }
+});
+
+/**
+ * PUT /api/compliance/:id
+ * Update project compliance (alias for frontend compatibility)
+ */
+router.put('/:id', authGuard, async (req, res) => {
+  try {
+    const compliance = await prisma.projectCompliance.update({
+      where: { id: req.params.id },
+      data: {
+        ...req.body,
+        requiredBy: req.body.requiredBy ? new Date(req.body.requiredBy) : undefined,
+      },
+      include: {
+        project: { select: { id: true, code: true, name: true } },
+        responsible: { select: { id: true, name: true } },
+      },
+    });
+    
+    console.log(`[compliance] Project compliance updated: ${req.params.id} by ${req.user.email}`);
+    res.json(compliance);
+  } catch (error) {
+    console.error('[compliance] Error updating project compliance:', error);
+    res.status(500).json({ error: 'Failed to update project compliance' });
+  }
+});
+
+/**
+ * DELETE /api/compliance/:id
+ * Delete project compliance (alias for frontend compatibility)
+ */
+router.delete('/:id', authGuard, async (req, res) => {
+  try {
+    await prisma.projectCompliance.delete({
+      where: { id: req.params.id },
+    });
+    
+    console.log(`[compliance] Project compliance deleted: ${req.params.id} by ${req.user.email}`);
+    res.json({ message: 'Project compliance deleted successfully' });
+  } catch (error) {
+    console.error('[compliance] Error deleting project compliance:', error);
+    res.status(500).json({ error: 'Failed to delete project compliance' });
   }
 });
 
@@ -506,6 +756,32 @@ router.post('/documents', authGuard, async (req, res) => {
   } catch (error) {
     console.error('[compliance] Error uploading document:', error);
     res.status(500).json({ error: 'Failed to upload document' });
+  }
+});
+
+/**
+ * GET /api/compliance/documents/by-project?projectId=123
+ * List compliance documents linked to a specific project via ProjectCompliance
+ */
+router.get('/documents/by-project', authGuard, permissionGuard('DOC_VIEW'), async (req, res) => {
+  try {
+    const projectId = req.query.projectId ? parseInt(req.query.projectId) : null;
+    if (!projectId) return res.status(400).json({ error: 'projectId is required' });
+
+    const documents = await prisma.complianceDocument.findMany({
+      where: { compliance: { projectId } },
+      include: {
+        compliance: { select: { id: true, complianceName: true, complianceType: true } },
+        uploader: { select: { id: true, name: true } },
+        verifier: { select: { id: true, name: true } },
+      },
+      orderBy: { uploadedAt: 'desc' },
+    });
+
+    res.json(documents);
+  } catch (error) {
+    console.error('[compliance] Error fetching documents by project:', error);
+    res.status(500).json({ error: 'Failed to fetch documents by project' });
   }
 });
 

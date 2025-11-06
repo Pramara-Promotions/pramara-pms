@@ -173,8 +173,24 @@ export default function MaterialDashboardPage() {
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Materials Dashboard</h1>
-        <p className="text-gray-600 mt-1">Inventory management, reservations, and alerts</p>
+        <h1 className="text-3xl font-bold text-gray-900">Materials & Inventory</h1>
+        <p className="text-gray-600 mt-1">
+          Monitor stock levels, manage reservations, and track material consumption across all projects
+        </p>
+        <div className="mt-3 flex gap-3 text-sm">
+          <span className="flex items-center gap-1 text-gray-600">
+            <span className="w-3 h-3 bg-green-500 rounded-full"></span>
+            Available: In stock and ready to use
+          </span>
+          <span className="flex items-center gap-1 text-gray-600">
+            <span className="w-3 h-3 bg-orange-500 rounded-full"></span>
+            Reserved: Allocated to projects
+          </span>
+          <span className="flex items-center gap-1 text-gray-600">
+            <span className="w-3 h-3 bg-red-500 rounded-full"></span>
+            Low Stock: Below minimum threshold
+          </span>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -182,18 +198,22 @@ export default function MaterialDashboardPage() {
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Total Materials</div>
           <div className="text-2xl font-bold text-gray-900">{summary.totalMaterials || 0}</div>
+          <div className="text-xs text-gray-500 mt-1">Unique material types</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Total Value</div>
           <div className="text-2xl font-bold text-green-600">₹{(summary.totalValue || 0).toLocaleString()}</div>
+          <div className="text-xs text-gray-500 mt-1">Inventory worth</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Low Stock Items</div>
           <div className="text-2xl font-bold text-orange-600">{summary.lowStockCount || 0}</div>
+          <div className="text-xs text-gray-500 mt-1">Require attention</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Active Reservations</div>
           <div className="text-2xl font-bold text-blue-600">{summary.activeReservations || 0}</div>
+          <div className="text-xs text-gray-500 mt-1">Pending allocations</div>
         </div>
       </div>
 

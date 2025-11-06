@@ -1,9 +1,9 @@
 import { Link, useRouterState, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { 
-  Menu, Search, Plus, LayoutGrid, ClipboardList, PackageCheck, AlertTriangle, 
+import {
+  Menu, Search, Plus, LayoutGrid, ClipboardList, PackageCheck, AlertTriangle,
   BarChart3, Settings, LogOut, User, Factory, FlaskConical, PackageOpen,
-  CheckSquare, Boxes, CalendarCheck, Users, TrendingUp, Bell, Home
+  CheckSquare, Boxes, CalendarCheck, Users, TrendingUp, Bell, Home, Moon, Sun
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -21,6 +21,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [quickAddOpen, setQuickAddOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchInitialQuery, setSearchInitialQuery] = useState('')
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const pathname = useRouterState({ select: s => s.location.pathname })
   const { user, logout, loading } = useAuth()
   const navigate = useNavigate()
@@ -40,6 +43,34 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   })
 
   const pinnedItems = Array.isArray(preferences?.pinnedItems) ? preferences.pinnedItems : []
+
+  // Initialize theme from preferences
+  useEffect(() => {
+    if (preferences?.theme) {
+      setTheme(preferences.theme)
+      document.documentElement.classList.toggle('dark', preferences.theme === 'dark')
+    }
+  }, [preferences?.theme])
+
+  // Toggle theme
+  const toggleTheme = async () => {
+    const newTheme = theme === 'light' ? 'dark' : 'light'
+    setTheme(newTheme)
+    document.documentElement.classList.toggle('dark', newTheme === 'dark')
+
+    // Persist to backend
+    try {
+      await fetch('/api/user/preferences', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ theme: newTheme })
+      })
+      queryClient.invalidateQueries({ queryKey: ['user-preferences'] })
+    } catch (error) {
+      console.error('Failed to save theme preference:', error)
+    }
+  }
 
   // Unpin mutation
   const unpinMutation = useMutation({
@@ -69,6 +100,45 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  // Debounce search query
+  useEffect(() => {
+    // Only trigger search if query is at least 2 characters
+    if (searchQuery.length < 2) {
+      return
+    }
+
+    const timer = setTimeout(() => {
+      setSearchInitialQuery(searchQuery)
+      setPaletteOpen(true)
+    }, 500) // 500ms debounce
+
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Handle search input change
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value)
+  }
+
+  // Handle search input keyboard events
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && searchQuery.length >= 2) {
+      e.preventDefault()
+      setSearchInitialQuery(searchQuery)
+      setPaletteOpen(true)
+    } else if (e.key === 'Escape') {
+      setSearchQuery('')
+    }
+  }
+
+  // Reset search query when palette closes
+  useEffect(() => {
+    if (!paletteOpen) {
+      setSearchQuery('')
+      setSearchInitialQuery('')
+    }
+  }, [paletteOpen])
+
   // Redirect to login if not authenticated and not loading
   useEffect(() => {
     if (!user && !loading) {
@@ -76,12 +146,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [user, loading, navigate])
 
-  const NavItem = ({ to, icon: Icon, label }:{to:string, icon:any, label:string}) => {
+  const NavItem = ({ to, icon: Icon, label }: { to: string, icon: any, label: string }) => {
     const active = pathname === to || (to !== '/' && pathname.startsWith(to))
     return (
       <Link to={to as any} className={clsx(
         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm",
-        active ? "bg-accent/10 text-accent" : "text-gray-700 hover:bg-gray-100"
+        active
+          ? "bg-accent/10 text-accent"
+          : "text-gray-700 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
       )}>
         <Icon className="h-4 w-4" />
         <span className="truncate">{label}</span>
@@ -90,28 +162,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="h-screen w-screen flex bg-white">
+    <div className="h-screen w-screen flex bg-gray-50 dark:bg-gray-950">
       <aside className={clsx(
-        "hidden md:flex flex-col border-r bg-white transition-all",
+        "hidden md:flex flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 transition-all",
         sidebarOpen ? "w-[var(--sidebar-w)]" : "w-16"
       )}>
-        <div className="flex items-center justify-between px-3 h-14 border-b">
-          <button onClick={()=>setSidebarOpen(s=>!s)} className="p-2 rounded hover:bg-gray-100">
+        <div className="flex items-center justify-between px-3 h-14 border-b border-gray-200 dark:border-gray-800 text-gray-900 dark:text-gray-100">
+          <button onClick={() => setSidebarOpen(s => !s)} className="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800">
             <Menu className="h-5 w-5" />
           </button>
-          {sidebarOpen && <span className="text-sm font-semibold">Pramara PMS</span>}
+          {sidebarOpen && <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Pramara PMS</span>}
           <div className="w-8" />
         </div>
         <nav className="p-3 space-y-1 flex-1 overflow-y-auto">
           {/* Core Navigation - Only 3 items */}
-          <NavItem to="/"          icon={Home}         label="Home" />
-          <NavItem to="/projects"  icon={ClipboardList}label="Projects" />
-          
-          {/* Admin - Role-based */}
-          {user?.roles?.some((r: any) => r.role?.name === 'ADMIN') && (
-            <NavItem to="/admin" icon={Settings} label="Admin" />
-          )}
-          
+          <NavItem to="/" icon={Home} label="Home" />
+          <NavItem to="/projects" icon={ClipboardList} label="Projects" />
+          <NavItem to="/reminders" icon={Bell} label="Tasks & Reminders" />
+          <NavItem to="/workforce" icon={Users} label="Workforce" />
+
           {/* Pinned Items Section */}
           {pinnedItems.length > 0 && (
             <>
@@ -128,7 +197,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
             </>
           )}
-          
+
           {/* Empty state for pinned items */}
           {pinnedItems.length === 0 && sidebarOpen && (
             <>
@@ -143,14 +212,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       <section className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 border-b flex items-center justify-between px-3 gap-3">
+        <header className="h-14 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between px-3 gap-3">
           <div className="flex items-center gap-2">
-            <button className="md:hidden p-2 rounded hover:bg-gray-100" onClick={()=>setSidebarOpen(s=>!s)}>
+            <button className="md:hidden p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800" onClick={() => setSidebarOpen(s => !s)}>
               <Menu className="h-5 w-5" />
             </button>
-            <div className="hidden md:flex items-center gap-2 bg-gray-100 rounded-lg px-2 py-1 w-[360px]">
-              <Search className="h-4 w-4 text-gray-500" />
-              <input placeholder="Search projects, tasks, QC…" className="bg-transparent outline-none text-sm w-full"/>
+            <div className="hidden md:flex items-center gap-2 bg-gray-100 dark:bg-gray-800 rounded-lg px-2 py-1 w-[360px]">
+              <Search className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+              <input
+                placeholder="Search projects, tasks, QC…"
+                className="bg-transparent outline-none text-sm w-full text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+              />
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -158,31 +233,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {user && (
               <NotificationBell onOpen={() => setNotificationCenterOpen(true)} />
             )}
-            
+
             {/* User Menu */}
             {user && (
               <div className="relative">
                 <button
                   onClick={() => setUserMenuOpen(!userMenuOpen)}
-                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-100"
+                  className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
                   title={user.email}
                 >
-                  <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
-                    <User className="h-4 w-4 text-gray-600" />
+                  <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                    <User className="h-4 w-4 text-gray-600 dark:text-gray-200" />
                   </div>
                 </button>
-                
+
                 {userMenuOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
-                    <div className="absolute right-0 mt-2 w-56 rounded-lg border bg-white shadow-lg z-50">
-                      <div className="px-3 py-2 border-b text-sm">
-                        <div className="font-medium">{user.email}</div>
+                    <div className="absolute right-0 mt-2 w-56 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-lg z-50">
+                      <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-800 text-sm">
+                        <div className="font-medium text-gray-900 dark:text-gray-100">{user.email}</div>
                       </div>
-                      <div className="p-1">
+                      <div className="p-1 text-gray-700 dark:text-gray-200">
                         <Link
                           to={"/account" as any}
-                          className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 text-sm"
+                          className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
                           onClick={() => setUserMenuOpen(false)}
                         >
                           <User className="h-4 w-4" />
@@ -190,10 +265,49 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         </Link>
                         <button
                           onClick={() => {
+                            toggleTheme()
+                            setUserMenuOpen(false)
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
+                        >
+                          {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+                          {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
+                        </button>
+                        {/* Admin Actions moved from Projects page */}
+                        {user?.roles?.some((r: any) => r.role?.name === 'ADMIN') && (
+                          <>
+                            <Link
+                              to={"/projects/new" as any}
+                              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
+                              onClick={() => setUserMenuOpen(false)}
+                            >
+                              <Plus className="h-4 w-4" />
+                              Create Project
+                            </Link>
+                            <Link
+                              to={"/admin" as any}
+                              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
+                              onClick={() => setUserMenuOpen(false)}
+                            >
+                              <Settings className="h-4 w-4" />
+                              Manage Users
+                            </Link>
+                            <Link
+                              to={"/projects?status=critical" as any}
+                              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
+                              onClick={() => setUserMenuOpen(false)}
+                            >
+                              <AlertTriangle className="h-4 w-4" />
+                              Critical Projects
+                            </Link>
+                          </>
+                        )}
+                        <button
+                          onClick={() => {
                             logout();
                             setUserMenuOpen(false);
                           }}
-                          className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 text-sm text-red-600"
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm text-red-600"
                         >
                           <LogOut className="h-4 w-4" />
                           Logout
@@ -214,19 +328,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </main>
 
-        <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t bg-white grid grid-cols-4 text-xs">
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 grid grid-cols-4 text-xs text-gray-700 dark:text-gray-200">
           <Link to={"/" as any} className="py-2 text-center">Home</Link>
           <Link to={"/projects" as any} className="py-2 text-center">Projects</Link>
-          <Link to={"/tasks" as any} className="py-2 text-center">Tasks</Link>
+          <Link to={"/reminders" as any} className="py-2 text-center">Tasks</Link>
           <Link to={"/admin" as any} className="py-2 text-center">More</Link>
         </nav>
       </section>
 
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        initialQuery={searchInitialQuery}
+      />
       <QuickAddModal open={quickAddOpen} onOpenChange={setQuickAddOpen} />
-      <NotificationCenter 
-        isOpen={notificationCenterOpen} 
-        onClose={() => setNotificationCenterOpen(false)} 
+      <NotificationCenter
+        isOpen={notificationCenterOpen}
+        onClose={() => setNotificationCenterOpen(false)}
       />
     </div>
   )

@@ -5,7 +5,7 @@ import { Link } from '@tanstack/react-router';
 import { useProjectContext } from '../ProjectContext';
 
 export default function PlanningTab() {
-  const project = useProjectContext() as any;
+  const project = useProjectContext();
   
   if (!project) return <div className="text-sm text-gray-500">Loading project…</div>;
   

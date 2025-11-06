@@ -29,7 +29,30 @@ router.get('/', async (req, res) => {
       include: {
         project: { select: { id: true, name: true } },
         StationType: { select: { id: true, name: true } },
-        Room: { select: { id: true, name: true } },
+        Room: { 
+          select: { 
+            id: true, 
+            name: true,
+            section: {
+              select: {
+                id: true,
+                name: true,
+                floor: {
+                  select: {
+                    id: true,
+                    name: true,
+                    factory: {
+                      select: {
+                        id: true,
+                        name: true,
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } 
+        },
         _count: {
           select: {
             ProductionEntry: true,
@@ -57,7 +80,30 @@ router.get('/:id', async (req, res) => {
       include: {
         project: { select: { id: true, name: true } },
         StationType: { select: { id: true, name: true, category: true } },
-        Room: { select: { id: true, name: true, floor: true } },
+        Room: { 
+          select: { 
+            id: true, 
+            name: true,
+            section: {
+              select: {
+                id: true,
+                name: true,
+                floor: {
+                  select: {
+                    id: true,
+                    name: true,
+                    factory: {
+                      select: {
+                        id: true,
+                        name: true,
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } 
+        },
         processOperations: {
           include: {
             processFlow: { select: { id: true, flowName: true } },
@@ -249,13 +295,26 @@ router.delete('/:id', async (req, res) => {
 router.get('/:id/analytics', async (req, res) => {
   try {
     const stationId = parseInt(req.params.id);
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, days } = req.query;
 
+    // Default to last 30 days if not specified
+    const daysToAnalyze = days ? parseInt(days) : 30;
     const dateFilter = {};
-    if (startDate) dateFilter.gte = new Date(startDate);
-    if (endDate) dateFilter.lte = new Date(endDate);
+    if (startDate) {
+      dateFilter.gte = new Date(startDate);
+    } else {
+      dateFilter.gte = new Date(Date.now() - daysToAnalyze * 24 * 60 * 60 * 1000);
+    }
+    if (endDate) {
+      dateFilter.lte = new Date(endDate);
+    }
 
-    const [productionStats, qcStats, shiftStats, wipStats] = await Promise.all([
+    const [station, productionStats, qcStats, shiftStats, wipStats, topOperators] = await Promise.all([
+      // Get station details
+      prisma.station.findUnique({
+        where: { id: stationId },
+        select: { capacity: true, targetUtilization: true, actualUtilization: true },
+      }),
       // Production statistics
       prisma.productionEntry.aggregate({
         where: {
@@ -279,7 +338,7 @@ router.get('/:id/analytics', async (req, res) => {
           stationId,
           ...(Object.keys(dateFilter).length > 0 && { shiftDate: dateFilter }),
         },
-        _sum: { totalProduced: true, workersPresent: true, downtimeMinutes: true },
+        _sum: { totalProduced: true, targetProduction: true, workersPresent: true, downtimeMinutes: true },
         _avg: { efficiency: true },
         _count: true,
       }),
@@ -293,6 +352,20 @@ router.get('/:id/analytics', async (req, res) => {
         },
         _sum: { quantity: true },
       }),
+      // Top operators by output
+      prisma.wIPLedger.groupBy({
+        by: ['operatorId'],
+        where: {
+          stationId,
+          transactionType: 'output',
+          status: 'active',
+          operatorId: { not: null },
+          ...(Object.keys(dateFilter).length > 0 && { transactionDate: dateFilter }),
+        },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: 'desc' } },
+        take: 5,
+      }),
     ]);
 
     const wipSummary = wipStats.reduce((acc, item) => {
@@ -300,14 +373,85 @@ router.get('/:id/analytics', async (req, res) => {
       return acc;
     }, {});
 
+    // Calculate utilization %
+    const totalDowntimeHours = (shiftStats._sum.downtimeMinutes || 0) / 60;
+    const totalShiftHours = shiftStats._count * 8; // Assuming 8-hour shifts
+    const utilizationPercent = totalShiftHours > 0 
+      ? ((totalShiftHours - totalDowntimeHours) / totalShiftHours) * 100 
+      : 0;
+
+    // Calculate output vs target
+    const totalOutput = shiftStats._sum.totalProduced || 0;
+    const totalTarget = shiftStats._sum.targetProduction || 0;
+    const outputVsTargetPercent = totalTarget > 0 
+      ? (totalOutput / totalTarget) * 100 
+      : 0;
+
+    // Calculate efficiency (actual vs theoretical)
+    const avgEfficiency = shiftStats._avg.efficiency || 0;
+    const downtimeHours = totalDowntimeHours;
+
+    // Fetch operator details for top performers
+    const operatorIds = topOperators.map(op => op.operatorId).filter(Boolean);
+    const operators = operatorIds.length > 0 
+      ? await prisma.user.findMany({
+          where: { id: { in: operatorIds } },
+          select: { id: true, name: true, firstName: true, lastName: true },
+        })
+      : [];
+
+    const topOperatorsWithNames = topOperators.map(op => {
+      const operator = operators.find(u => u.id === op.operatorId);
+      return {
+        operatorId: op.operatorId,
+        operatorName: operator 
+          ? (operator.name || `${operator.firstName || ''} ${operator.lastName || ''}`.trim() || 'Unknown')
+          : 'Unknown',
+        totalOutput: op._sum.quantity || 0,
+      };
+    });
+
     res.json({
+      stationId,
+      period: {
+        startDate: dateFilter.gte,
+        endDate: dateFilter.lte || new Date(),
+        days: daysToAnalyze,
+      },
+      utilization: {
+        percent: Math.round(utilizationPercent * 100) / 100,
+        totalShiftHours: Math.round(totalShiftHours * 100) / 100,
+        downtimeHours: Math.round(downtimeHours * 100) / 100,
+        activeHours: Math.round((totalShiftHours - downtimeHours) * 100) / 100,
+        targetUtilization: station?.targetUtilization || null,
+        actualUtilization: station?.actualUtilization || null,
+      },
+      output: {
+        total: totalOutput,
+        target: totalTarget,
+        vsTargetPercent: Math.round(outputVsTargetPercent * 100) / 100,
+        approved: productionStats._sum.approvedQty || 0,
+        rejected: productionStats._sum.rejectedQty || 0,
+      },
+      efficiency: {
+        avgPercent: Math.round(avgEfficiency * 100) / 100,
+        totalShifts: shiftStats._count,
+      },
+      downtime: {
+        totalMinutes: shiftStats._sum.downtimeMinutes || 0,
+        totalHours: Math.round(downtimeHours * 100) / 100,
+        avgMinutesPerShift: shiftStats._count > 0 
+          ? Math.round((shiftStats._sum.downtimeMinutes || 0) / shiftStats._count * 100) / 100 
+          : 0,
+      },
+      topOperators: topOperatorsWithNames,
       production: {
         totalEntries: productionStats._count,
         totalProduced: productionStats._sum.totalProduced || 0,
         totalApproved: productionStats._sum.approvedQty || 0,
         totalRejected: productionStats._sum.rejectedQty || 0,
         qualityRate: productionStats._sum.totalProduced
-          ? ((productionStats._sum.approvedQty || 0) / productionStats._sum.totalProduced) * 100
+          ? Math.round(((productionStats._sum.approvedQty || 0) / productionStats._sum.totalProduced) * 10000) / 100
           : 0,
       },
       qc: {
@@ -318,7 +462,7 @@ router.get('/:id/analytics', async (req, res) => {
         totalProduced: shiftStats._sum.totalProduced || 0,
         totalWorkers: shiftStats._sum.workersPresent || 0,
         totalDowntime: shiftStats._sum.downtimeMinutes || 0,
-        avgEfficiency: shiftStats._avg.efficiency || 0,
+        avgEfficiency: Math.round(avgEfficiency * 100) / 100,
       },
       wip: {
         input: wipSummary.input || 0,

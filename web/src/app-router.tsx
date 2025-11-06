@@ -63,6 +63,8 @@ import DailyPlanningPage from "./pages/DailyPlanningPage";
 import ApprovalTrackerPage from "./pages/ApprovalTrackerPage";
 import MRPCalculatorPage from "./pages/MRPCalculatorPage";
 import StageView from "./pages/cross-project/StageView";
+import { FacilityManagementPage } from "./pages/admin/FacilityManagementPage";
+import TasksRemindersHub from "./pages/inbox/TasksRemindersHub";
 
 /****************************************************
  * [LMK-02] ROOT ROUTE (no context)
@@ -176,6 +178,12 @@ const tasksRoute = createRoute({
   component: Tasks,
 });
 
+const remindersRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "reminders",
+  component: TasksRemindersHub,
+});
+
 const qcRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "qc",
@@ -204,6 +212,12 @@ const emailAnalyticsRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "admin/email-analytics",
   component: EmailAnalytics,
+});
+
+const facilityManagementRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "admin/facilities",
+  component: FacilityManagementPage,
 });
 
 const moldsRoute = createRoute({
@@ -334,7 +348,7 @@ const materialDashboardRoute = createRoute({
 
 const workforceManagementRoute = createRoute({
   getParentRoute: () => layoutRoute,
-  path: "planning/workforce",
+  path: "workforce",
   component: WorkforceManagementPage,
 });
 
@@ -407,11 +421,13 @@ const routeTree = rootRoute.addChildren([
     dashboardRoute,
     projectsRoute,
     tasksRoute,
+    remindersRoute,
     qcRoute,
     alertsRoute,
     reportsRoute,
     adminRoute,
     emailAnalyticsRoute,
+    facilityManagementRoute,
     moldsRoute,
     trialsRoute,
     packagingRoute,

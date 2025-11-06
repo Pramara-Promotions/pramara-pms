@@ -141,8 +141,24 @@ export default function MRPCalculatorPage() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">MRP Calculator</h1>
-        <p className="text-gray-600 mt-1">Material Requirement Planning with self-learning</p>
+        <h1 className="text-3xl font-bold text-gray-900">Material Requirements Planning (MRP)</h1>
+        <p className="text-gray-600 mt-1">
+          Calculate precise raw material quantities needed for production using BOM explosion, loss factors, and AI-powered recommendations
+        </p>
+        <div className="mt-3 flex flex-wrap gap-4 text-sm">
+          <span className="flex items-center gap-1.5 text-gray-600">
+            <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+            BOM Explosion: Breaks down finished goods into raw materials
+          </span>
+          <span className="flex items-center gap-1.5 text-gray-600">
+            <span className="w-3 h-3 bg-purple-500 rounded-full"></span>
+            Loss Factors: Accounts for material waste during production
+          </span>
+          <span className="flex items-center gap-1.5 text-gray-600">
+            <span className="w-3 h-3 bg-green-500 rounded-full"></span>
+            AI Learning: Improves accuracy based on actual production data
+          </span>
+        </div>
       </div>
 
       {/* Learning Metrics */}
@@ -151,10 +167,12 @@ export default function MRPCalculatorPage() {
           <div className="text-sm text-gray-600">Overall Accuracy</div>
           <div className="text-3xl font-bold text-green-600">{accuracy.overallAccuracy || 0}%</div>
           <div className="text-xs text-gray-500 mt-1">{accuracy.totalDataPoints || 0} data points</div>
+          <div className="text-xs text-gray-500 mt-0.5">How close MRP predictions match actual usage</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Pending Recommendations</div>
           <div className="text-3xl font-bold text-blue-600">{recommendations.length}</div>
+          <div className="text-xs text-gray-500 mt-1">AI-suggested improvements awaiting review</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">MRP Accuracy by Type</div>
@@ -166,12 +184,14 @@ export default function MRPCalculatorPage() {
               </div>
             ))}
           </div>
+          <div className="text-xs text-gray-500 mt-2">Accuracy breakdown by material category</div>
         </div>
       </div>
 
       {/* MRP Calculator Form */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-lg font-bold mb-4">Calculate Material Requirements</h2>
+        <h2 className="text-lg font-bold mb-1">Calculate Material Requirements</h2>
+        <p className="text-sm text-gray-600 mb-4">Enter production details to calculate exact raw material quantities needed</p>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
@@ -186,6 +206,7 @@ export default function MRPCalculatorPage() {
                 <option key={p.id} value={p.id}>{p.projectCode} - {p.projectName}</option>
               ))}
             </select>
+            <p className="text-xs text-gray-500 mt-1">Choose the project to plan materials for</p>
           </div>
           
           <div>
@@ -201,6 +222,7 @@ export default function MRPCalculatorPage() {
                 <option key={s.id} value={s.id}>{s.skuCode} - {s.skuName}</option>
               ))}
             </select>
+            <p className="text-xs text-gray-500 mt-1">Select the finished product to produce</p>
           </div>
           
           <div>
@@ -212,6 +234,7 @@ export default function MRPCalculatorPage() {
               className="w-full border rounded px-3 py-2"
               placeholder="e.g., 10000"
             />
+            <p className="text-xs text-gray-500 mt-1">How many units you want to produce</p>
           </div>
         </div>
         
@@ -226,6 +249,7 @@ export default function MRPCalculatorPage() {
               <option value="project_wide">Project-Wide Loss %</option>
               <option value="stage_specific">Stage-Specific Loss %</option>
             </select>
+            <p className="text-xs text-gray-500 mt-1">Apply loss uniformly or per production stage</p>
           </div>
           
           {formData.lossType === 'project_wide' && (
@@ -239,6 +263,7 @@ export default function MRPCalculatorPage() {
                 className="w-full border rounded px-3 py-2"
                 placeholder="e.g., 0.05 for 5%"
               />
+              <p className="text-xs text-gray-500 mt-1">Expected material waste across all stages (e.g., 0.05 = 5%)</p>
             </div>
           )}
         </div>

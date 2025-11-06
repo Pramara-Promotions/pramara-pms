@@ -54,6 +54,38 @@ function buildPublicUrl(key) {
   return null;
 }
 
+/**
+ * Lightweight ACL check using document.tags
+ * Allows access when no tags ACL is set. If tags specify owner/roles, enforce them.
+ */
+function userHasAccessToDoc(doc, auth) {
+  try {
+    if (!doc) return false;
+    const tags = doc.tags || {};
+    const owner = tags.owner || null; // could be user id or email
+    const allowedRoles = Array.isArray(tags.roles) ? tags.roles.map(String) : [];
+
+    // No ACL specified => allow
+    if (!owner && allowedRoles.length === 0) return true;
+
+    const userId = auth?.user?.id || auth?.userId || null;
+    const userEmail = auth?.user?.email || null;
+    const userRoles = Array.isArray(auth?.roles)
+      ? auth.roles.map(r => (typeof r === 'string' ? r : (r?.name || r?.role?.name))).filter(Boolean)
+      : [];
+
+    // Owner match by id or email
+    if (owner && (owner === userId || owner === userEmail)) return true;
+
+    // Role intersection
+    if (allowedRoles.length > 0 && userRoles.some(r => allowedRoles.includes(r))) return true;
+
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 /* ────────────────────────────────────────────────────────────
    Routes
    ──────────────────────────────────────────────────────────── */
@@ -352,6 +384,94 @@ router.post("/documents/presign", authGuard, permissionGuard('DOC_UPLOAD'), asyn
 });
 
 /**
+ * GET /api/documents/url?key=...
+ * Returns a short-lived presigned GET URL for a stored object key
+ * Query: { key: string }
+ * Response: { url: string }
+ */
+router.get("/documents/url", authGuard, async (req, res) => {
+  try {
+    if (!STORAGE_READY) {
+      return res.status(503).json({ error: "Storage not configured." });
+    }
+    const key = req.query.key;
+    if (!key || typeof key !== 'string') {
+      return res.status(400).json({ error: "Missing 'key' query parameter" });
+    }
+    // Optional ACL: if key corresponds to a ProjectDocument, enforce tags-based access
+    try {
+      if (hasModel('projectDocument')) {
+        const docMatch = await prisma.projectDocument.findFirst({
+          where: { OR: [{ key }, { storageKey: key }] },
+          select: { id: true, tags: true }
+        });
+        if (docMatch && !userHasAccessToDoc(docMatch, req.auth)) {
+          return res.status(403).json({ error: 'Forbidden' });
+        }
+      }
+    } catch (e) {
+      console.warn('[documents] ACL check skipped for /documents/url:', e?.message);
+    }
+    const result = await getPresignedGetUrl({ key });
+    return res.json(result);
+  } catch (e) {
+    console.error("GET /documents/url failed:", e);
+    return res.status(500).json({ error: e.message || "Failed to presign GET url" });
+  }
+});
+
+/**
+ * GET /api/documents/:id/url
+ * Returns a short-lived presigned GET URL for a stored object of a document by id
+ * Enforces DOC_VIEW permission and tags-based ACL when present
+ */
+router.get('/documents/:id/url', authGuard, permissionGuard('DOC_VIEW'), async (req, res) => {
+  try {
+    if (!STORAGE_READY) {
+      return res.status(503).json({ error: 'Storage not configured.' });
+    }
+    if (!hasModel('projectDocument')) return res.status(404).json({ error: 'Not found' });
+    const id = toInt(req.params.id);
+    const doc = await prisma.projectDocument.findUnique({ where: { id } });
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+
+    // Enforce lightweight ACL based on tags
+    if (!userHasAccessToDoc(doc, req.auth)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // If document has a direct key, sign and return
+    const directKey = doc.storageKey || doc.key;
+    if (directKey) {
+      const result = await getPresignedGetUrl({ key: directKey });
+      return res.json(result);
+    }
+
+    // Fallback: find a revision in the same chain that has a key (prefer active)
+    try {
+      const rootId = doc.parentId ? doc.parentId : doc.id;
+      const chain = await prisma.projectDocument.findMany({
+        where: { OR: [{ id: rootId }, { parentId: rootId }] },
+        orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
+      });
+      const candidate = chain.find(d => d.active && (d.key || d.storageKey)) || chain.find(d => d.key || d.storageKey);
+      const candKey = candidate?.storageKey || candidate?.key;
+      if (candKey) {
+        const result = await getPresignedGetUrl({ key: candKey });
+        return res.json(result);
+      }
+    } catch (e) {
+      console.warn('[documents] Fallback chain search failed for /documents/:id/url:', e?.message);
+    }
+
+    return res.status(400).json({ error: 'Document has no stored object key' });
+  } catch (e) {
+    console.error('GET /documents/:id/url failed:', e);
+    return res.status(500).json({ error: e.message || 'Failed to presign GET url' });
+  }
+});
+
+/**
  * POST /api/documents/:id/revise
  * Create a new revision of a document (with custom version and revision note)
  * Body: { ...fields, version, revisionNote }
@@ -513,6 +633,190 @@ router.post("/documents/:id/tag-stations", authGuard, async (req, res) => {
   } catch (e) {
     console.error("POST /documents/:id/tag-stations failed:", e);
     res.status(500).json({ error: "Tagging failed" });
+  }
+});
+
+/**
+ * GET /api/documents/by-project/:projectId?module=all
+ * Aggregate all files from different modules for a project
+ * - ProjectDocument (document management)
+ * - ComplianceDocument (compliance module)
+ * - ProcessFlow attachments (preproduction)
+ * - DailyPlan attachments (planning)
+ * - Task attachments (board)
+ * Query params:
+ * - module: 'all' | 'documents' | 'compliance' | 'preproduction' | 'planning' | 'board'
+ */
+router.get("/documents/by-project/:projectId", authGuard, async (req, res) => {
+  try {
+    const projectId = toInt(req.params.projectId);
+    const module = req.query.module || 'all';
+    const aggregated = [];
+
+    // 1. ProjectDocument (document management)
+    if (module === 'all' || module === 'documents') {
+      if (hasModel("projectDocument")) {
+        const docs = await prisma.projectDocument.findMany({
+          where: { projectId, parentId: null }, // Only root documents
+          orderBy: { createdAt: 'desc' },
+        });
+        for (const doc of docs) {
+          if (!userHasAccessToDoc(doc, req)) continue;
+          aggregated.push({
+            id: `doc-${doc.id}`,
+            sourceId: doc.id,
+            module: 'documents',
+            title: doc.title,
+            type: doc.kind || 'document',
+            version: doc.activeVersion || doc.version,
+            createdAt: doc.createdAt,
+            url: null, // Will be fetched via /api/documents/:id/url
+            contextUrl: `/projects/${projectId}/files-tab`, // Link to Files tab
+            metadata: {
+              active: doc.active,
+              contentType: doc.contentType,
+              notes: doc.notes
+            }
+          });
+        }
+      }
+    }
+
+    // 2. ComplianceDocument (compliance module)
+    if (module === 'all' || module === 'compliance') {
+      if (hasModel("complianceDocument")) {
+        const compDocs = await prisma.complianceDocument.findMany({
+          where: { compliance: { projectId } },
+          include: { compliance: true },
+          orderBy: { uploadedAt: 'desc' },
+        });
+        for (const cd of compDocs) {
+          aggregated.push({
+            id: `compliance-${cd.id}`,
+            sourceId: cd.id,
+            module: 'compliance',
+            title: cd.documentName,
+            type: cd.documentType || 'compliance-doc',
+            version: null,
+            createdAt: cd.uploadedAt,
+            url: cd.fileUrl,
+            contextUrl: `/projects/${projectId}/compliance-tab`,
+            metadata: {
+              complianceName: cd.compliance?.complianceName,
+              expiryDate: cd.expiryDate
+            }
+          });
+        }
+      }
+    }
+
+    // 3. ProcessFlow attachments (preproduction)
+    if (module === 'all' || module === 'preproduction') {
+      if (hasModel("processFlow") && hasModel("operation")) {
+        const flows = await prisma.processFlow.findMany({
+          where: { projectId },
+          include: { operations: true },
+        });
+        for (const flow of flows) {
+          // Check for flow-level attachments (if you store them)
+          // For now, look in operations for attachments
+          for (const op of flow.operations || []) {
+            if (op.attachments && Array.isArray(op.attachments)) {
+              op.attachments.forEach((att, idx) => {
+                aggregated.push({
+                  id: `flow-${flow.id}-op-${op.id}-att-${idx}`,
+                  sourceId: op.id,
+                  module: 'preproduction',
+                  title: att.name || att.filename || `Attachment ${idx + 1}`,
+                  type: 'operation-attachment',
+                  version: null,
+                  createdAt: op.createdAt,
+                  url: att.url,
+                  contextUrl: `/preprod/process-flows/${flow.id}`,
+                  metadata: {
+                    flowName: flow.name,
+                    operationName: op.name,
+                    operationSequence: op.sequence
+                  }
+                });
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // 4. DailyPlan attachments (planning)
+    if (module === 'all' || module === 'planning') {
+      if (hasModel("dailyPlan")) {
+        const plans = await prisma.dailyPlan.findMany({
+          where: { projectId },
+          orderBy: { date: 'desc' },
+        });
+        for (const plan of plans) {
+          // Assuming attachments stored in plan.attachments JSON field
+          if (plan.attachments && Array.isArray(plan.attachments)) {
+            plan.attachments.forEach((att, idx) => {
+              aggregated.push({
+                id: `plan-${plan.id}-att-${idx}`,
+                sourceId: plan.id,
+                module: 'planning',
+                title: att.name || att.filename || `Plan Attachment ${idx + 1}`,
+                type: 'plan-attachment',
+                version: null,
+                createdAt: plan.createdAt || plan.date,
+                url: att.url,
+                contextUrl: `/planning/daily-plans/${plan.id}`,
+                metadata: {
+                  planDate: plan.date,
+                  shift: plan.shift
+                }
+              });
+            });
+          }
+        }
+      }
+    }
+
+    // 5. Task attachments (board)
+    if (module === 'all' || module === 'board') {
+      if (hasModel("task")) {
+        const tasks = await prisma.task.findMany({
+          where: { projectId },
+          orderBy: { createdAt: 'desc' },
+        });
+        for (const task of tasks) {
+          // Assuming attachments stored in task.attachments JSON field
+          if (task.attachments && Array.isArray(task.attachments)) {
+            task.attachments.forEach((att, idx) => {
+              aggregated.push({
+                id: `task-${task.id}-att-${idx}`,
+                sourceId: task.id,
+                module: 'board',
+                title: att.name || att.filename || `Task Attachment ${idx + 1}`,
+                type: 'task-attachment',
+                version: null,
+                createdAt: task.createdAt,
+                url: att.url,
+                contextUrl: `/projects/${projectId}/board-tab?cardId=${task.id}`,
+                metadata: {
+                  taskTitle: task.title,
+                  taskStatus: task.status
+                }
+              });
+            });
+          }
+        }
+      }
+    }
+
+    // Sort by createdAt desc
+    aggregated.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    res.json(aggregated);
+  } catch (e) {
+    console.error("GET /documents/by-project/:projectId failed:", e);
+    res.status(500).json({ error: "Aggregation failed" });
   }
 });
 

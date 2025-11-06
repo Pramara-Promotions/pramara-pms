@@ -4,6 +4,7 @@ import { listProjects } from '../../lib/services/projects';
 import { listStations } from '../../lib/services/stations';
 import { listShifts } from '../../lib/services/shifts';
 import { listProductionEntries, getProductionAnalytics, createProductionEntry } from '../../lib/services/productionEntries';
+import { listDailyPlans } from '../../lib/services/dailyPlans';
 
 interface ProductionEntry {
   id: string;
@@ -58,6 +59,33 @@ const ProductionEntryPage = () => {
     rejectedQty: 0,
     notes: '',
   });
+
+  // Auto-fill target from Daily Plan when project + station selected
+  useEffect(() => {
+    const pid = formData.projectId;
+    const sid = formData.stationId;
+    if (!pid || !sid) return;
+    (async () => {
+      try {
+        const today = new Date();
+        const yyyy = today.getFullYear();
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const dd = String(today.getDate()).padStart(2, '0');
+        const isoDate = `${yyyy}-${mm}-${dd}`;
+        const plans = await listDailyPlans({ projectId: pid, date: isoDate });
+        if (Array.isArray(plans) && plans.length > 0) {
+          // Pick the most recent plan for today
+          const plan = plans[0];
+          const stations = plan?.DailyPlanStation || plan?.dailyPlanStations || [];
+          const match = stations.find((s: any) => String(s.stationId) === String(sid));
+          if (match?.targetQty != null) {
+            setFormData((prev) => ({ ...prev, targetQty: Number(match.targetQty) }));
+          }
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.projectId, formData.stationId]);
 
   useEffect(() => {
     fetchEntries();

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, GitBranch, Play, CheckCircle, AlertTriangle, Clock, Workflow } from 'lucide-react';
 import { listProjects } from '../../lib/services/projects';
 import { listProcessFlows, createProcessFlow, updateProcessFlow, activateProcessFlow, deleteProcessFlow } from '../../lib/services/preproduction';
+import { useProjectContextSafe } from '../projects/ProjectContext';
 
 interface ProcessFlow {
   id: string;
@@ -43,6 +44,7 @@ interface SubOperation {
 }
 
 const ProcessFlowsPage = () => {
+  const projectContext = useProjectContextSafe();
   const [flows, setFlows] = useState<ProcessFlow[]>([]);
   const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
   const [selectedFlow, setSelectedFlow] = useState<ProcessFlow | null>(null);
@@ -51,6 +53,14 @@ const ProcessFlowsPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [projectFilter, setProjectFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  // Auto-set project filter from context if available
+  useEffect(() => {
+    if (projectContext) {
+      setProjectFilter(String(projectContext.id));
+      setFormData(prev => ({ ...prev, projectId: String(projectContext.id) }));
+    }
+  }, [projectContext]);
 
   const [formData, setFormData] = useState({
     projectId: '',
@@ -173,19 +183,22 @@ const ProcessFlowsPage = () => {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-6">
-        <select
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg"
-        >
-          <option value="">All Projects</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        {/* Hide project filter when inside project context */}
+        {!projectContext && (
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg"
+          >
+            <option value="">All Projects</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
 
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg"
+          className={`px-3 py-2 border border-gray-300 rounded-lg ${projectContext ? 'col-span-2' : ''}`}
         >
           <option value="">All Statuses</option>
           <option value="draft">Draft</option>
@@ -272,10 +285,18 @@ const ProcessFlowsPage = () => {
               </div>
 
               <div className="space-y-4">
-                <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                  <GitBranch size={20} />
-                  Operations Flow ({selectedFlow.operations.length})
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                    <GitBranch size={20} />
+                    Operations Flow ({selectedFlow.operations.length})
+                  </h3>
+                  {selectedFlow.operations.length > 0 && (
+                    <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                      <Plus size={16} />
+                      Add Operation
+                    </button>
+                  )}
+                </div>
 
                 {selectedFlow.operations.length === 0 ? (
                   <div className="text-center py-8 bg-gray-50 rounded-lg">

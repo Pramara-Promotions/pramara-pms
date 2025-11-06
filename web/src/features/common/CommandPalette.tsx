@@ -64,9 +64,11 @@ const scopeConfig = {
 export default function CommandPalette({
   open,
   onOpenChange,
+  initialQuery = '',
 }: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
+  initialQuery?: string;
 }) {
   const { addTask } = useTasks();
   const [query, setQuery] = useState('');
@@ -97,8 +99,12 @@ export default function CommandPalette({
       loadRecentSearches();
       loadSavedSearches();
       inputRef.current?.focus();
+      // Set initial query if provided
+      if (initialQuery) {
+        setQuery(initialQuery);
+      }
     }
-  }, [open]);
+  }, [open, initialQuery]);
 
   // Perform search when query or scope changes
   useEffect(() => {

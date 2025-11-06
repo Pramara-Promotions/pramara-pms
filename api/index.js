@@ -83,6 +83,11 @@ const dashboardRouter = require('./routes/dashboard');
 const userRouter = require('./routes/user');
 const capacityRouter = require('./routes/capacity');
 const workflowsRouter = require('./routes/workflows');
+const boardRouter = require('./routes/board');
+const factoriesRouter = require('./routes/factories');
+const remindersRouter = require('./routes/reminders');
+const workforceRouter = require('./routes/workforce');
+const executionRouter = require('./routes/execution');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -196,6 +201,11 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/user', userRouter);
 app.use('/api/capacity', capacityRouter);
 app.use('/api/workflows', workflowsRouter);
+app.use('/api', boardRouter);
+app.use('/api', factoriesRouter);
+app.use('/api', remindersRouter);
+app.use('/api/workforce', workforceRouter);
+app.use('/api/execution', executionRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

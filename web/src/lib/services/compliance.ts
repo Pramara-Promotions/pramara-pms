@@ -83,14 +83,19 @@ export function listCertifications(filters: { projectId?: string; status?: strin
 
 function mapCertificationPayload(input: any) {
   return {
-    projectId: input.projectId ? Number(input.projectId) : undefined,
-    certType: input.certType || '',
-    issuedBy: input.issuedBy || '',
+    certificationType: input.certificationType || '',
+    certificationName: input.certificationName || '',
+    certificationBody: input.certificationBody || '',
+    certificateNumber: input.certificateNumber || '',
+    certificateFileUrl: input.certificateFileUrl || null,
     issueDate: input.issueDate,
-    expiryDate: input.expiryDate || null,
-    certNumber: input.certNumber || '',
-    status: input.status || 'active',
-    documentUrl: input.documentUrl || null,
+    expiryDate: input.expiryDate,
+    lastAuditDate: input.lastAuditDate || null,
+    nextAuditDate: input.nextAuditDate || null,
+    scope: input.scope || '',
+    responsiblePerson: input.responsiblePerson || '',
+    reminderDays: input.reminderDays ?? 90,
+    notes: input.notes || '',
   };
 }
 

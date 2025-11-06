@@ -4,6 +4,7 @@ import { listStations } from '../../lib/services/stations';
 import { listWorkers } from '../../lib/services/workers';
 import { listQCSubmissions, getQCAnalytics, createQCSubmission, updateQCSubmission, approveQCSubmission, rejectQCSubmission } from '../../lib/services/qcSubmissions';
 import { Plus, CheckCircle, XCircle, Clock, AlertTriangle, TrendingUp, Eye, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { useProjectContextSafe } from '../projects/ProjectContext';
 
 interface QCSubmission {
   id: number;
@@ -44,6 +45,7 @@ interface QCAnalytics {
 }
 
 const QCManagementPage = () => {
+  const projectContext = useProjectContextSafe();
   const [submissions, setSubmissions] = useState<QCSubmission[]>([]);
   const [analytics, setAnalytics] = useState<QCAnalytics | null>(null);
   const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
@@ -55,6 +57,13 @@ const QCManagementPage = () => {
   const [projectFilter, setProjectFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [resultFilter, setResultFilter] = useState('');
+
+  // Auto-set project filter from context if available
+  useEffect(() => {
+    if (projectContext) {
+      setProjectFilter(String(projectContext.id));
+    }
+  }, [projectContext]);
 
   const [formData, setFormData] = useState({
     projectId: '',
@@ -301,14 +310,17 @@ const QCManagementPage = () => {
       )}
 
       <div className="flex gap-4 mb-6">
-        <select
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg"
-        >
-          <option value="">All Projects</option>
-          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        {/* Hide project filter when inside project context */}
+        {!projectContext && (
+          <select
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg"
+          >
+            <option value="">All Projects</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        )}
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}

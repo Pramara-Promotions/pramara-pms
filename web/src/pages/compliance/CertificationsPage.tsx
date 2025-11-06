@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, Shield, Calendar, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Search, Edit2, Trash2, Shield, Calendar, AlertTriangle, CheckCircle, Clock, Stamp } from 'lucide-react';
 import { listCertifications, createCertification, updateCertification, deleteCertification } from '../../lib/services/compliance';
+import { presignDocumentUpload, getDocumentGetUrl } from '../../lib/services/documents';
+import { createApproval } from '../../lib/services/approvals';
 
 interface CompanyCertification {
   id: string;
@@ -42,6 +44,19 @@ const CertificationsPage = () => {
     reminderDays: 90,
     notes: '',
   });
+  const [uploading, setUploading] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [approvalCert, setApprovalCert] = useState<CompanyCertification | null>(null);
+  const [approvalForm, setApprovalForm] = useState({
+    contactPerson: '',
+    contactEmail: '',
+    dueDate: '',
+    expectedDate: '',
+    priority: 'medium' as 'low'|'medium'|'high',
+  });
 
   const certTypes = [
     { value: 'quality', label: 'Quality (ISO 9001, etc.)' },
@@ -55,6 +70,116 @@ const CertificationsPage = () => {
   useEffect(() => {
     fetchCertifications();
   }, [statusFilter, typeFilter]);
+
+  // Paste event listener for screenshot support
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Only handle paste when modal is open
+      if (!isModalOpen) return;
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      // Look for image in clipboard
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault();
+          const blob = items[i].getAsFile();
+          if (!blob) continue;
+
+          // Generate filename with timestamp
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+          const file = new File([blob], `screenshot-${timestamp}.png`, { type: blob.type });
+
+          // Upload the file
+          setUploading(true);
+          setUploadedFileName(file.name);
+          try {
+            const presign = await presignDocumentUpload({
+              projectId: 'company',
+              filename: file.name,
+              contentType: file.type,
+              sizeBytes: file.size,
+            });
+            await fetch(presign.url, {
+              method: 'PUT',
+              headers: { 'Content-Type': presign.headers?.['Content-Type'] || file.type },
+              body: file,
+            });
+            setFormData((prev) => ({ ...prev, certificateFileUrl: presign.key }));
+            
+            // Show success message
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+            toast.textContent = '✓ Screenshot uploaded successfully';
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+          } catch (err) {
+            console.error('Screenshot upload failed:', err);
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-4 right-4 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+            toast.textContent = '✗ Screenshot upload failed';
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+          } finally {
+            setUploading(false);
+          }
+          break;
+        }
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [isModalOpen]);
+
+  // Drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    setUploading(true);
+    setUploadedFileName(file.name);
+
+    try {
+      const presign = await presignDocumentUpload({
+        projectId: 'company',
+        filename: file.name,
+        contentType: file.type || 'application/octet-stream',
+        sizeBytes: file.size,
+      });
+
+      await fetch(presign.url, {
+        method: 'PUT',
+        headers: { 'Content-Type': presign.headers?.['Content-Type'] || file.type || 'application/octet-stream' },
+        body: file,
+      });
+
+      setFormData((prev) => ({ ...prev, certificateFileUrl: presign.key }));
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const fetchCertifications = async () => {
     setIsLoading(true);
@@ -127,6 +252,54 @@ const CertificationsPage = () => {
     if (daysUntil <= 30) return { color: 'bg-red-100 text-red-800', label: `${daysUntil}d left`, icon: AlertTriangle };
     if (daysUntil <= 90) return { color: 'bg-yellow-100 text-yellow-800', label: `${daysUntil}d left`, icon: Clock };
     return { color: 'bg-green-100 text-green-800', label: 'Active', icon: CheckCircle };
+  };
+
+  const openCertificate = async (fileRef?: string | null) => {
+    if (!fileRef) return;
+    try {
+      // If it's an absolute URL, open directly
+      if (/^https?:\/\//i.test(fileRef)) {
+        window.open(fileRef, '_blank', 'noopener');
+        return;
+      }
+      // Otherwise treat as storage key and request a presigned GET URL
+      const { url } = await getDocumentGetUrl(fileRef);
+      if (url) window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      console.error('Failed to open certificate:', e);
+      alert('Unable to open certificate.');
+    }
+  };
+
+  const handleFilePick = () => fileInputRef.current?.click();
+
+  const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadedFileName(file.name);
+    try {
+      // Use a global bucket path under a special pseudo projectId "company"
+      const presign = await presignDocumentUpload({
+        projectId: 'company',
+        filename: file.name,
+        contentType: file.type || 'application/octet-stream',
+        sizeBytes: file.size,
+      });
+      // Upload via presigned PUT
+      await fetch(presign.url, {
+        method: 'PUT',
+        headers: { 'Content-Type': presign.headers?.['Content-Type'] || file.type || 'application/octet-stream' },
+        body: file,
+      });
+      // Store the storage key in certificateFileUrl; we'll render via presigned GET later
+      setFormData((prev) => ({ ...prev, certificateFileUrl: presign.key }));
+    } catch (err) {
+      console.error('Upload failed:', err);
+      alert('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -251,10 +424,16 @@ const CertificationsPage = () => {
                 )}
 
                 {cert.certificateFileUrl && (
-                  <a href={cert.certificateFileUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 mt-3 px-3 py-2 bg-gray-100 rounded hover:bg-gray-200">
-                    <Shield size={16} />
-                    View Certificate
-                  </a>
+                  <>
+                    <button onClick={() => openCertificate(cert.certificateFileUrl)} className="inline-flex items-center gap-2 mt-3 px-3 py-2 bg-gray-100 rounded hover:bg-gray-200">
+                      <Shield size={16} />
+                      View Certificate
+                    </button>
+                    <button onClick={() => { setApprovalCert(cert); setApprovalForm({ contactPerson: cert.responsible?.name || '', contactEmail: cert.responsible?.email || '', dueDate: cert.expiryDate?.split('T')[0] || '', expectedDate: '', priority: 'medium' }); setShowApprovalModal(true); }} className="ml-2 inline-flex items-center gap-2 mt-3 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                      <Stamp size={16} />
+                      Request Approval
+                    </button>
+                  </>
                 )}
               </div>
             );
@@ -304,8 +483,68 @@ const CertificationsPage = () => {
                     <input type="date" value={formData.nextAuditDate} onChange={(e) => setFormData({ ...formData, nextAuditDate: e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
                   </div>
                   <div className="col-span-2">
-                    <label className="block text-sm font-medium mb-2">Certificate URL</label>
-                    <input type="url" value={formData.certificateFileUrl} onChange={(e) => setFormData({ ...formData, certificateFileUrl: e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
+                    <label className="block text-sm font-medium mb-2">Certificate File or URL</label>
+                    
+                    {/* Drag and Drop Zone */}
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                        isDragging 
+                          ? 'border-blue-500 bg-blue-50' 
+                          : 'border-gray-300 hover:border-gray-400'
+                      }`}
+                    >
+                      <input ref={fileInputRef} type="file" className="hidden" onChange={onFileSelected} />
+                      
+                      {uploading ? (
+                        <div className="py-4">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                          <p className="text-sm text-gray-600">Uploading...</p>
+                        </div>
+                      ) : uploadedFileName ? (
+                        <div className="py-2">
+                          <div className="flex items-center justify-center gap-2 text-green-600 mb-2">
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            <span className="font-medium">{uploadedFileName}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setUploadedFileName(''); setFormData(prev => ({ ...prev, certificateFileUrl: '' })); }}
+                            className="text-sm text-red-600 hover:text-red-700"
+                          >
+                            Remove file
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="py-4">
+                          <svg className="mx-auto h-12 w-12 text-gray-400 mb-3" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          <p className="text-sm text-gray-600 mb-2">
+                            <span className="font-medium">Drag and drop</span> your file here, or
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleFilePick}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                          >
+                            Browse files
+                          </button>
+                          <p className="text-xs text-gray-500 mt-3">
+                            Allowed: PDF, PNG, JPG, WEBP, DOCX, XLSX, PPTX • Max 20MB
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="mt-3">
+                      <input type="url" placeholder="Or paste an external URL" value={formData.certificateFileUrl} onChange={(e) => setFormData({ ...formData, certificateFileUrl: e.target.value })} className="w-full px-3 py-2 border rounded-lg text-sm" />
+                      <p className="text-xs text-gray-500 mt-1">Tip: You can also paste screenshots directly (Ctrl+V)</p>
+                    </div>
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-medium mb-2">Scope</label>
@@ -319,6 +558,64 @@ const CertificationsPage = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApprovalModal && approvalCert && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg">
+            <h3 className="text-xl font-semibold mb-4">Request Approval for {approvalCert.certificationName}</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Approver Name</label>
+                <input className="w-full border rounded px-3 py-2" value={approvalForm.contactPerson} onChange={(e)=>setApprovalForm({...approvalForm, contactPerson: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Approver Email</label>
+                <input type="email" className="w-full border rounded px-3 py-2" value={approvalForm.contactEmail} onChange={(e)=>setApprovalForm({...approvalForm, contactEmail: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Due Date</label>
+                <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.dueDate} onChange={(e)=>setApprovalForm({...approvalForm, dueDate: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Expected Date</label>
+                <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.expectedDate} onChange={(e)=>setApprovalForm({...approvalForm, expectedDate: e.target.value})} />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm text-gray-600 mb-1">Priority</label>
+                <select className="w-full border rounded px-3 py-2" value={approvalForm.priority} onChange={(e)=>setApprovalForm({...approvalForm, priority: e.target.value as any})}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button className="px-4 py-2 border rounded" onClick={()=>setShowApprovalModal(false)}>Cancel</button>
+              <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={async ()=>{
+                try {
+                  // Company-level certs aren’t tied to a project, pass 0 as projectId as a convention
+                  await createApproval({
+                    projectId: 0,
+                    approvalType: 'certification',
+                    title: `Certification Approval: ${approvalCert.certificationName}`,
+                    description: `Approval for ${approvalCert.certificationType} (${approvalCert.certificateNumber || 'N/A'})`,
+                    contactPerson: approvalForm.contactPerson || undefined,
+                    contactEmail: approvalForm.contactEmail || undefined,
+                    dueDate: approvalForm.dueDate || undefined,
+                    expectedDate: approvalForm.expectedDate || undefined,
+                    priority: approvalForm.priority,
+                  });
+                  setShowApprovalModal(false);
+                  alert('Approval request created');
+                } catch (e) {
+                  console.error(e);
+                  alert('Failed to create approval');
+                }
+              }}>Create</button>
             </div>
           </div>
         </div>

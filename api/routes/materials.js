@@ -7,6 +7,271 @@ const router = express.Router();
 
 router.use(requireAuth);
 
+// GET /api/materials/alerts/summary - Get material alerts
+// MUST be before /:id route to avoid treating "alerts" as an ID
+router.get('/alerts/summary', async (req, res) => {
+  try {
+    // Low stock materials
+    const lowStock = await prisma.material.findMany({
+      where: {
+        stockQty: { lte: prisma.material.fields.minStock }
+      },
+      select: {
+        id: true,
+        name: true,
+        stockQty: true,
+        minStock: true,
+        unit: true
+      }
+    });
+    
+    // Materials needing reorder
+    const needsReorder = await prisma.material.findMany({
+      where: {
+        stockQty: { lte: prisma.material.fields.reorderPoint }
+      },
+      select: {
+        id: true,
+        name: true,
+        stockQty: true,
+        reorderPoint: true,
+        leadTimeDays: true,
+        unit: true
+      }
+    });
+    
+    // Expiring materials (next 30 days)
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    
+    const expiringSoon = await prisma.materialLot.findMany({
+      where: {
+        status: 'active',
+        expiryDate: {
+          lte: thirtyDaysFromNow,
+          gte: new Date()
+        }
+      },
+      include: {
+        Material: {
+          select: { name: true, unit: true }
+        }
+      }
+    });
+    
+    res.json({
+      lowStock,
+      needsReorder,
+      expiringSoon,
+      summary: {
+        lowStockCount: lowStock.length,
+        reorderCount: needsReorder.length,
+        expiringCount: expiringSoon.length
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching material alerts:', error);
+    res.status(500).json({ error: 'Failed to fetch material alerts' });
+  }
+});
+
+// GET /api/materials/forecast - Material consumption forecast
+router.get('/forecast', async (req, res) => {
+  try {
+    const { days = 30, materialId } = req.query;
+    
+    const where = materialId ? { materialId } : {};
+    
+    const forecasts = await prisma.materialForecast.findMany({
+      where: {
+        ...where,
+        forecastDate: {
+          gte: new Date(),
+          lte: new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+        }
+      },
+      include: {
+        Material: {
+          select: {
+            id: true,
+            name: true,
+            unit: true,
+            stockQty: true
+          }
+        }
+      },
+      orderBy: { forecastDate: 'asc' }
+    });
+    
+    res.json({ forecasts });
+  } catch (error) {
+    console.error('Error fetching material forecast:', error);
+    res.status(500).json({ error: 'Failed to fetch material forecast' });
+  }
+});
+
+// GET /api/materials/movements - Stock movement history
+router.get('/movements', async (req, res) => {
+  try {
+    const { materialId, movementType, limit = 100 } = req.query;
+    
+    const where = {};
+    if (materialId) where.materialId = materialId;
+    if (movementType) where.movementType = movementType;
+    
+    const movements = await prisma.stockMovement.findMany({
+      where,
+      include: {
+        Material: {
+          select: {
+            name: true,
+            unit: true
+          }
+        }
+      },
+      orderBy: { timestamp: 'desc' },
+      take: parseInt(limit)
+    });
+    
+    res.json({ movements });
+  } catch (error) {
+    console.error('Error fetching stock movements:', error);
+    res.status(500).json({ error: 'Failed to fetch stock movements' });
+  }
+});
+
+// GET /api/materials/dashboard/summary - Dashboard summary
+router.get('/dashboard/summary', async (req, res) => {
+  try {
+    const totalMaterials = await prisma.material.count();
+    
+    const byType = await prisma.material.groupBy({
+      by: ['type'],
+      _count: true,
+      _sum: {
+        stockQty: true
+      }
+    });
+    
+    const totalValue = await prisma.material.aggregate({
+      _sum: {
+        stockQty: true
+      },
+      where: {
+        costPerUnit: { not: null }
+      }
+    });
+    
+    const lowStockCount = await prisma.material.count({
+      where: {
+        stockQty: { lte: prisma.material.fields.minStock }
+      }
+    });
+    
+    const activeReservations = await prisma.materialReservation.count({
+      where: { status: 'active' }
+    });
+    
+    res.json({
+      totalMaterials,
+      byType,
+      totalValue: totalValue._sum.stockQty || 0,
+      lowStockCount,
+      activeReservations
+    });
+  } catch (error) {
+    console.error('Error fetching material dashboard:', error);
+    res.status(500).json({ error: 'Failed to fetch material dashboard' });
+  }
+});
+
+// POST /api/materials/reserve - Reserve materials for daily plan
+router.post('/reserve', async (req, res) => {
+  try {
+    const { materialId, qty, dailyPlanId, stationId } = req.body;
+    
+    if (!materialId || !qty) {
+      return res.status(400).json({ error: 'Material ID and quantity are required' });
+    }
+    
+    // Check availability
+    const material = await prisma.material.findUnique({
+      where: { id: materialId }
+    });
+    
+    const availableQty = material.stockQty - (material.reservedQty || 0);
+    if (availableQty < qty) {
+      return res.status(400).json({ 
+        error: 'Insufficient stock',
+        available: availableQty,
+        requested: qty
+      });
+    }
+    
+    // Create reservation
+    const reservation = await prisma.materialReservation.create({
+      data: {
+        materialId,
+        dailyPlanId: dailyPlanId || null,
+        stationId: stationId ? parseInt(stationId) : null,
+        reservedQty: qty,
+        reservedBy: req.user?.id || 'system',
+        status: 'active'
+      }
+    });
+    
+    // Update reserved quantity
+    await prisma.material.update({
+      where: { id: materialId },
+      data: {
+        reservedQty: { increment: qty }
+      }
+    });
+    
+    res.status(201).json({ reservation });
+  } catch (error) {
+    console.error('Error reserving material:', error);
+    res.status(500).json({ error: 'Failed to reserve material' });
+  }
+});
+
+// POST /api/materials/reservations/:id/release - Release reservation
+router.post('/reservations/:id/release', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const reservation = await prisma.materialReservation.findUnique({
+      where: { id }
+    });
+    
+    if (!reservation) {
+      return res.status(404).json({ error: 'Reservation not found' });
+    }
+    
+    // Update reservation status
+    await prisma.materialReservation.update({
+      where: { id },
+      data: {
+        status: 'released',
+        releasedAt: new Date()
+      }
+    });
+    
+    // Update material reserved quantity
+    await prisma.material.update({
+      where: { id: reservation.materialId },
+      data: {
+        reservedQty: { decrement: reservation.reservedQty }
+      }
+    });
+    
+    res.json({ message: 'Reservation released successfully' });
+  } catch (error) {
+    console.error('Error releasing reservation:', error);
+    res.status(500).json({ error: 'Failed to release reservation' });
+  }
+});
+
 // GET /api/materials - List all materials with filters
 router.get('/', async (req, res) => {
   try {
@@ -280,268 +545,313 @@ router.post('/:id/adjust', async (req, res) => {
   }
 });
 
-// POST /api/materials/reserve - Reserve materials for daily plan
-router.post('/reserve', async (req, res) => {
+// ============================================================================
+// MATERIAL WORKFLOW CUSTOMIZATION (Q8)
+// Per-project material sourcing with customizable workflow and saved fields
+// ============================================================================
+
+/**
+ * GET /api/materials/workflow-config/:projectId
+ * Get custom workflow configuration for a project's material sourcing
+ */
+router.get('/workflow-config/:projectId', async (req, res) => {
   try {
-    const { materialId, qty, dailyPlanId, stationId } = req.body;
+    const projectId = parseInt(req.params.projectId);
     
-    if (!materialId || !qty) {
-      return res.status(400).json({ error: 'Material ID and quantity are required' });
-    }
-    
-    // Check availability
-    const material = await prisma.material.findUnique({
-      where: { id: materialId }
+    // Check if project has custom workflow config
+    const config = await prisma.systemSetting.findUnique({
+      where: { key: `material_workflow_${projectId}` }
     });
     
-    const availableQty = material.stockQty - (material.reservedQty || 0);
-    if (availableQty < qty) {
-      return res.status(400).json({ 
-        error: 'Insufficient stock',
-        available: availableQty,
-        requested: qty
+    if (!config) {
+      // Return default workflow
+      return res.json({
+        projectId,
+        hasCustomWorkflow: false,
+        workflow: {
+          stages: [
+            { id: 'request', name: 'Material Request', order: 1, required: true, fields: ['quantity', 'material'] },
+            { id: 'approval', name: 'Approval', order: 2, required: true, fields: ['approver', 'approvalDate'] },
+            { id: 'sourcing', name: 'Sourcing', order: 3, required: true, fields: ['supplier', 'quotation'] },
+            { id: 'ordering', name: 'Ordering', order: 4, required: true, fields: ['poNumber', 'orderDate'] },
+            { id: 'receiving', name: 'Receiving', order: 5, required: true, fields: ['receivedQty', 'receivedDate'] }
+          ],
+          customFields: []
+        }
       });
     }
     
-    // Create reservation
-    const reservation = await prisma.materialReservation.create({
-      data: {
-        materialId,
-        dailyPlanId: dailyPlanId || null,
-        stationId: stationId ? parseInt(stationId) : null,
-        reservedQty: qty,
-        reservedBy: req.user?.id || 'system',
-        status: 'active'
-      }
+    res.json({
+      projectId,
+      hasCustomWorkflow: true,
+      workflow: config.value,
+      updatedAt: config.updatedAt,
+      updatedBy: config.updatedBy
     });
     
-    // Update reserved quantity
-    await prisma.material.update({
-      where: { id: materialId },
-      data: {
-        reservedQty: { increment: qty }
-      }
-    });
-    
-    res.status(201).json({ reservation });
   } catch (error) {
-    console.error('Error reserving material:', error);
-    res.status(500).json({ error: 'Failed to reserve material' });
+    console.error('[materials] Error fetching workflow config:', error);
+    res.status(500).json({ error: 'Failed to fetch workflow configuration' });
   }
 });
 
-// POST /api/materials/reservations/:id/release - Release reservation
-router.post('/reservations/:id/release', async (req, res) => {
+/**
+ * PUT /api/materials/workflow-config/:projectId
+ * Update custom workflow configuration for a project
+ */
+router.put('/workflow-config/:projectId', async (req, res) => {
   try {
-    const { id } = req.params;
+    const projectId = parseInt(req.params.projectId);
+    const { stages, customFields } = req.body;
     
-    const reservation = await prisma.materialReservation.findUnique({
-      where: { id }
-    });
-    
-    if (!reservation) {
-      return res.status(404).json({ error: 'Reservation not found' });
+    if (!stages || !Array.isArray(stages)) {
+      return res.status(400).json({ error: 'Stages array is required' });
     }
     
-    // Update reservation status
-    await prisma.materialReservation.update({
-      where: { id },
-      data: {
-        status: 'released',
-        releasedAt: new Date()
-      }
-    });
+    // Validate stages
+    const requiredStages = ['request', 'approval', 'sourcing', 'ordering', 'receiving'];
+    const stageIds = stages.map(s => s.id);
+    const missingRequired = requiredStages.filter(r => !stageIds.includes(r));
     
-    // Update material reserved quantity
-    await prisma.material.update({
-      where: { id: reservation.materialId },
-      data: {
-        reservedQty: { decrement: reservation.reservedQty }
-      }
-    });
+    if (missingRequired.length > 0) {
+      return res.status(400).json({ 
+        error: `Missing required stages: ${missingRequired.join(', ')}` 
+      });
+    }
     
-    res.json({ message: 'Reservation released successfully' });
-  } catch (error) {
-    console.error('Error releasing reservation:', error);
-    res.status(500).json({ error: 'Failed to release reservation' });
-  }
-});
-
-// GET /api/materials/alerts - Get material alerts
-router.get('/alerts/summary', async (req, res) => {
-  try {
-    // Low stock materials
-    const lowStock = await prisma.material.findMany({
-      where: {
-        stockQty: { lte: prisma.material.fields.minStock }
+    // Save workflow config
+    const config = await prisma.systemSetting.upsert({
+      where: { key: `material_workflow_${projectId}` },
+      update: {
+        value: {
+          stages,
+          customFields: customFields || [],
+          lastModified: new Date().toISOString()
+        },
+        updatedBy: req.user?.id || 'system'
       },
-      select: {
-        id: true,
-        name: true,
-        stockQty: true,
-        minStock: true,
-        unit: true
-      }
-    });
-    
-    // Materials needing reorder
-    const needsReorder = await prisma.material.findMany({
-      where: {
-        stockQty: { lte: prisma.material.fields.reorderPoint }
-      },
-      select: {
-        id: true,
-        name: true,
-        stockQty: true,
-        reorderPoint: true,
-        leadTimeDays: true,
-        unit: true
-      }
-    });
-    
-    // Expiring materials (next 30 days)
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-    
-    const expiringSoon = await prisma.materialLot.findMany({
-      where: {
-        status: 'active',
-        expiryDate: {
-          lte: thirtyDaysFromNow,
-          gte: new Date()
-        }
-      },
-      include: {
-        Material: {
-          select: { name: true, unit: true }
-        }
+      create: {
+        key: `material_workflow_${projectId}`,
+        value: {
+          stages,
+          customFields: customFields || [],
+          created: new Date().toISOString()
+        },
+        updatedBy: req.user?.id || 'system'
       }
     });
     
     res.json({
-      lowStock,
-      needsReorder,
-      expiringSoon,
-      summary: {
-        lowStockCount: lowStock.length,
-        reorderCount: needsReorder.length,
-        expiringCount: expiringSoon.length
-      }
+      message: 'Workflow configuration saved successfully',
+      projectId,
+      workflow: config.value
     });
+    
   } catch (error) {
-    console.error('Error fetching material alerts:', error);
-    res.status(500).json({ error: 'Failed to fetch material alerts' });
+    console.error('[materials] Error saving workflow config:', error);
+    res.status(500).json({ error: 'Failed to save workflow configuration' });
   }
 });
 
-// GET /api/materials/forecast - Material consumption forecast
-router.get('/forecast', async (req, res) => {
+/**
+ * POST /api/materials/sourcing/:projectId
+ * Create a new material sourcing request with custom workflow
+ */
+router.post('/sourcing/:projectId', async (req, res) => {
   try {
-    const { days = 30, materialId } = req.query;
+    const projectId = parseInt(req.params.projectId);
+    const {
+      materialId,
+      quantity,
+      requiredBy,
+      customFieldData = {}
+    } = req.body;
     
-    const where = materialId ? { materialId } : {};
+    if (!materialId || !quantity) {
+      return res.status(400).json({ error: 'Material ID and quantity are required' });
+    }
     
-    const forecasts = await prisma.materialForecast.findMany({
-      where: {
-        ...where,
-        forecastDate: {
-          gte: new Date(),
-          lte: new Date(Date.now() + days * 24 * 60 * 60 * 1000)
-        }
-      },
-      include: {
-        Material: {
-          select: {
-            id: true,
-            name: true,
-            unit: true,
-            stockQty: true
-          }
-        }
-      },
-      orderBy: { forecastDate: 'asc' }
+    // Get workflow config
+    const configKey = `material_workflow_${projectId}`;
+    const config = await prisma.systemSetting.findUnique({
+      where: { key: configKey }
     });
     
-    res.json({ forecasts });
+    const workflow = config?.value || {
+      stages: [
+        { id: 'request', name: 'Material Request', order: 1, required: true },
+        { id: 'approval', name: 'Approval', order: 2, required: true },
+        { id: 'sourcing', name: 'Sourcing', order: 3, required: true },
+        { id: 'ordering', name: 'Ordering', order: 4, required: true },
+        { id: 'receiving', name: 'Receiving', order: 5, required: true }
+      ],
+      customFields: []
+    };
+    
+    // Create sourcing request (using SystemSetting as storage for now)
+    // In production, you'd create a MaterialSourcingRequest model
+    const requestId = `MAT_${projectId}_${Date.now()}`;
+    const requestKey = `material_sourcing_${requestId}`;
+    
+    await prisma.systemSetting.create({
+      data: {
+        key: requestKey,
+        value: {
+          requestId,
+          projectId,
+          materialId,
+          quantity,
+          requiredBy,
+          customFieldData,
+          currentStage: 'request',
+          status: 'pending',
+          workflow: workflow.stages,
+          history: [
+            {
+              stage: 'request',
+              timestamp: new Date().toISOString(),
+              userId: req.user?.id || 'system',
+              action: 'created'
+            }
+          ],
+          createdAt: new Date().toISOString(),
+          createdBy: req.user?.id || 'system'
+        },
+        updatedBy: req.user?.id || 'system'
+      }
+    });
+    
+    // Get material name for response
+    const material = await prisma.material.findUnique({
+      where: { id: materialId },
+      select: { name: true, unit: true }
+    });
+    
+    res.status(201).json({
+      requestId,
+      projectId,
+      material: material?.name,
+      quantity,
+      unit: material?.unit,
+      currentStage: 'request',
+      status: 'pending',
+      message: 'Sourcing request created successfully'
+    });
+    
   } catch (error) {
-    console.error('Error fetching material forecast:', error);
-    res.status(500).json({ error: 'Failed to fetch material forecast' });
+    console.error('[materials] Error creating sourcing request:', error);
+    res.status(500).json({ error: 'Failed to create sourcing request' });
   }
 });
 
-// GET /api/materials/movements - Stock movement history
-router.get('/movements', async (req, res) => {
+/**
+ * PUT /api/materials/sourcing/:requestId/advance
+ * Advance sourcing request to next workflow stage
+ */
+router.put('/sourcing/:requestId/advance', async (req, res) => {
   try {
-    const { materialId, movementType, limit = 100 } = req.query;
+    const { requestId } = req.params;
+    const { stageData = {} } = req.body;
     
-    const where = {};
-    if (materialId) where.materialId = materialId;
-    if (movementType) where.movementType = movementType;
+    const requestKey = `material_sourcing_${requestId}`;
+    const setting = await prisma.systemSetting.findUnique({
+      where: { key: requestKey }
+    });
     
-    const movements = await prisma.stockMovement.findMany({
-      where,
-      include: {
-        Material: {
-          select: {
-            name: true,
-            unit: true
-          }
+    if (!setting) {
+      return res.status(404).json({ error: 'Sourcing request not found' });
+    }
+    
+    const request = setting.value;
+    const currentStageIndex = request.workflow.findIndex(s => s.id === request.currentStage);
+    
+    if (currentStageIndex === -1) {
+      return res.status(400).json({ error: 'Invalid current stage' });
+    }
+    
+    const nextStage = request.workflow[currentStageIndex + 1];
+    
+    if (!nextStage) {
+      return res.status(400).json({ error: 'Already at final stage' });
+    }
+    
+    // Update request
+    const updatedRequest = {
+      ...request,
+      currentStage: nextStage.id,
+      status: nextStage.id === 'receiving' ? 'receiving' : 'in_progress',
+      [`${request.currentStage}Data`]: stageData,
+      history: [
+        ...request.history,
+        {
+          stage: nextStage.id,
+          timestamp: new Date().toISOString(),
+          userId: req.user?.id || 'system',
+          action: 'advanced',
+          data: stageData
         }
-      },
-      orderBy: { timestamp: 'desc' },
-      take: parseInt(limit)
-    });
+      ],
+      lastUpdated: new Date().toISOString()
+    };
     
-    res.json({ movements });
-  } catch (error) {
-    console.error('Error fetching stock movements:', error);
-    res.status(500).json({ error: 'Failed to fetch stock movements' });
-  }
-});
-
-// GET /api/materials/dashboard - Dashboard summary
-router.get('/dashboard/summary', async (req, res) => {
-  try {
-    const totalMaterials = await prisma.material.count();
-    
-    const byType = await prisma.material.groupBy({
-      by: ['type'],
-      _count: true,
-      _sum: {
-        stockQty: true
+    await prisma.systemSetting.update({
+      where: { key: requestKey },
+      data: {
+        value: updatedRequest,
+        updatedBy: req.user?.id || 'system'
       }
-    });
-    
-    const totalValue = await prisma.material.aggregate({
-      _sum: {
-        stockQty: true
-      },
-      where: {
-        costPerUnit: { not: null }
-      }
-    });
-    
-    const lowStockCount = await prisma.material.count({
-      where: {
-        stockQty: { lte: prisma.material.fields.minStock }
-      }
-    });
-    
-    const activeReservations = await prisma.materialReservation.count({
-      where: { status: 'active' }
     });
     
     res.json({
-      totalMaterials,
-      byType,
-      totalValue: totalValue._sum.stockQty || 0,
-      lowStockCount,
-      activeReservations
+      requestId,
+      currentStage: nextStage.id,
+      stageName: nextStage.name,
+      status: updatedRequest.status,
+      message: `Advanced to ${nextStage.name}`
     });
+    
   } catch (error) {
-    console.error('Error fetching material dashboard:', error);
-    res.status(500).json({ error: 'Failed to fetch material dashboard' });
+    console.error('[materials] Error advancing sourcing request:', error);
+    res.status(500).json({ error: 'Failed to advance sourcing request' });
+  }
+});
+
+/**
+ * GET /api/materials/sourcing/:projectId
+ * Get all sourcing requests for a project
+ */
+router.get('/sourcing/:projectId', async (req, res) => {
+  try {
+    const projectId = parseInt(req.params.projectId);
+    
+    // Get all sourcing requests for this project
+    // Pattern: material_sourcing_MAT_{projectId}_*
+    const allSettings = await prisma.systemSetting.findMany({
+      where: {
+        key: {
+          startsWith: `material_sourcing_MAT_${projectId}_`
+        }
+      }
+    });
+    
+    const requests = allSettings.map(setting => ({
+      requestId: setting.value.requestId,
+      materialId: setting.value.materialId,
+      quantity: setting.value.quantity,
+      currentStage: setting.value.currentStage,
+      status: setting.value.status,
+      createdAt: setting.value.createdAt,
+      createdBy: setting.value.createdBy,
+      lastUpdated: setting.value.lastUpdated
+    }));
+    
+    res.json(requests);
+    
+  } catch (error) {
+    console.error('[materials] Error fetching sourcing requests:', error);
+    res.status(500).json({ error: 'Failed to fetch sourcing requests' });
   }
 });
 
 module.exports = router;
+

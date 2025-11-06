@@ -15,6 +15,7 @@ import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import KanbanColumn from '../../../components/tasks/KanbanColumn';
 import TaskCard from '../../../components/tasks/TaskCard';
 import TaskDetailPanel from '../../../components/tasks/TaskDetailPanel';
+import CreateTaskModal from '../../../components/tasks/CreateTaskModal';
 import { Loader2, AlertCircle, Plus, Settings } from 'lucide-react';
 import { useProjectContext } from '../ProjectContext';
 
@@ -42,9 +43,8 @@ interface BoardColumn {
 }
 
 export default function BoardTab() {
-  const context = useProjectContext() as any;
-  const project = context?.project;
-  
+  const project = useProjectContext();
+
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,12 +52,15 @@ export default function BoardTab() {
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [defaultSection, setDefaultSection] = useState<string>('Pre_Prod');
 
   // Drag and drop sensors
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 8 // 8px movement to activate drag
+        delay: 150,
+        tolerance: 5
       }
     }),
     useSensor(KeyboardSensor, {
@@ -66,34 +69,55 @@ export default function BoardTab() {
   );
 
   // Load board configuration and tasks
-  useEffect(() => {
-    if (!project?.id) return;
-    loadBoardData();
-  }, [project?.id]);
+  const loadBoardData = React.useCallback(async () => {
+    if (!project?.id) {
+      setError('Project ID not available');
+      setLoading(false);
+      return;
+    }
 
-  async function loadBoardData() {
     try {
       setLoading(true);
       setError(null);
 
       // Load board config
       const configRes = await fetch(`/api/projects/${project.id}/board-config`);
-      if (!configRes.ok) throw new Error('Failed to load board configuration');
-      const configData = await configRes.json();
-      setColumns(configData);
+      if (configRes.status === 404) {
+        // Fallback to default columns if backend not implemented
+        setColumns([
+          { id: 'col-pre', name: 'Pre Production', section: 'Pre_Prod', position: 0, taskCount: 0, wipLimit: 10, color: '#0ea5e9' },
+          { id: 'col-prod', name: 'Production', section: 'Production', position: 1, taskCount: 0, wipLimit: 15, color: '#10b981' },
+          { id: 'col-qc', name: 'Quality Check', section: 'QC', position: 2, taskCount: 0, wipLimit: 10, color: '#f59e0b' },
+          { id: 'col-disp', name: 'Dispatch', section: 'Dispatch', position: 3, taskCount: 0, wipLimit: 10, color: '#8b5cf6' }
+        ]);
+      } else if (!configRes.ok) {
+        throw new Error('Failed to load board configuration');
+      } else {
+        const configData = await configRes.json();
+        setColumns(configData);
+      }
 
       // Load tasks
       const tasksRes = await fetch(`/api/projects/${project.id}/tasks`);
-      if (!tasksRes.ok) throw new Error('Failed to load tasks');
-      const tasksData = await tasksRes.json();
-      setTasks(tasksData);
+      if (tasksRes.status === 404) {
+        setTasks([]);
+      } else if (!tasksRes.ok) {
+        throw new Error('Failed to load tasks');
+      } else {
+        const tasksData = await tasksRes.json();
+        setTasks(tasksData);
+      }
     } catch (err) {
       console.error('Failed to load board:', err);
       setError(err instanceof Error ? err.message : 'Failed to load board');
     } finally {
       setLoading(false);
     }
-  }
+  }, [project]);
+
+  useEffect(() => {
+    loadBoardData();
+  }, [loadBoardData]);
 
   // Group tasks by section
   function getTasksBySection(section: string): Task[] {
@@ -164,6 +188,44 @@ export default function BoardTab() {
     // Only update if section or position changed
     if (targetSection !== activeTask.section || targetPosition !== activeTask.position) {
       try {
+        // Optimistically update local state to reduce flicker
+        setTasks(prev => {
+          const updated = [...prev];
+          // Work within target section ordering
+          const fromSection = activeTask.section;
+          const toSection = targetSection;
+
+          // Remove active from its current list
+          const withoutActive = updated.filter(t => t.id !== activeTask.id);
+
+          // Build new list for target section
+          const targetList = withoutActive
+            .filter(t => t.section === toSection)
+            .sort((a, b) => a.position - b.position);
+
+          // Insert active at computed index
+          const insertIndex = Math.max(0, Math.min(targetPosition, targetList.length));
+          const movedTask: Task = { ...activeTask, section: toSection, position: insertIndex } as Task;
+          targetList.splice(insertIndex, 0, movedTask);
+
+          // Reassign positions in target list
+          targetList.forEach((t, idx) => (t.position = idx));
+
+          // Reassign positions in from section (if different)
+          if (fromSection !== toSection) {
+            const fromList = withoutActive
+              .filter(t => t.section === fromSection)
+              .sort((a, b) => a.position - b.position);
+            fromList.forEach((t, idx) => (t.position = idx));
+          }
+
+          // Merge back into full list
+          const byId: Record<string, Task> = {};
+          withoutActive.forEach(t => (byId[t.id] = t));
+          targetList.forEach(t => (byId[t.id] = t));
+          return Object.values(byId);
+        });
+
         // Call API to move task
         const res = await fetch(`/api/tasks/${activeTask.id}/move`, {
           method: 'PUT',
@@ -204,8 +266,37 @@ export default function BoardTab() {
   }
 
   function handleAddTask(section: string) {
-    // TODO: Open new task modal
-    console.log('Add task to section:', section);
+    setDefaultSection(section);
+    setIsCreateModalOpen(true);
+  }
+
+  async function handleCreateTask(taskData: {
+    name: string;
+    section: string;
+    priority?: string;
+    assignee?: string;
+    dueDate?: string;
+  }) {
+    try {
+      const response = await fetch(`/api/projects/${project.id}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...taskData,
+          status: 'green', // Default status
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create task');
+      }
+
+      setIsCreateModalOpen(false);
+      loadBoardData(); // Reload the board data
+    } catch (err) {
+      console.error('Error creating task:', err);
+      // You could add error toast notification here
+    }
   }
 
   function handleColumnMenu(column: BoardColumn) {
@@ -239,7 +330,7 @@ export default function BoardTab() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full select-none">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -322,7 +413,7 @@ export default function BoardTab() {
           </button>
         </div>
       )}
-      
+
       {/* Task Detail Panel */}
       {selectedTaskId && (
         <TaskDetailPanel
@@ -332,6 +423,14 @@ export default function BoardTab() {
           onUpdate={handleTaskUpdate}
         />
       )}
+
+      {/* Create Task Modal */}
+      <CreateTaskModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSubmit={handleCreateTask}
+        defaultSection={defaultSection}
+      />
     </div>
   );
 }

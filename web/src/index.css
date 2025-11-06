@@ -20,6 +20,13 @@ html, body, #root {
 }
 
 /* Default Background Gradients */
+/* Ensure page chrome respects dark mode without white edges */
+@layer base {
+  html {
+    @apply bg-slate-50 dark:bg-slate-950;
+  }
+}
+
 body {
   @apply bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/20 
          dark:from-slate-900 dark:via-blue-950/50 dark:to-purple-950/30;
@@ -35,7 +42,7 @@ body {
   .btn-primary {
     @apply bg-gradient-to-r from-primary-600 via-primary-500 to-primary-600 
            text-white font-medium px-4 py-2 rounded-lg
-           shadow-md hover:shadow-primary 
+           shadow-md 
            transition-all duration-300
            hover:-translate-y-1 hover:shadow-lg
            active:translate-y-0 active:shadow-md;
@@ -265,6 +272,17 @@ body {
    =================================== */
 
 @layer utilities {
+  /* Dark mode text visibility fixes for legacy classes
+     Many components use text-gray-900/800/700 which are too dark on dark backgrounds.
+     These overrides ensure readable contrast in dark mode without touching each component. */
+  .dark .text-black { @apply text-slate-100; }
+  .dark .text-gray-900 { @apply text-slate-100; }
+  .dark .text-slate-900 { @apply text-slate-100; }
+  .dark .text-gray-800 { @apply text-slate-100; }
+  .dark .text-gray-700 { @apply text-slate-300; }
+  .dark .text-gray-600 { @apply text-slate-400; }
+  .dark .text-gray-500 { @apply text-slate-400; }
+
   /* Touch-friendly sizing for mobile */
   .touch-target {
     @apply min-h-[44px] min-w-[44px];
@@ -320,7 +338,9 @@ body {
     border-radius: inherit;
     padding: 2px;
     background: linear-gradient(135deg, #6b6ef2, #5b50e5, #4c3fca);
+    /* Vendor-prefixed first, then standard property for proper cascade */
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
   }

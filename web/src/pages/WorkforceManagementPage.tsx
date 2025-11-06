@@ -1,22 +1,37 @@
 import { useState, useEffect } from 'react';
-import { apiGet, apiPost } from '../lib/api';
+import {
+  listWorkers,
+  listProviders,
+  getPerformanceLeaderboard,
+  getWorkforceDashboard,
+} from '../lib/services/workforce';
 
 interface Worker {
   id: string;
   name: string;
+  employeeCode?: string;
+  email?: string;
+  phone?: string;
   workerType: string;
   skills: string[];
-  Provider?: { name: string; stabilityScore: number };
-  performance: any[];
+  hourlyRate?: number;
+  overtimeRate?: number;
+  status: string;
+  ThirdPartyProvider?: { id: string; name: string; contactPerson: string };
 }
 
 interface Provider {
   id: string;
   name: string;
+  contactPerson?: string;
+  email?: string;
+  phone?: string;
   stabilityScore: number;
-  turnoverRate: number;
   performanceScore: number;
-  workers: Worker[];
+  attendanceRate: number;
+  activeWorkerCount: number;
+  totalWorkerCount: number;
+  Worker: any[];
 }
 
 export default function WorkforceManagementPage() {
@@ -47,8 +62,8 @@ export default function WorkforceManagementPage() {
 
   const fetchWorkers = async () => {
     try {
-      const response = await apiGet('/api/workers');
-      setWorkers(response.workers || []);
+      const data = await listWorkers({ status: 'active' });
+      setWorkers(data || []);
     } catch (error) {
       console.error('Error fetching workers:', error);
     }
@@ -56,8 +71,8 @@ export default function WorkforceManagementPage() {
 
   const fetchProviders = async () => {
     try {
-      const response = await apiGet('/api/workers/providers/list');
-      setProviders(response.providers || []);
+      const data = await listProviders({ active: true });
+      setProviders(data || []);
     } catch (error) {
       console.error('Error fetching providers:', error);
     }
@@ -65,8 +80,8 @@ export default function WorkforceManagementPage() {
 
   const fetchLeaderboard = async () => {
     try {
-      const response = await apiGet('/api/workers/performance/leaderboard?days=30');
-      setLeaderboard(response.leaderboard || []);
+      const data = await getPerformanceLeaderboard({ days: 30, limit: 20 });
+      setLeaderboard(data || []);
     } catch (error) {
       console.error('Error fetching leaderboard:', error);
     }
@@ -74,8 +89,8 @@ export default function WorkforceManagementPage() {
 
   const fetchSummary = async () => {
     try {
-      const response = await apiGet('/api/workers/dashboard/summary');
-      setSummary(response);
+      const data = await getWorkforceDashboard();
+      setSummary(data || {});
     } catch (error) {
       console.error('Error fetching summary:', error);
     }
@@ -100,19 +115,19 @@ export default function WorkforceManagementPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Total Workers</div>
-          <div className="text-2xl font-bold text-gray-900">{summary.totalWorkers || 0}</div>
+          <div className="text-2xl font-bold text-gray-900">{summary.workers?.total || 0}</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Company Workers</div>
-          <div className="text-2xl font-bold text-blue-600">{summary.byType?.company || 0}</div>
+          <div className="text-2xl font-bold text-blue-600">{summary.workers?.company || 0}</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">3rd Party Workers</div>
-          <div className="text-2xl font-bold text-purple-600">{summary.byType?.third_party || 0}</div>
+          <div className="text-2xl font-bold text-purple-600">{summary.workers?.contractor || 0}</div>
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Avg Efficiency</div>
-          <div className="text-2xl font-bold text-green-600">{summary.avgEfficiency || 0}%</div>
+          <div className="text-2xl font-bold text-green-600">{summary.recentPerformance?.avgEfficiency || 0}%</div>
         </div>
       </div>
 
@@ -149,16 +164,23 @@ export default function WorkforceManagementPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Skills</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Provider</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Shifts</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate (₹/hr)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {workers.map(worker => (
                     <tr key={worker.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{worker.name}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{worker.name}</div>
+                        {worker.email && <div className="text-xs text-gray-500">{worker.email}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-600">
+                        {worker.employeeCode || '-'}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded text-xs ${
                           worker.workerType === 'company' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
@@ -171,10 +193,10 @@ export default function WorkforceManagementPage() {
                         {worker.skills.length > 3 && ` +${worker.skills.length - 3}`}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600">
-                        {worker.Provider?.name || '-'}
+                        {worker.ThirdPartyProvider?.name || '-'}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-600">
-                        {worker.performance.length}
+                      <td className="px-4 py-3 text-right text-gray-900 font-medium">
+                        {worker.hourlyRate ? `₹${worker.hourlyRate}` : '-'}
                       </td>
                     </tr>
                   ))}
@@ -191,13 +213,16 @@ export default function WorkforceManagementPage() {
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <h3 className="font-bold text-lg">{provider.name}</h3>
-                      <p className="text-sm text-gray-500">{provider.workers.length} workers</p>
+                      <p className="text-sm text-gray-500">{provider.contactPerson}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {provider.activeWorkerCount} active / {provider.totalWorkerCount} total workers
+                      </p>
                     </div>
                     <div className="text-right">
                       <div className="text-2xl font-bold text-green-600">
                         {provider.stabilityScore?.toFixed(0) || 0}
                       </div>
-                      <div className="text-xs text-gray-500">Stability Score</div>
+                      <div className="text-xs text-gray-500">Stability</div>
                     </div>
                   </div>
                   
@@ -207,9 +232,15 @@ export default function WorkforceManagementPage() {
                       <span className="font-medium">{provider.performanceScore?.toFixed(1) || 0}%</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Turnover Rate:</span>
-                      <span className="font-medium">{provider.turnoverRate?.toFixed(1) || 0}%</span>
+                      <span className="text-gray-600">Attendance:</span>
+                      <span className="font-medium">{provider.attendanceRate?.toFixed(1) || 0}%</span>
                     </div>
+                    {provider.email && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">Email:</span>
+                        <span className="text-xs text-gray-500">{provider.email}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -220,35 +251,39 @@ export default function WorkforceManagementPage() {
           {tab === 'leaderboard' && (
             <div className="space-y-3">
               {leaderboard.map((entry, index) => (
-                <div key={entry.worker.id} className="flex items-center gap-4 border rounded-lg p-4 hover:bg-gray-50">
+                <div key={entry.workerId} className="flex items-center gap-4 border rounded-lg p-4 hover:bg-gray-50">
                   <div className="text-2xl font-bold text-gray-400 w-8">#{index + 1}</div>
                   <div className="flex-1">
-                    <div className="font-bold text-gray-900">{entry.worker.name}</div>
+                    <div className="font-bold text-gray-900">{entry.workerName}</div>
                     <div className="text-sm text-gray-500">
-                      {entry.worker.skills.slice(0, 2).join(', ')}
+                      <span className={`px-2 py-0.5 rounded text-xs ${
+                        entry.workerType === 'company' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                      }`}>
+                        {entry.workerType}
+                      </span>
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-bold text-green-600">
-                      {entry.overallScore.toFixed(1)}
+                      {entry.performanceScore?.toFixed(1) || 0}
                     </div>
-                    <div className="text-xs text-gray-500">Overall Score</div>
+                    <div className="text-xs text-gray-500">Score</div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-medium text-blue-600">
-                      {entry.avgEfficiency.toFixed(0)}%
+                      {entry.totalTasks || 0}
                     </div>
-                    <div className="text-xs text-gray-500">Efficiency</div>
+                    <div className="text-xs text-gray-500">Tasks</div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-medium text-purple-600">
-                      {entry.avgQuality.toFixed(0)}%
+                      {entry.avgQuality?.toFixed(0) || 0}%
                     </div>
                     <div className="text-xs text-gray-500">Quality</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm text-gray-600">{entry.totalShifts}</div>
-                    <div className="text-xs text-gray-500">Shifts</div>
+                    <div className="text-sm text-gray-600">{entry.totalHours?.toFixed(0) || 0}h</div>
+                    <div className="text-xs text-gray-500">Hours</div>
                   </div>
                 </div>
               ))}

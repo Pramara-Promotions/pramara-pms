@@ -99,11 +99,11 @@ export default function ProjectShell() {
     { label: "Overview", path: basePath },
     { label: "SKUs", path: `${basePath}/skus` },
     { label: "Board", path: `${basePath}/board` },
-    { label: "Execution", path: `${basePath}/execution` },
-    { label: "PreProd", path: `${basePath}/preprod` },
-    { label: "Compliance", path: `${basePath}/compliance` },
-    { label: "Planning", path: `${basePath}/planning` },
     { label: "Files", path: `${basePath}/files` },
+    { label: "Planning", path: `${basePath}/planning` },
+    { label: "Compliance", path: `${basePath}/compliance` },
+    { label: "Pre Production", path: `${basePath}/preprod` },
+    { label: "Execution", path: `${basePath}/execution` },
   ];
 
   return (

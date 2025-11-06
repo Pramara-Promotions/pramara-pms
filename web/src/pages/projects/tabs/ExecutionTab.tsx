@@ -5,9 +5,7 @@ import { Link } from '@tanstack/react-router';
 import { useProjectContext } from '../ProjectContext';
 
 export default function ExecutionTab() {
-  const project = useProjectContext() as any;
-  
-  if (!project) return <div className="text-sm text-gray-500">Loading project…</div>;
+  const project = useProjectContext();
   
   const projectId = project.id;
   

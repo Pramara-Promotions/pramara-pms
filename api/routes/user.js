@@ -2,20 +2,13 @@ const express = require('express')
 const router = express.Router()
 const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
-
-// Middleware to require authentication
-const requireAuth = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Authentication required' })
-  }
-  next()
-}
+const authGuard = require('../middleware/authGuard')
 
 /**
  * GET /api/user/preferences
  * Get user preferences including pinned items
  */
-router.get('/preferences', requireAuth, async (req, res) => {
+router.get('/preferences', authGuard, async (req, res) => {
   try {
     const userId = req.user.id
     
@@ -46,7 +39,7 @@ router.get('/preferences', requireAuth, async (req, res) => {
  * PUT /api/user/preferences
  * Update user preferences
  */
-router.put('/preferences', requireAuth, async (req, res) => {
+router.put('/preferences', authGuard, async (req, res) => {
   try {
     const userId = req.user.id
     const { pinnedItems, homeLayout, theme, notifications } = req.body
@@ -78,7 +71,7 @@ router.put('/preferences', requireAuth, async (req, res) => {
  * POST /api/user/preferences/pin
  * Add a pinned item
  */
-router.post('/preferences/pin', requireAuth, async (req, res) => {
+router.post('/preferences/pin', authGuard, async (req, res) => {
   try {
     const userId = req.user.id
     const { type, label, icon, link, query, projectId } = req.body
@@ -145,7 +138,7 @@ router.post('/preferences/pin', requireAuth, async (req, res) => {
  * DELETE /api/user/preferences/pin/:pinId
  * Remove a pinned item
  */
-router.delete('/preferences/pin/:pinId', requireAuth, async (req, res) => {
+router.delete('/preferences/pin/:pinId', authGuard, async (req, res) => {
   try {
     const userId = req.user.id
     const { pinId } = req.params
@@ -183,7 +176,7 @@ router.delete('/preferences/pin/:pinId', requireAuth, async (req, res) => {
  * PUT /api/user/preferences/reorder
  * Reorder pinned items
  */
-router.put('/preferences/reorder', requireAuth, async (req, res) => {
+router.put('/preferences/reorder', authGuard, async (req, res) => {
   try {
     const userId = req.user.id
     const { pinnedItems } = req.body

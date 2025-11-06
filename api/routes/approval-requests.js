@@ -7,6 +7,198 @@ const router = express.Router();
 
 router.use(requireAuth);
 
+// POST /api/approvals/reminders/auto-send - Auto-send due reminders
+// MUST be before /:id route to avoid treating "reminders" as an ID
+router.post('/reminders/auto-send', async (req, res) => {
+  try {
+    const { daysThreshold = 3 } = req.body;
+    
+    const threshold = new Date();
+    threshold.setDate(threshold.getDate() + parseInt(daysThreshold));
+    
+    // Find approvals due within threshold
+    const approvals = await prisma.approvalRequest.findMany({
+      where: {
+        status: 'pending',
+        dueDate: {
+          lte: threshold,
+          gte: new Date()
+        }
+      },
+      include: {
+        reminders: {
+          orderBy: { sentAt: 'desc' },
+          take: 1
+        }
+      }
+    });
+    
+    const remindersSent = [];
+    
+    for (const approval of approvals) {
+      // Check if reminder was sent in last 24 hours
+      const lastReminder = approval.reminders[0];
+      const daysSinceReminder = lastReminder
+        ? (new Date() - new Date(lastReminder.sentAt)) / (1000 * 60 * 60 * 24)
+        : 999;
+      
+      if (daysSinceReminder >= 1) {
+        const message = `Urgent: ${approval.title} is due on ${approval.dueDate.toLocaleDateString()}. Buffer: ${approval.bufferDays || 0} days.`;
+        
+        // Send via preferred channels
+        if (approval.contactEmail) {
+          await prisma.approvalReminder.create({
+            data: {
+              approvalRequestId: approval.id,
+              channel: 'email',
+              recipientEmail: approval.contactEmail,
+              message,
+              sentAt: new Date(),
+              sentBy: 'system'
+            }
+          });
+          remindersSent.push({ id: approval.id, channel: 'email' });
+        }
+        
+        if (approval.contactPhone) {
+          await prisma.approvalReminder.create({
+            data: {
+              approvalRequestId: approval.id,
+              channel: 'whatsapp',
+              recipientPhone: approval.contactPhone,
+              message,
+              sentAt: new Date(),
+              sentBy: 'system'
+            }
+          });
+          remindersSent.push({ id: approval.id, channel: 'whatsapp' });
+        }
+      }
+    }
+    
+    res.json({
+      message: `Sent ${remindersSent.length} reminders`,
+      reminders: remindersSent
+    });
+  } catch (error) {
+    console.error('Error auto-sending reminders:', error);
+    res.status(500).json({ error: 'Failed to auto-send reminders' });
+  }
+});
+
+// GET /api/approvals/analytics/buffer-status - Buffer monitoring
+router.get('/analytics/buffer-status', async (req, res) => {
+  try {
+    const { projectId } = req.query;
+    
+    const where = { status: 'pending' };
+    if (projectId) where.projectId = projectId;
+    
+    const approvals = await prisma.approvalRequest.findMany({
+      where,
+      include: {
+        Project: {
+          select: { projectCode: true, projectName: true }
+        }
+      }
+    });
+    
+    const now = new Date();
+    
+    const bufferAnalysis = approvals.map(approval => {
+      const bufferDays = approval.expectedDate 
+        ? Math.ceil((new Date(approval.expectedDate) - now) / (1000 * 60 * 60 * 24))
+        : null;
+      
+      const dueDays = approval.dueDate
+        ? Math.ceil((new Date(approval.dueDate) - now) / (1000 * 60 * 60 * 24))
+        : null;
+      
+      let status = 'healthy';
+      if (dueDays !== null && dueDays < 0) status = 'overdue';
+      else if (bufferDays !== null && bufferDays < 0) status = 'critical';
+      else if (bufferDays !== null && bufferDays < 3) status = 'at-risk';
+      else if (bufferDays !== null && bufferDays < 7) status = 'warning';
+      
+      return {
+        id: approval.id,
+        title: approval.title,
+        approvalType: approval.approvalType,
+        project: approval.Project,
+        bufferDays,
+        dueDays,
+        status
+      };
+    });
+    
+    // Group by status
+    const summary = {
+      total: bufferAnalysis.length,
+      overdue: bufferAnalysis.filter(a => a.status === 'overdue').length,
+      critical: bufferAnalysis.filter(a => a.status === 'critical').length,
+      atRisk: bufferAnalysis.filter(a => a.status === 'at-risk').length,
+      warning: bufferAnalysis.filter(a => a.status === 'warning').length,
+      healthy: bufferAnalysis.filter(a => a.status === 'healthy').length
+    };
+    
+    res.json({ summary, approvals: bufferAnalysis });
+  } catch (error) {
+    console.error('Error analyzing buffer status:', error);
+    res.status(500).json({ error: 'Failed to analyze buffer status' });
+  }
+});
+
+// GET /api/approvals/dashboard/summary - Dashboard metrics
+router.get('/dashboard/summary', async (req, res) => {
+  try {
+    const totalApprovals = await prisma.approvalRequest.count();
+    
+    const byStatus = await prisma.approvalRequest.groupBy({
+      by: ['status'],
+      _count: true
+    });
+    
+    const byType = await prisma.approvalRequest.groupBy({
+      by: ['approvalType'],
+      _count: true,
+      where: { status: 'pending' }
+    });
+    
+    const overdueCount = await prisma.approvalRequest.count({
+      where: {
+        status: 'pending',
+        dueDate: { lt: new Date() }
+      }
+    });
+    
+    const avgResponseTime = await prisma.approvalRequest.aggregate({
+      _avg: {
+        bufferDays: true
+      },
+      where: {
+        status: { in: ['approved', 'rejected'] }
+      }
+    });
+    
+    res.json({
+      totalApprovals,
+      byStatus: byStatus.reduce((acc, item) => {
+        acc[item.status] = item._count;
+        return acc;
+      }, {}),
+      byType: byType.reduce((acc, item) => {
+        acc[item.approvalType] = item._count;
+        return acc;
+      }, {}),
+      overdueCount,
+      avgResponseDays: avgResponseTime._avg.bufferDays?.toFixed(1) || 0
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard' });
+  }
+});
+
 // GET /api/approvals - List approval requests
 router.get('/', async (req, res) => {
   try {
@@ -379,197 +571,6 @@ router.post('/:id/reminders', async (req, res) => {
   } catch (error) {
     console.error('Error sending reminder:', error);
     res.status(500).json({ error: 'Failed to send reminder' });
-  }
-});
-
-// POST /api/approvals/reminders/auto-send - Auto-send due reminders
-router.post('/reminders/auto-send', async (req, res) => {
-  try {
-    const { daysThreshold = 3 } = req.body;
-    
-    const threshold = new Date();
-    threshold.setDate(threshold.getDate() + parseInt(daysThreshold));
-    
-    // Find approvals due within threshold
-    const approvals = await prisma.approvalRequest.findMany({
-      where: {
-        status: 'pending',
-        dueDate: {
-          lte: threshold,
-          gte: new Date()
-        }
-      },
-      include: {
-        reminders: {
-          orderBy: { sentAt: 'desc' },
-          take: 1
-        }
-      }
-    });
-    
-    const remindersSent = [];
-    
-    for (const approval of approvals) {
-      // Check if reminder was sent in last 24 hours
-      const lastReminder = approval.reminders[0];
-      const daysSinceReminder = lastReminder
-        ? (new Date() - new Date(lastReminder.sentAt)) / (1000 * 60 * 60 * 24)
-        : 999;
-      
-      if (daysSinceReminder >= 1) {
-        const message = `Urgent: ${approval.title} is due on ${approval.dueDate.toLocaleDateString()}. Buffer: ${approval.bufferDays || 0} days.`;
-        
-        // Send via preferred channels
-        if (approval.contactEmail) {
-          await prisma.approvalReminder.create({
-            data: {
-              approvalRequestId: approval.id,
-              channel: 'email',
-              recipientEmail: approval.contactEmail,
-              message,
-              sentAt: new Date(),
-              sentBy: 'system'
-            }
-          });
-          remindersSent.push({ id: approval.id, channel: 'email' });
-        }
-        
-        if (approval.contactPhone) {
-          await prisma.approvalReminder.create({
-            data: {
-              approvalRequestId: approval.id,
-              channel: 'whatsapp',
-              recipientPhone: approval.contactPhone,
-              message,
-              sentAt: new Date(),
-              sentBy: 'system'
-            }
-          });
-          remindersSent.push({ id: approval.id, channel: 'whatsapp' });
-        }
-      }
-    }
-    
-    res.json({
-      message: `Sent ${remindersSent.length} reminders`,
-      reminders: remindersSent
-    });
-  } catch (error) {
-    console.error('Error auto-sending reminders:', error);
-    res.status(500).json({ error: 'Failed to auto-send reminders' });
-  }
-});
-
-// GET /api/approvals/analytics/buffer-status - Buffer monitoring
-router.get('/analytics/buffer-status', async (req, res) => {
-  try {
-    const { projectId } = req.query;
-    
-    const where = { status: 'pending' };
-    if (projectId) where.projectId = projectId;
-    
-    const approvals = await prisma.approvalRequest.findMany({
-      where,
-      include: {
-        Project: {
-          select: { projectCode: true, projectName: true }
-        }
-      }
-    });
-    
-    const now = new Date();
-    
-    const bufferAnalysis = approvals.map(approval => {
-      const bufferDays = approval.expectedDate 
-        ? Math.ceil((new Date(approval.expectedDate) - now) / (1000 * 60 * 60 * 24))
-        : null;
-      
-      const dueDays = approval.dueDate
-        ? Math.ceil((new Date(approval.dueDate) - now) / (1000 * 60 * 60 * 24))
-        : null;
-      
-      let status = 'healthy';
-      if (dueDays !== null && dueDays < 0) status = 'overdue';
-      else if (bufferDays !== null && bufferDays < 0) status = 'critical';
-      else if (bufferDays !== null && bufferDays < 3) status = 'at-risk';
-      else if (bufferDays !== null && bufferDays < 7) status = 'warning';
-      
-      return {
-        id: approval.id,
-        title: approval.title,
-        approvalType: approval.approvalType,
-        project: approval.Project,
-        bufferDays,
-        dueDays,
-        status
-      };
-    });
-    
-    // Group by status
-    const summary = {
-      total: bufferAnalysis.length,
-      overdue: bufferAnalysis.filter(a => a.status === 'overdue').length,
-      critical: bufferAnalysis.filter(a => a.status === 'critical').length,
-      atRisk: bufferAnalysis.filter(a => a.status === 'at-risk').length,
-      warning: bufferAnalysis.filter(a => a.status === 'warning').length,
-      healthy: bufferAnalysis.filter(a => a.status === 'healthy').length
-    };
-    
-    res.json({ summary, approvals: bufferAnalysis });
-  } catch (error) {
-    console.error('Error analyzing buffer status:', error);
-    res.status(500).json({ error: 'Failed to analyze buffer status' });
-  }
-});
-
-// GET /api/approvals/dashboard/summary - Dashboard metrics
-router.get('/dashboard/summary', async (req, res) => {
-  try {
-    const totalApprovals = await prisma.approvalRequest.count();
-    
-    const byStatus = await prisma.approvalRequest.groupBy({
-      by: ['status'],
-      _count: true
-    });
-    
-    const byType = await prisma.approvalRequest.groupBy({
-      by: ['approvalType'],
-      _count: true,
-      where: { status: 'pending' }
-    });
-    
-    const overdueCount = await prisma.approvalRequest.count({
-      where: {
-        status: 'pending',
-        dueDate: { lt: new Date() }
-      }
-    });
-    
-    const avgResponseTime = await prisma.approvalRequest.aggregate({
-      _avg: {
-        bufferDays: true
-      },
-      where: {
-        status: { in: ['approved', 'rejected'] }
-      }
-    });
-    
-    res.json({
-      totalApprovals,
-      byStatus: byStatus.reduce((acc, item) => {
-        acc[item.status] = item._count;
-        return acc;
-      }, {}),
-      byType: byType.reduce((acc, item) => {
-        acc[item.approvalType] = item._count;
-        return acc;
-      }, {}),
-      overdueCount,
-      avgResponseDays: avgResponseTime._avg.bufferDays?.toFixed(1) || 0
-    });
-  } catch (error) {
-    console.error('Error fetching dashboard:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard' });
   }
 });
 

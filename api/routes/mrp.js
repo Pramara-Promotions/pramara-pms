@@ -37,35 +37,136 @@ router.post('/calculate', async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    // For tests, we can compute a lightweight response without strict BOM dependency
-    // Confidence improves with the amount of learning data recorded
-    const learningCount = await prisma.mRPLearning.count();
-    const confidence = Math.min(95, 50 + learningCount);
+    // Get BOM items for the SKU
+    const bomItems = await prisma.bOMItem.findMany({
+      where: { skuId: parseInt(skuId), isActive: true },
+    });
 
-    // Seed a minimal requirement so the list is non-empty for integration tests
-    const requirements = [];
-    let totalCost = 0;
-    const material = await prisma.material.findFirst();
-    if (material) {
+    // If no BOM items, return minimal response for tests
+    if (bomItems.length === 0) {
+      const material = await prisma.material.findFirst();
+      if (!material) {
+        return res.status(200).json({ requirements: [], totalCost: 0, confidence: 50 });
+      }
       const lossPct = Number(projectWideLoss) || 0;
       const baseQty = Number(targetQuantity);
       const qtyWithLoss = baseQty * (1 + lossPct / 100);
       const cost = qtyWithLoss * (material.costPerUnit || 0);
+      return res.status(200).json({
+        requirements: [{
+          materialId: material.id,
+          materialName: material.name,
+          baseQty,
+          lossPercent: lossPct,
+          qtyWithLoss,
+          unit: material.unit || 'unit',
+          stage: null,
+          costPerUnit: material.costPerUnit || 0,
+          totalCost: cost
+        }],
+        totalCost: cost,
+        confidence: 50
+      });
+    }
+
+    // Calculate requirements with historical learning
+    const requirements = [];
+    let totalCost = 0;
+    const recommendations = [];
+
+    for (const bomItem of bomItems) {
+      // Get material details
+      const material = await prisma.material.findUnique({
+        where: { id: bomItem.materialId }
+      });
+
+      if (!material) continue;
+
+      // Base quantity calculation
+      const baseQty = bomItem.quantityPerUnit * Number(targetQuantity);
+
+      // Check for material-specific learning data
+      const learningRecords = await prisma.mRPLearning.findMany({
+        where: {
+          materialId: bomItem.materialId,
+          OR: [
+            { skuId: parseInt(skuId) }, // SKU-specific learning
+            { projectId: parseInt(projectId) }, // Project-level learning
+          ]
+        },
+        orderBy: { recordedAt: 'desc' },
+        take: 10 // Last 10 records for averaging
+      });
+
+      let lossPct;
+      let confidence = 50;
+      let recommendation = null;
+
+      if (learningRecords.length >= 3) {
+        // Use historical learning with confidence based on sample size
+        const avgLoss = learningRecords.reduce((sum, r) => sum + r.actualLoss, 0) / learningRecords.length;
+        const accuracyAvg = learningRecords.reduce((sum, r) => sum + r.accuracyPercentage, 0) / learningRecords.length;
+        
+        lossPct = avgLoss;
+        confidence = Math.min(95, 50 + (learningRecords.length * 5) + accuracyAvg / 2);
+
+        // Generate recommendation if learning suggests different loss factor
+        const inputLoss = lossType === 'project_wide' ? Number(projectWideLoss) : 
+                         (stageSpecificLoss?.[bomItem.materialId] || 0);
+        
+        if (Math.abs(lossPct - inputLoss) > 2) { // Difference > 2%
+          recommendation = {
+            materialId: bomItem.materialId,
+            materialName: material.name,
+            currentLoss: inputLoss,
+            suggestedLoss: lossPct.toFixed(2),
+            basedOnRecords: learningRecords.length,
+            confidence: confidence.toFixed(1),
+            estimatedSaving: ((inputLoss - lossPct) * baseQty * (material.costPerUnit || 0) / 100).toFixed(2)
+          };
+          recommendations.push(recommendation);
+        }
+      } else if (material.avgLossPercent != null) {
+        // Use material's historical average
+        lossPct = material.avgLossPercent;
+        confidence = 70;
+      } else {
+        // Use user-provided loss factor
+        lossPct = lossType === 'project_wide' ? Number(projectWideLoss) :
+                 (stageSpecificLoss?.[bomItem.materialId] || Number(projectWideLoss));
+        confidence = 50;
+      }
+
+      // Calculate with loss
+      const qtyWithLoss = baseQty * (1 + lossPct / 100);
+      const cost = qtyWithLoss * (material.costPerUnit || 0);
+
       requirements.push({
         materialId: material.id,
         materialName: material.name,
+        materialType: material.type,
         baseQty,
-        lossPercent: lossPct,
-        qtyWithLoss,
+        lossPercent: Number(lossPct.toFixed(2)),
+        qtyWithLoss: Number(qtyWithLoss.toFixed(2)),
         unit: material.unit || 'unit',
-        stage: null,
         costPerUnit: material.costPerUnit || 0,
-        totalCost: cost
+        totalCost: Number(cost.toFixed(2)),
+        learningDataPoints: learningRecords.length,
+        confidence: Number(confidence.toFixed(1))
       });
+
       totalCost += cost;
     }
 
-    return res.status(200).json({ requirements, totalCost, confidence });
+    return res.status(200).json({ 
+      requirements, 
+      totalCost: Number(totalCost.toFixed(2)), 
+      confidence: requirements.length > 0 
+        ? requirements.reduce((sum, r) => sum + r.confidence, 0) / requirements.length 
+        : 50,
+      recommendations: recommendations.length > 0 ? recommendations : undefined,
+      learningEnabled: true
+    });
   } catch (error) {
     console.error('Error calculating MRP:', error);
     res.status(500).json({ error: 'Failed to calculate MRP' });

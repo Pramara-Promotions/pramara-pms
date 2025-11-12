@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import { createApproval } from "../../../lib/services/approvals";
 import { useProjectDocuments } from "../hooks/useProjectDocuments";
 import { useStations } from "../hooks/useStations";
@@ -38,9 +38,9 @@ export default function FilesTab() {
     priority: 'medium',
     notes: ''
   });
-  
+
   // Enhanced delete: ask if user wants to delete all versions or just this one
-  const [deleteMode, setDeleteMode] = useState<'single'|'all'>('single');
+  const [deleteMode, setDeleteMode] = useState<'single' | 'all'>('single');
   const [deleteHasChain, setDeleteHasChain] = useState(false);
   async function confirmDelete(doc) {
     setDeleteDoc(doc);
@@ -54,7 +54,7 @@ export default function FilesTab() {
           const revs = await res.json();
           hasChain = Array.isArray(revs) && revs.length > 1;
         }
-      } catch {}
+      } catch { }
     }
     setDeleteHasChain(hasChain);
     setShowDeleteModal(true);
@@ -116,7 +116,7 @@ export default function FilesTab() {
             const js = await res2.json();
             setHistory(js);
           }
-        } catch {}
+        } catch { }
       }
     } catch (err) {
       console.error('Error activating:', err);
@@ -134,7 +134,7 @@ export default function FilesTab() {
           const js = await res.json();
           setComplianceDocs(Array.isArray(js) ? js : []);
         }
-      } catch {}
+      } catch { }
     })();
   }, [showComplianceDocs, projectId]);
 
@@ -257,7 +257,7 @@ export default function FilesTab() {
         const blob = it.getAsFile();
         if (blob) {
           if (blob.size > MAX_BYTES) {
-            setUploadError(`Image too large. Max ${Math.floor(MAX_BYTES / (1024*1024))}MB.`);
+            setUploadError(`Image too large. Max ${Math.floor(MAX_BYTES / (1024 * 1024))}MB.`);
             return;
           }
           const name = `pasted-${Date.now()}${extForType(blob.type)}`;
@@ -291,7 +291,7 @@ export default function FilesTab() {
     const f = e.dataTransfer?.files?.[0];
     if (!f) return;
     if (f.size > MAX_BYTES) {
-      setUploadError(`File too large. Max ${Math.floor(MAX_BYTES / (1024*1024))}MB.`);
+      setUploadError(`File too large. Max ${Math.floor(MAX_BYTES / (1024 * 1024))}MB.`);
       return;
     }
     setSelectedFile(f);
@@ -378,7 +378,7 @@ export default function FilesTab() {
       window.addEventListener('keydown', onKey);
       return () => window.removeEventListener('keydown', onKey);
     }, [onClose]);
-    
+
     // Fetch the latest version from the revision chain to calculate the next version number
     const [nextVersion, setNextVersion] = React.useState(doc.version + 1);
     React.useEffect(() => {
@@ -392,10 +392,10 @@ export default function FilesTab() {
               : doc.version;
             setNextVersion(maxVer + 1);
           }
-        } catch {}
+        } catch { }
       })();
     }, [doc.id, doc.version]);
-    
+
     const [form, setForm] = useState({
       kind: doc.kind,
       title: doc.title,
@@ -407,7 +407,7 @@ export default function FilesTab() {
       owner: (doc.tags && (doc.tags.owner || '')) || '',
       rolesCsv: (doc.tags && Array.isArray(doc.tags.roles) ? doc.tags.roles.join(', ') : '')
     });
-    
+
     // Update form.version whenever nextVersion changes
     React.useEffect(() => {
       setForm(f => ({ ...f, version: nextVersion }));
@@ -418,7 +418,7 @@ export default function FilesTab() {
     const [editUploading, setEditUploading] = useState(false);
     const [editError, setEditError] = useState<string | null>(null);
     const [editDragOver, setEditDragOver] = useState(false);
-    
+
     function clearEditSelection() {
       setEditSelectedFile(null);
       if (editPreviewUrl) URL.revokeObjectURL(editPreviewUrl);
@@ -532,14 +532,14 @@ export default function FilesTab() {
           .map(s => s.trim())
           .filter(Boolean);
         payload.tags = { ...(doc.tags || {}), owner: form.owner || null, roles };
-        
+
         // If a file is selected, upload it first
         if (editSelectedFile) {
           const presignRes = await fetch(`/api/projects/${projectId}/documents/presign`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-              filename: editSelectedFile.name, 
+            body: JSON.stringify({
+              filename: editSelectedFile.name,
               contentType: editSelectedFile.type,
               sizeBytes: editSelectedFile.size
             }),
@@ -550,7 +550,7 @@ export default function FilesTab() {
             throw new Error(errorText || "Presign failed");
           }
           const preJson = await presignRes.json();
-          
+
           const putRes = await fetch(preJson.putUrl, {
             method: "PUT",
             headers: { "Content-Type": editSelectedFile.type || "application/octet-stream" },
@@ -577,7 +577,7 @@ export default function FilesTab() {
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-        <div 
+        <div
           className="bg-white rounded-lg p-6 w-full max-w-lg shadow-lg max-h-[90vh] overflow-y-auto"
           onPaste={handleEditPaste}
         >
@@ -641,8 +641,8 @@ export default function FilesTab() {
             </div>
           </div>
           <div className="flex gap-2 mt-4">
-            <button 
-              className="bg-indigo-600 text-white px-4 py-1 rounded disabled:bg-gray-400" 
+            <button
+              className="bg-indigo-600 text-white px-4 py-1 rounded disabled:bg-gray-400"
               onClick={handleSaveRevision}
               disabled={editUploading}
             >
@@ -666,7 +666,7 @@ export default function FilesTab() {
     }, [onClose]);
     // Add per-version delete button
     const [pendingDelete, setPendingDelete] = React.useState(null);
-    const [deleteMode, setDeleteMode] = React.useState<'single'|'all'>('single');
+    const [deleteMode, setDeleteMode] = React.useState<'single' | 'all'>('single');
     const [deleteHasChain, setDeleteHasChain] = React.useState(false);
     async function confirmDeleteVersion(versionDoc) {
       setPendingDelete(versionDoc);
@@ -680,7 +680,7 @@ export default function FilesTab() {
             const revs = await res.json();
             hasChain = Array.isArray(revs) && revs.length > 1;
           }
-        } catch {}
+        } catch { }
       }
       setDeleteHasChain(hasChain);
     }
@@ -705,8 +705,8 @@ export default function FilesTab() {
           ) : (
             <div className="space-y-3 mb-4">
               {history.map(r => (
-                <div 
-                  key={r.id} 
+                <div
+                  key={r.id}
                   className={`border rounded-lg p-4 ${r.active ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}
                 >
                   <div className="flex items-start justify-between mb-2">
@@ -742,9 +742,9 @@ export default function FilesTab() {
                       {r.referenceUrl && (
                         <div className="text-sm mt-2">
                           <span className="font-medium text-gray-700">Reference URL:</span>
-                          <a 
-                            href={r.referenceUrl} 
-                            target="_blank" 
+                          <a
+                            href={r.referenceUrl}
+                            target="_blank"
                             rel="noopener noreferrer"
                             className="text-indigo-600 hover:underline ml-1"
                           >
@@ -761,7 +761,7 @@ export default function FilesTab() {
                             const r2 = await fetch(`/api/documents/${r.id}/url`, { credentials: 'include' });
                             const js2 = await r2.json();
                             if (r2.ok && js2?.url) window.open(js2.url, '_blank', 'noopener');
-                          } catch {}
+                          } catch { }
                         }}
                       >
                         View File
@@ -773,8 +773,8 @@ export default function FilesTab() {
                         Share
                       </button>
                       {!r.active && (
-                        <button 
-                          className="px-3 py-1 border border-green-600 text-green-600 text-sm rounded hover:bg-green-50" 
+                        <button
+                          className="px-3 py-1 border border-green-600 text-green-600 text-sm rounded hover:bg-green-50"
                           onClick={() => onActivate(r.id)}
                         >
                           Activate
@@ -828,23 +828,23 @@ export default function FilesTab() {
             <div className="mb-4">
               <label className="block font-medium mb-1">Delete options:</label>
               <label className="flex items-center gap-2 mb-1">
-                <input type="radio" checked={mode==='single'} onChange={()=>setMode('single')} /> Delete only this version
+                <input type="radio" checked={mode === 'single'} onChange={() => setMode('single')} /> Delete only this version
               </label>
               <label className="flex items-center gap-2">
-                <input type="radio" checked={mode==='all'} onChange={()=>setMode('all')} /> Delete all versions in this chain
+                <input type="radio" checked={mode === 'all'} onChange={() => setMode('all')} /> Delete all versions in this chain
               </label>
             </div>
           )}
           <p className="text-sm text-red-600 mb-4">This action cannot be undone.</p>
           <div className="flex gap-2 justify-end">
-            <button 
-              className="px-4 py-2 border rounded hover:bg-gray-50" 
+            <button
+              className="px-4 py-2 border rounded hover:bg-gray-50"
               onClick={onClose}
             >
               Cancel
             </button>
-            <button 
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700" 
+            <button
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
               onClick={onConfirm}
             >
               Delete
@@ -862,7 +862,7 @@ export default function FilesTab() {
       if (!Array.isArray(targets) || targets.length === 0) return [];
       const actives = targets.filter(t => t.active);
       if (actives.length > 0) return actives.map(t => t.id);
-      const max = targets.reduce((acc, t) => (Number(t.version||0) > Number(acc.version||0) ? t : acc), targets[0]);
+      const max = targets.reduce((acc, t) => (Number(t.version || 0) > Number(acc.version || 0) ? t : acc), targets[0]);
       return max ? [max.id] : [];
     }, [targets]);
     const [selected, setSelected] = useState(initialSelected);
@@ -877,7 +877,7 @@ export default function FilesTab() {
       window.addEventListener('keydown', onKey);
       return () => window.removeEventListener('keydown', onKey);
     }, [onClose]);
-    
+
     function toggle(id) {
       setSelected(sel => sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id]);
     }
@@ -889,7 +889,7 @@ export default function FilesTab() {
         for (const id of selected) {
           const target = targets.find(t => t.id === id);
           if (!target) continue;
-          
+
           // Fetch the shareable URL for this document/version
           const res = await fetch(`/api/documents/${id}/url`, { credentials: 'include' });
           if (res.ok) {
@@ -923,7 +923,7 @@ export default function FilesTab() {
       <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
         <div className="bg-white rounded-lg p-6 w-full max-w-lg shadow-lg max-h-[90vh] overflow-y-auto">
           <h2 className="text-lg font-bold mb-2">Share Document{targets.length > 1 ? 's' : ''}</h2>
-          
+
           {shareLinks.length === 0 ? (
             <>
               <div className="mb-4">
@@ -939,18 +939,18 @@ export default function FilesTab() {
               </div>
               <div className="mb-4">
                 <label className="block font-medium mb-1">Reason for sharing (optional):</label>
-                <textarea 
-                  className="w-full border rounded px-3 py-2 text-sm" 
+                <textarea
+                  className="w-full border rounded px-3 py-2 text-sm"
                   rows={3}
-                  value={reason} 
-                  onChange={e => setReason(e.target.value)} 
-                  placeholder="Enter reason for sharing (e.g., 'Client review', 'Team feedback')" 
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  placeholder="Enter reason for sharing (e.g., 'Client review', 'Team feedback')"
                 />
               </div>
               <div className="flex gap-2 justify-end">
                 <button className="px-4 py-2 border rounded hover:bg-gray-50" onClick={onClose}>Cancel</button>
-                <button 
-                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50" 
+                <button
+                  className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
                   onClick={handleShare}
                   disabled={selected.length === 0 || generating}
                 >
@@ -972,13 +972,13 @@ export default function FilesTab() {
                     <div key={link.id} className="border rounded p-3 bg-gray-50">
                       <div className="font-medium text-sm mb-1">{link.title}</div>
                       <div className="flex gap-2 items-center">
-                        <input 
-                          type="text" 
-                          className="flex-1 text-xs border rounded px-2 py-1 bg-white" 
-                          value={link.url} 
-                          readOnly 
+                        <input
+                          type="text"
+                          className="flex-1 text-xs border rounded px-2 py-1 bg-white"
+                          value={link.url}
+                          readOnly
                         />
-                        <button 
+                        <button
                           className="px-3 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700"
                           onClick={() => copyToClipboard(link.url)}
                         >
@@ -1001,14 +1001,14 @@ export default function FilesTab() {
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-sm font-medium">Files</div>
-          <button onClick={() => setShowAddForm(!showAddForm)} className="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-sm hover:bg-indigo-700">
-            {showAddForm ? "Cancel" : "Add Document"}
-          </button>
-        </div>
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm font-medium">Files</div>
+        <button onClick={() => setShowAddForm(!showAddForm)} className="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-sm hover:bg-indigo-700">
+          {showAddForm ? "Cancel" : "Add Document"}
+        </button>
+      </div>
 
-        {showAddForm && (
+      {showAddForm && (
         <form onSubmit={handleSubmit} onPaste={handlePaste} className="mb-4 p-4 border rounded-lg space-y-4">
           {/* File Upload Section */}
           <div
@@ -1041,7 +1041,7 @@ export default function FilesTab() {
                 <img src={previewUrl} alt="preview" className="h-20 w-20 object-cover rounded border" />
                 <div className="text-xs text-gray-600 dark:text-gray-300">
                   <div className="font-medium">{selectedFile.name}</div>
-                  <div>{(selectedFile.size/1024).toFixed(1)} KB • {selectedFile.type || 'file'}</div>
+                  <div>{(selectedFile.size / 1024).toFixed(1)} KB • {selectedFile.type || 'file'}</div>
                   <button type="button" onClick={clearSelection} className="mt-2 px-2 py-1 border rounded">Remove</button>
                 </div>
               </div>
@@ -1111,7 +1111,7 @@ export default function FilesTab() {
                             const r = await fetch(`/api/documents/${d.id}/url`, { credentials: 'include' });
                             const js = await r.json();
                             if (r.ok && js?.url) window.open(js.url, '_blank', 'noopener');
-                          } catch {}
+                          } catch { }
                         }}
                       >
                         {d.title}
@@ -1134,8 +1134,8 @@ export default function FilesTab() {
                     <button className="px-2 py-1 border rounded" onClick={() => openEdit(d)}>Edit</button>
                     <button className="px-2 py-1 border rounded" onClick={() => openHistory(d)}>History</button>
                     <button className="px-2 py-1 border rounded text-blue-600 hover:bg-blue-50" onClick={() => openApproval(d)}>Request Approval</button>
-                    <button 
-                      className="px-2 py-1 border rounded text-red-600 hover:bg-red-50" 
+                    <button
+                      className="px-2 py-1 border rounded text-red-600 hover:bg-red-50"
                       onClick={() => confirmDelete(d)}
                     >
                       Delete
@@ -1148,7 +1148,7 @@ export default function FilesTab() {
                           if (res.ok) {
                             const revs = await res.json();
                             // Sort by version desc so the latest is first
-                            const sorted = Array.isArray(revs) ? [...revs].sort((a,b) => (b.version||0)-(a.version||0)) : [d];
+                            const sorted = Array.isArray(revs) ? [...revs].sort((a, b) => (b.version || 0) - (a.version || 0)) : [d];
                             openShareModal(sorted);
                           } else {
                             openShareModal([d]);
@@ -1169,14 +1169,14 @@ export default function FilesTab() {
       </div>
       <div className="mt-6">
         <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={showAggregated} onChange={(e)=>setShowAggregated(e.target.checked)} />
+          <input type="checkbox" checked={showAggregated} onChange={(e) => setShowAggregated(e.target.checked)} />
           <span className="text-sm font-medium">Show All Files (Aggregated from all modules)</span>
         </label>
         {showAggregated && (
           <div className="mt-3 border rounded-lg dark:border-neutral-700">
             <div className="px-3 py-2 bg-gray-50 dark:bg-neutral-800 border-b dark:border-neutral-700 flex items-center justify-between">
               <span className="font-medium text-sm">Aggregated Files ({aggregatedFiles.length})</span>
-              <select 
+              <select
                 className="text-xs border rounded px-2 py-1 dark:bg-neutral-900 dark:border-neutral-600"
                 value={moduleFilter}
                 onChange={(e) => setModuleFilter(e.target.value)}
@@ -1207,13 +1207,12 @@ export default function FilesTab() {
                     {aggregatedFiles.map((file) => (
                       <tr key={file.id} className="border-t dark:border-neutral-700 hover:bg-gray-50 dark:hover:bg-neutral-800">
                         <td className="px-3 py-2">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                            file.module === 'documents' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
-                            file.module === 'compliance' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                            file.module === 'preproduction' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
-                            file.module === 'planning' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' :
-                            'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300'
-                          }`}>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${file.module === 'documents' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                              file.module === 'compliance' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                                file.module === 'preproduction' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
+                                  file.module === 'planning' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' :
+                                    'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300'
+                            }`}>
                             {file.module}
                           </span>
                         </td>
@@ -1236,10 +1235,10 @@ export default function FilesTab() {
                         </td>
                         <td className="px-3 py-2 space-x-2">
                           {file.url ? (
-                            <a 
-                              href={file.url} 
-                              target="_blank" 
-                              rel="noreferrer" 
+                            <a
+                              href={file.url}
+                              target="_blank"
+                              rel="noreferrer"
                               className="px-2 py-1 border rounded text-xs hover:bg-gray-100 dark:hover:bg-neutral-700"
                             >
                               View
@@ -1252,7 +1251,7 @@ export default function FilesTab() {
                                   const r = await fetch(`/api/documents/${file.sourceId}/url`, { credentials: 'include' });
                                   const js = await r.json();
                                   if (r.ok && js?.url) window.open(js.url, '_blank', 'noopener');
-                                } catch {}
+                                } catch { }
                               }}
                             >
                               View
@@ -1283,7 +1282,7 @@ export default function FilesTab() {
       </div>
       <div className="mt-6">
         <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={showComplianceDocs} onChange={(e)=>setShowComplianceDocs(e.target.checked)} />
+          <input type="checkbox" checked={showComplianceDocs} onChange={(e) => setShowComplianceDocs(e.target.checked)} />
           <span className="text-sm">Show Compliance Documents for this project</span>
         </label>
         {showComplianceDocs && (
@@ -1345,9 +1344,9 @@ export default function FilesTab() {
         />
       )}
       {showShareModal && (
-        <ShareModal 
-          targets={shareTargets} 
-          onClose={closeShareModal} 
+        <ShareModal
+          targets={shareTargets}
+          onClose={closeShareModal}
         />
       )}
       {showApprovalModal && approvalDoc && (
@@ -1357,29 +1356,29 @@ export default function FilesTab() {
             <div className="space-y-3">
               <div>
                 <label className="block text-sm text-gray-600 mb-1">Title</label>
-                <input className="w-full border rounded px-3 py-2" value={approvalForm.title} onChange={(e)=>setApprovalForm({...approvalForm, title: e.target.value})} />
+                <input className="w-full border rounded px-3 py-2" value={approvalForm.title} onChange={(e) => setApprovalForm({ ...approvalForm, title: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Approver Name</label>
-                  <input className="w-full border rounded px-3 py-2" value={approvalForm.contactPerson} onChange={(e)=>setApprovalForm({...approvalForm, contactPerson: e.target.value})} />
+                  <input className="w-full border rounded px-3 py-2" value={approvalForm.contactPerson} onChange={(e) => setApprovalForm({ ...approvalForm, contactPerson: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Approver Email</label>
-                  <input type="email" className="w-full border rounded px-3 py-2" value={approvalForm.contactEmail} onChange={(e)=>setApprovalForm({...approvalForm, contactEmail: e.target.value})} />
+                  <input type="email" className="w-full border rounded px-3 py-2" value={approvalForm.contactEmail} onChange={(e) => setApprovalForm({ ...approvalForm, contactEmail: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Due Date</label>
-                  <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.dueDate} onChange={(e)=>setApprovalForm({...approvalForm, dueDate: e.target.value})} />
+                  <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.dueDate} onChange={(e) => setApprovalForm({ ...approvalForm, dueDate: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-600 mb-1">Expected Date</label>
-                  <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.expectedDate} onChange={(e)=>setApprovalForm({...approvalForm, expectedDate: e.target.value})} />
+                  <input type="date" className="w-full border rounded px-3 py-2" value={approvalForm.expectedDate} onChange={(e) => setApprovalForm({ ...approvalForm, expectedDate: e.target.value })} />
                 </div>
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">Priority</label>
-                <select className="w-full border rounded px-3 py-2" value={approvalForm.priority} onChange={(e)=>setApprovalForm({...approvalForm, priority: e.target.value as any})}>
+                <select className="w-full border rounded px-3 py-2" value={approvalForm.priority} onChange={(e) => setApprovalForm({ ...approvalForm, priority: e.target.value as any })}>
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
@@ -1387,12 +1386,12 @@ export default function FilesTab() {
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">Notes</label>
-                <textarea className="w-full border rounded px-3 py-2" rows={3} value={approvalForm.notes} onChange={(e)=>setApprovalForm({...approvalForm, notes: e.target.value})} />
+                <textarea className="w-full border rounded px-3 py-2" rows={3} value={approvalForm.notes} onChange={(e) => setApprovalForm({ ...approvalForm, notes: e.target.value })} />
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button className="px-4 py-2 border rounded" onClick={()=>setShowApprovalModal(false)}>Cancel</button>
-              <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={async ()=>{
+              <button className="px-4 py-2 border rounded" onClick={() => setShowApprovalModal(false)}>Cancel</button>
+              <button className="px-4 py-2 bg-blue-600 text-white rounded" onClick={async () => {
                 try {
                   await createApproval({
                     projectId,

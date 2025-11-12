@@ -375,6 +375,7 @@ export default function BoardTab() {
                 key={column.id}
                 column={column}
                 tasks={getTasksBySection(column.section)}
+                projectId={project?.id}
                 onTaskClick={handleTaskClick}
                 onAddTask={() => handleAddTask(column.section)}
                 onColumnMenu={() => handleColumnMenu(column)}
@@ -386,7 +387,7 @@ export default function BoardTab() {
         <DragOverlay>
           {activeTask ? (
             <div className="rotate-3 scale-105">
-              <TaskCard task={activeTask} />
+              <TaskCard task={activeTask} projectId={project?.id} />
             </div>
           ) : null}
         </DragOverlay>

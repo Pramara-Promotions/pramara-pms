@@ -9,6 +9,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useToast } from "../../ui/toast/ToastProvider";
 import { useAuth } from "../../features/common/AuthProvider";
 import { http } from "../../lib/http";
+import ProjectAttentionCard from "../../components/projects/ProjectAttentionCard";
 import ProjectCard from "../../components/projects/ProjectCard";
 import { Plus, Search, Filter, Grid, List, TrendingUp, Users, CheckCircle, AlertTriangle, Clock, Star } from "lucide-react";
 
@@ -21,9 +22,9 @@ type ProjectHealth = {
   attentionItemCount: number;
 };
 
-type Project = { 
-  id: number; 
-  code: string; 
+type Project = {
+  id: number;
+  code: string;
   name: string;
   description?: string;
   cutoffDate?: string;
@@ -58,10 +59,8 @@ export default function ProjectsList() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [viewFilter, setViewFilter] = useState<'all' | 'assigned' | 'my-tasks'>(
-    isWorker ? 'my-tasks' : 'all'
-  );
-  
+  const [viewFilter, setViewFilter] = useState<'all' | 'assigned' | 'my-tasks'>('all');
+
   // Pinned projects stored in localStorage
   const [pinnedProjectIds, setPinnedProjectIds] = useState<number[]>(() => {
     try {
@@ -71,7 +70,7 @@ export default function ProjectsList() {
       return [];
     }
   });
-  
+
   // Recently viewed projects
   const [recentlyViewed, setRecentlyViewed] = useState<number[]>(() => {
     try {
@@ -94,10 +93,10 @@ export default function ProjectsList() {
       setLoading(true);
       setError(null);
       // For workers, only load projects with their assigned tasks
-      const endpoint = isWorker 
+      const endpoint = isWorker
         ? `/api/projects?includeHealth=true&assignedTo=${user?.id}`
         : `/api/projects?includeHealth=true`;
-      
+
       const res = await http(endpoint, { headers: { Accept: "application/json" } });
       console.log('[ProjectsList] API response status:', res.status);
       if (res.status === 401) {
@@ -111,6 +110,9 @@ export default function ProjectsList() {
         throw new Error("Got HTML instead of JSON (check VITE_API_URL / proxy)");
       const data = JSON.parse(txt);
       console.log('[ProjectsList] Loaded projects:', data.length);
+      if (data.length > 0) {
+        console.log('[ProjectsList] First project:', JSON.stringify(data[0], null, 2));
+      }
       setItems(data);
     } catch (e: any) {
       const msg = e?.message || "Failed to load projects";
@@ -124,42 +126,52 @@ export default function ProjectsList() {
 
   useEffect(() => {
     console.log('[ProjectsList] Component mounted, calling load()');
+    console.log('[ProjectsList] Initial state - items:', items.length, 'loading:', loading);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // [LMK-43] Filter projects
   const filteredProjects = items.filter(project => {
-    const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         project.code.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    // Apply view filter
-    let matchesView = true;
-    if (viewFilter === 'assigned') {
-      matchesView = project.health && project.health.attentionItemCount > 0; // Projects with user's tasks
-    } else if (viewFilter === 'my-tasks') {
-      matchesView = project.health && project.health.attentionItemCount > 0; // Projects with tasks assigned to user
+    if (!project) {
+      console.log('[ProjectsList] Filtering: project is null/undefined');
+      return false;
     }
-    
-    if (statusFilter === 'all') return matchesSearch && matchesView;
+
+    const matchesSearch = (project.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+      (project.code?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+
+    // Apply view filter - 'all' shows everything, 'assigned'/'my-tasks' only for workers
+    let matchesView = true;
+    // Note: For now, view filter is simplified - admins/managers see all projects
+    // Workers would see only their assigned projects (to be implemented with proper user-project assignment)
+
+    // Status filter - if no health data, show project by default unless specifically filtering for health status
+    if (statusFilter === 'all') {
+      const result = matchesSearch && matchesView;
+      if (!result) {
+        console.log('[ProjectsList] Project filtered out:', project.name, 'matchesSearch:', matchesSearch, 'matchesView:', matchesView, 'viewFilter:', viewFilter);
+      }
+      return result;
+    }
     if (statusFilter === 'healthy') return matchesSearch && matchesView && project.health?.status === 'healthy';
     if (statusFilter === 'at-risk') return matchesSearch && matchesView && project.health?.status === 'at-risk';
     if (statusFilter === 'critical') return matchesSearch && matchesView && project.health?.status === 'critical';
-    
+
     return matchesSearch && matchesView;
   });
-  
-  // Separate pinned and unpinned projects
+
+  console.log('[ProjectsList] After filtering - filteredProjects:', filteredProjects.length, 'from', items.length, 'items');  // Separate pinned and unpinned projects
   const pinnedProjects = filteredProjects.filter(p => pinnedProjectIds.includes(p.id));
   const unpinnedProjects = filteredProjects.filter(p => !pinnedProjectIds.includes(p.id));
-  
+
   // Projects needing attention (for personalized section)
-  const projectsNeedingAttention = unpinnedProjects.filter(p => 
+  const projectsNeedingAttention = unpinnedProjects.filter(p =>
     p.health?.attentionItemCount && p.health.attentionItemCount > 0 ||
     p.health?.status === 'critical' ||
     p.health?.status === 'at-risk'
   ).slice(0, 3);
-  
+
   // Your active projects (recently updated or viewed)
   const activeProjects = unpinnedProjects
     .filter(p => !projectsNeedingAttention.find(ap => ap.id === p.id))
@@ -172,22 +184,22 @@ export default function ProjectsList() {
     healthy: items.filter(p => p.health?.status === 'healthy').length,
     atRisk: items.filter(p => p.health?.status === 'at-risk').length,
     critical: items.filter(p => p.health?.status === 'critical').length,
-    avgHealth: items.length > 0 
+    avgHealth: items.length > 0
       ? Math.round(items.reduce((sum, p) => sum + (p.health?.score || 0), 0) / items.length)
       : 0
   };
-  
+
   // Toggle pin functionality
   function togglePin(projectId: number) {
     setPinnedProjectIds(prev => {
-      const updated = prev.includes(projectId) 
+      const updated = prev.includes(projectId)
         ? prev.filter(id => id !== projectId)
         : [...prev, projectId];
       localStorage.setItem('pinnedProjects', JSON.stringify(updated));
       return updated;
     });
   }
-  
+
   // Track project view
   function trackProjectView(projectId: number) {
     setRecentlyViewed(prev => {
@@ -235,8 +247,8 @@ export default function ProjectsList() {
       const res = await http(`/api/projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ 
-          name: label, 
+        body: JSON.stringify({
+          name: label,
           code: `TEMP-${Date.now()}`,
           quantity: 0  // Default quantity for new projects
         }),
@@ -269,7 +281,7 @@ export default function ProjectsList() {
    * [LMK-50] RENDER
    ****************************************************/
   console.log('[ProjectsList] Rendering - loading:', loading, 'items:', items.length, 'error:', error);
-  
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -280,9 +292,9 @@ export default function ProjectsList() {
             {isAdmin ? 'All Projects' : isManager ? 'My Projects' : 'My Tasks'}
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1">
-            {isAdmin 
-              ? 'Manage and monitor all projects' 
-              : isManager 
+            {isAdmin
+              ? 'Manage and monitor all projects'
+              : isManager
                 ? 'Monitor your assigned projects and team progress'
                 : 'View and manage your assigned tasks'}
           </p>
@@ -300,7 +312,11 @@ export default function ProjectsList() {
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
+        <button
+          onClick={() => setStatusFilter('all')}
+          className={`bg-white dark:bg-slate-800 rounded-lg shadow p-4 text-left transition-all hover:shadow-lg hover:scale-105 ${statusFilter === 'all' ? 'ring-2 ring-indigo-500' : ''
+            }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 dark:text-gray-400 text-sm">Total Projects</p>
@@ -310,9 +326,13 @@ export default function ProjectsList() {
               <TrendingUp className="text-indigo-600 dark:text-indigo-400" size={24} />
             </div>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
+        <button
+          onClick={() => setStatusFilter('healthy')}
+          className={`bg-white dark:bg-slate-800 rounded-lg shadow p-4 text-left transition-all hover:shadow-lg hover:scale-105 ${statusFilter === 'healthy' ? 'ring-2 ring-green-500' : ''
+            }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 dark:text-gray-400 text-sm">Healthy</p>
@@ -320,9 +340,13 @@ export default function ProjectsList() {
             </div>
             <div className="w-3 h-3 bg-green-500 rounded-full ring-4 ring-green-500/20" />
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
+        <button
+          onClick={() => setStatusFilter('at-risk')}
+          className={`bg-white dark:bg-slate-800 rounded-lg shadow p-4 text-left transition-all hover:shadow-lg hover:scale-105 ${statusFilter === 'at-risk' ? 'ring-2 ring-yellow-500' : ''
+            }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 dark:text-gray-400 text-sm">At Risk</p>
@@ -330,9 +354,13 @@ export default function ProjectsList() {
             </div>
             <div className="w-3 h-3 bg-yellow-500 rounded-full ring-4 ring-yellow-500/20" />
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-4">
+        <button
+          onClick={() => setStatusFilter('critical')}
+          className={`bg-white dark:bg-slate-800 rounded-lg shadow p-4 text-left transition-all hover:shadow-lg hover:scale-105 ${statusFilter === 'critical' ? 'ring-2 ring-red-500' : ''
+            }`}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600 dark:text-gray-400 text-sm">Critical</p>
@@ -340,7 +368,7 @@ export default function ProjectsList() {
             </div>
             <div className="w-3 h-3 bg-red-500 rounded-full ring-4 ring-red-500/20" />
           </div>
-        </div>
+        </button>
 
         <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg shadow p-4 text-white">
           <p className="text-white/80 text-sm">Avg Health</p>
@@ -530,8 +558,8 @@ export default function ProjectsList() {
             {searchQuery || statusFilter !== 'all' ? 'No projects match your filters' : 'No projects yet'}
           </h3>
           <p className="text-gray-600 dark:text-gray-400 mb-6">
-            {searchQuery || statusFilter !== 'all' 
-              ? 'Try adjusting your search or filters' 
+            {searchQuery || statusFilter !== 'all'
+              ? 'Try adjusting your search or filters'
               : 'Get started by creating your first project'}
           </p>
           {!searchQuery && statusFilter === 'all' && (isAdmin || isManager) && (
@@ -558,7 +586,7 @@ export default function ProjectsList() {
                   {pinnedProjects.length} pinned
                 </span>
               </div>
-              <div className={viewMode === 'grid' 
+              <div className={viewMode === 'grid'
                 ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
                 : "space-y-4"
               }>
@@ -593,24 +621,12 @@ export default function ProjectsList() {
                   {projectsNeedingAttention.length} require action
                 </span>
               </div>
-              <div className={viewMode === 'grid' 
-                ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-                : "space-y-4"
-              }>
+              <div className="space-y-6">
                 {projectsNeedingAttention.map((project) => (
-                  <div key={project.id} className="relative group">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); togglePin(project.id); }}
-                      className="absolute top-3 right-3 z-10 p-2 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm rounded-lg shadow-md hover:scale-110 transition-transform opacity-0 group-hover:opacity-100"
-                      title="Pin project"
-                    >
-                      <Star className="text-gray-400 hover:text-yellow-500" size={16} />
-                    </button>
-                    <ProjectCard
-                      project={project}
-                      onClick={() => { trackProjectView(project.id); navigate({ to: `/projects/${project.id}` }); }}
-                    />
-                  </div>
+                  <ProjectAttentionCard
+                    key={project.id}
+                    project={project}
+                  />
                 ))}
               </div>
             </div>
@@ -628,7 +644,7 @@ export default function ProjectsList() {
                   {activeProjects.length} recently viewed
                 </span>
               </div>
-              <div className={viewMode === 'grid' 
+              <div className={viewMode === 'grid'
                 ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
                 : "space-y-4"
               }>
@@ -652,49 +668,49 @@ export default function ProjectsList() {
           )}
 
           {/* All Other Projects Section */}
-          {unpinnedProjects.filter(p => 
+          {unpinnedProjects.filter(p =>
             !projectsNeedingAttention.find(ap => ap.id === p.id) &&
             !activeProjects.find(ap => ap.id === p.id)
           ).length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  All Projects
-                </h2>
-                <span className="text-sm text-gray-500 dark:text-gray-400">
-                  {unpinnedProjects.filter(p => 
-                    !projectsNeedingAttention.find(ap => ap.id === p.id) &&
-                    !activeProjects.find(ap => ap.id === p.id)
-                  ).length} projects
-                </span>
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    All Projects
+                  </h2>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    {unpinnedProjects.filter(p =>
+                      !projectsNeedingAttention.find(ap => ap.id === p.id) &&
+                      !activeProjects.find(ap => ap.id === p.id)
+                    ).length} projects
+                  </span>
+                </div>
+                <div className={viewMode === 'grid'
+                  ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+                  : "space-y-4"
+                }>
+                  {unpinnedProjects
+                    .filter(p =>
+                      !projectsNeedingAttention.find(ap => ap.id === p.id) &&
+                      !activeProjects.find(ap => ap.id === p.id)
+                    )
+                    .map((project) => (
+                      <div key={project.id} className="relative group">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); togglePin(project.id); }}
+                          className="absolute top-3 right-3 z-10 p-2 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm rounded-lg shadow-md hover:scale-110 transition-transform opacity-0 group-hover:opacity-100"
+                          title="Pin project"
+                        >
+                          <Star className="text-gray-400 hover:text-yellow-500" size={16} />
+                        </button>
+                        <ProjectCard
+                          project={project}
+                          onClick={() => { trackProjectView(project.id); navigate({ to: `/projects/${project.id}` }); }}
+                        />
+                      </div>
+                    ))}
+                </div>
               </div>
-              <div className={viewMode === 'grid' 
-                ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-                : "space-y-4"
-              }>
-                {unpinnedProjects
-                  .filter(p => 
-                    !projectsNeedingAttention.find(ap => ap.id === p.id) &&
-                    !activeProjects.find(ap => ap.id === p.id)
-                  )
-                  .map((project) => (
-                    <div key={project.id} className="relative group">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); togglePin(project.id); }}
-                        className="absolute top-3 right-3 z-10 p-2 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm rounded-lg shadow-md hover:scale-110 transition-transform opacity-0 group-hover:opacity-100"
-                        title="Pin project"
-                      >
-                        <Star className="text-gray-400 hover:text-yellow-500" size={16} />
-                      </button>
-                      <ProjectCard
-                        project={project}
-                        onClick={() => { trackProjectView(project.id); navigate({ to: `/projects/${project.id}` }); }}
-                      />
-                    </div>
-                  ))}
-              </div>
-            </div>
-          )}
+            )}
         </div>
       )}
 

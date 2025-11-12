@@ -189,7 +189,7 @@ router.get('/multi-project/aggregate', async (req, res) => {
       where,
       include: {
         Project: {
-          select: { projectCode: true, projectName: true }
+          select: { code: true, name: true }
         }
       }
     });
@@ -214,7 +214,7 @@ router.get('/multi-project/aggregate', async (req, res) => {
         aggregated[materialId].totalQty += req.qtyWithLoss;
         aggregated[materialId].totalCost += req.totalCost;
         aggregated[materialId].projects.push({
-          projectCode: mrp.Project.projectCode,
+          code: mrp.Project.code,
           qty: req.qtyWithLoss
         });
       });

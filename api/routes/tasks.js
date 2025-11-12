@@ -11,31 +11,22 @@ router.use(requireAuth);
 router.get('/', async (req, res) => {
   try {
     const { projectId, assignedTo, status, priority, search } = req.query;
-    
+
     const where = {};
     if (projectId) where.projectId = parseInt(projectId);
-    if (assignedTo) where.assignedTo = assignedTo;
+    if (assignedTo) where.assignee = assignedTo;
     if (status) where.status = status;
     if (priority) where.priority = priority;
     if (search) {
       where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
       ];
     }
 
     const tasks = await prisma.task.findMany({
       where,
       include: {
-        project: { select: { id: true, name: true } },
-        assignee: { select: { id: true, name: true, email: true } },
-        creator: { select: { id: true, name: true } },
-        _count: {
-          select: {
-            comments: true,
-            attachments: true,
-          },
-        },
+        Project: { select: { id: true, name: true } },
       },
       orderBy: [
         { priority: 'desc' },
@@ -44,7 +35,20 @@ router.get('/', async (req, res) => {
       ],
     });
 
-    res.json(tasks);
+    // Parse description from tags and add as separate field
+    const tasksWithDescription = tasks.map(task => {
+      const descTag = task.tags?.find(tag => tag.startsWith('desc:'));
+      const description = descTag ? descTag.substring(5) : '';
+      const cleanTags = task.tags?.filter(tag => !tag.startsWith('desc:')) || [];
+
+      return {
+        ...task,
+        description,
+        tags: cleanTags
+      };
+    });
+
+    res.json(tasksWithDescription);
   } catch (error) {
     console.error('Error fetching tasks:', error);
     res.status(500).json({ error: 'Failed to fetch tasks' });
@@ -55,18 +59,9 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const task = await prisma.task.findUnique({
-      where: { id: parseInt(req.params.id) },
+      where: { id: req.params.id },
       include: {
-        project: { select: { id: true, name: true } },
-        assignee: { select: { id: true, name: true, email: true } },
-        creator: { select: { id: true, name: true } },
-        comments: {
-          include: {
-            author: { select: { id: true, name: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-        },
-        attachments: true,
+        Project: { select: { id: true, name: true } },
       },
     });
 
@@ -74,7 +69,16 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    res.json(task);
+    // Parse description from tags
+    const descTag = task.tags?.find(tag => tag.startsWith('desc:'));
+    const description = descTag ? descTag.substring(5) : '';
+    const cleanTags = task.tags?.filter(tag => !tag.startsWith('desc:')) || [];
+
+    res.json({
+      ...task,
+      description,
+      tags: cleanTags
+    });
   } catch (error) {
     console.error('Error fetching task:', error);
     res.status(500).json({ error: 'Failed to fetch task' });
@@ -96,27 +100,61 @@ router.post('/', async (req, res) => {
       tags,
     } = req.body;
 
+    // Map frontend status values to database enum values
+    const statusMap = {
+      'todo': 'green',
+      'in-progress': 'amber',
+      'review': 'amber',
+      'done': 'green',
+      'completed': 'green',
+      'blocked': 'red',
+      'cancelled': 'red',
+    };
+
+    // Map frontend priority values to database enum values
+    const priorityMap = {
+      'low': 'Low',
+      'medium': 'Med',
+      'med': 'Med',
+      'high': 'High',
+    };
+
+    const dbStatus = status ? (statusMap[status.toLowerCase()] || 'green') : 'green';
+    const dbPriority = priority ? (priorityMap[priority.toLowerCase()] || 'Med') : 'Med';
+
+    // Prepare tags array with description if provided
+    const taskTags = tags || [];
+    if (description && description.trim()) {
+      taskTags.push(`desc:${description.trim()}`);
+    }
+
     const task = await prisma.task.create({
       data: {
-        projectId: parseInt(projectId),
-        title,
-        description,
-        assignedTo,
-        createdBy: req.user.id,
-        status: status || 'todo',
-        priority: priority || 'medium',
+        id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        projectId: projectId ? parseInt(projectId) : null,
+        name: title,
+        assignee: assignedTo,
+        status: dbStatus,
+        priority: dbPriority,
         dueDate: dueDate ? new Date(dueDate) : null,
-        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : null,
-        tags: tags || [],
+        tags: taskTags,
+        updatedAt: new Date(),
       },
       include: {
-        project: { select: { id: true, name: true } },
-        assignee: { select: { id: true, name: true, email: true } },
-        creator: { select: { id: true, name: true } },
+        Project: { select: { id: true, name: true } },
       },
     });
 
-    res.status(201).json(task);
+    // Parse description from tags for response
+    const descTag = task.tags?.find(tag => tag.startsWith('desc:'));
+    const taskDescription = descTag ? descTag.substring(5) : '';
+    const cleanTags = task.tags?.filter(tag => !tag.startsWith('desc:')) || [];
+
+    res.status(201).json({
+      ...task,
+      description: taskDescription,
+      tags: cleanTags
+    });
   } catch (error) {
     console.error('Error creating task:', error);
     res.status(500).json({ error: 'Failed to create task' });
@@ -128,45 +166,81 @@ router.put('/:id', async (req, res) => {
   try {
     const {
       title,
+      name,
       description,
       assignedTo,
       status,
       priority,
       dueDate,
-      estimatedHours,
-      actualHours,
       tags,
-      progress,
     } = req.body;
 
-    const updateData = {};
-    if (title !== undefined) updateData.title = title;
-    if (description !== undefined) updateData.description = description;
-    if (assignedTo !== undefined) updateData.assignedTo = assignedTo;
-    if (status !== undefined) updateData.status = status;
-    if (priority !== undefined) updateData.priority = priority;
-    if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : null;
-    if (estimatedHours !== undefined) updateData.estimatedHours = estimatedHours ? parseFloat(estimatedHours) : null;
-    if (actualHours !== undefined) updateData.actualHours = actualHours ? parseFloat(actualHours) : null;
-    if (tags !== undefined) updateData.tags = tags;
-    if (progress !== undefined) updateData.progress = parseInt(progress);
+    // Map frontend status values to database enum values
+    const statusMap = {
+      'todo': 'green',
+      'in-progress': 'amber',
+      'review': 'amber',
+      'done': 'green',
+      'completed': 'green',
+      'blocked': 'red',
+      'cancelled': 'red',
+    };
 
-    // Set completion date when status changes to done
-    if (status === 'done' || status === 'completed') {
-      updateData.completedAt = new Date();
+    // Map frontend priority values to database enum values
+    const priorityMap = {
+      'low': 'Low',
+      'medium': 'Med',
+      'med': 'Med',
+      'high': 'High',
+    };
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (title !== undefined) updateData.name = title; // Support both name and title
+    if (assignedTo !== undefined) updateData.assignee = assignedTo;
+    if (status !== undefined) updateData.status = statusMap[status.toLowerCase()] || status;
+    if (priority !== undefined) updateData.priority = priorityMap[priority.toLowerCase()] || priority;
+    if (dueDate !== undefined) updateData.dueDate = dueDate ? new Date(dueDate) : null;
+
+    // Handle tags and description
+    if (tags !== undefined || description !== undefined) {
+      // Get current task to preserve existing tags
+      const currentTask = await prisma.task.findUnique({
+        where: { id: req.params.id },
+        select: { tags: true }
+      });
+
+      let newTags = tags !== undefined ? [...tags] : [...(currentTask?.tags || [])];
+
+      // Remove old description tag if exists
+      newTags = newTags.filter(tag => !tag.startsWith('desc:'));
+
+      // Add new description if provided
+      if (description !== undefined && description.trim()) {
+        newTags.push(`desc:${description.trim()}`);
+      }
+
+      updateData.tags = newTags;
     }
 
     const task = await prisma.task.update({
-      where: { id: parseInt(req.params.id) },
-      data: updateData,
+      where: { id: req.params.id },
+      data: { ...updateData, updatedAt: new Date() },
       include: {
-        project: { select: { id: true, name: true } },
-        assignee: { select: { id: true, name: true, email: true } },
-        creator: { select: { id: true, name: true } },
+        Project: { select: { id: true, name: true } },
       },
     });
 
-    res.json(task);
+    // Parse description from tags for response
+    const descTag = task.tags?.find(tag => tag.startsWith('desc:'));
+    const taskDescription = descTag ? descTag.substring(5) : '';
+    const cleanTags = task.tags?.filter(tag => !tag.startsWith('desc:')) || [];
+
+    res.json({
+      ...task,
+      description: taskDescription,
+      tags: cleanTags
+    });
   } catch (error) {
     console.error('Error updating task:', error);
     res.status(500).json({ error: 'Failed to update task' });
@@ -177,7 +251,7 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     await prisma.task.delete({
-      where: { id: parseInt(req.params.id) },
+      where: { id: req.params.id },
     });
     res.json({ message: 'Task deleted successfully' });
   } catch (error) {
@@ -186,35 +260,11 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// POST /api/tasks/:id/comments - Add comment to task
-router.post('/:id/comments', async (req, res) => {
-  try {
-    const { content } = req.body;
-    const taskId = parseInt(req.params.id);
-
-    const comment = await prisma.taskComment.create({
-      data: {
-        taskId,
-        authorId: req.user.id,
-        content,
-      },
-      include: {
-        author: { select: { id: true, name: true } },
-      },
-    });
-
-    res.status(201).json(comment);
-  } catch (error) {
-    console.error('Error adding comment:', error);
-    res.status(500).json({ error: 'Failed to add comment' });
-  }
-});
-
 // GET /api/tasks/analytics/summary - Task analytics
 router.get('/analytics/summary', async (req, res) => {
   try {
     const { projectId, assignedTo } = req.query;
-    
+
     const where = {};
     if (projectId) where.projectId = parseInt(projectId);
     if (assignedTo) where.assignedTo = assignedTo;
@@ -234,7 +284,7 @@ router.get('/analytics/summary', async (req, res) => {
       prisma.task.count({
         where: {
           ...where,
-          status: { notIn: ['done', 'completed', 'cancelled'] },
+          status: { notIn: ['green'] },
           dueDate: { lt: new Date() },
         },
       }),

@@ -3,6 +3,7 @@ import { Plus, Edit2, Trash2, GitBranch, Play, CheckCircle, AlertTriangle, Clock
 import { listProjects } from '../../lib/services/projects';
 import { listProcessFlows, createProcessFlow, updateProcessFlow, activateProcessFlow, deleteProcessFlow } from '../../lib/services/preproduction';
 import { useProjectContextSafe } from '../projects/ProjectContext';
+import ContextualTaskReminder from '../../components/ContextualTaskReminder';
 
 interface ProcessFlow {
   id: string;
@@ -47,9 +48,12 @@ const ProcessFlowsPage = () => {
   const projectContext = useProjectContextSafe();
   const [flows, setFlows] = useState<ProcessFlow[]>([]);
   const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
+  const [stations, setStations] = useState<Array<{ id: number; name: string; code: string }>>([]);
   const [selectedFlow, setSelectedFlow] = useState<ProcessFlow | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
   const [editingFlow, setEditingFlow] = useState<ProcessFlow | null>(null);
+  const [editingOperation, setEditingOperation] = useState<ProcessOperation | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [projectFilter, setProjectFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -71,9 +75,22 @@ const ProcessFlowsPage = () => {
     notes: '',
   });
 
+  const [operationFormData, setOperationFormData] = useState({
+    operationName: '',
+    operationCode: '',
+    sequence: 1,
+    stationId: '',
+    estimatedTime: 0,
+    standardOutput: 0,
+    isParallel: false,
+    isCriticalPath: false,
+    description: ''
+  });
+
   useEffect(() => {
     fetchProjects();
     fetchFlows();
+    fetchStations();
   }, [projectFilter, statusFilter]);
 
   const fetchProjects = async () => {
@@ -82,6 +99,17 @@ const ProcessFlowsPage = () => {
       setProjects(rows || []);
     } catch (error) {
       console.error('Error fetching projects:', error);
+    }
+  };
+
+  const fetchStations = async () => {
+    try {
+      const response = await fetch('/api/stations');
+      if (!response.ok) throw new Error('Failed to fetch stations');
+      const data = await response.json();
+      setStations(data || []);
+    } catch (error) {
+      console.error('Error fetching stations:', error);
     }
   };
 
@@ -148,6 +176,66 @@ const ProcessFlowsPage = () => {
       isTemplate: false,
       notes: '',
     });
+  };
+
+  const resetOperationForm = () => {
+    setOperationFormData({
+      operationName: '',
+      operationCode: '',
+      sequence: selectedFlow ? selectedFlow.operations.length + 1 : 1,
+      stationId: '',
+      estimatedTime: 0,
+      standardOutput: 0,
+      isParallel: false,
+      isCriticalPath: false,
+      description: ''
+    });
+    setEditingOperation(null);
+  };
+
+  const handleOpenOperationModal = () => {
+    resetOperationForm();
+    setIsOperationModalOpen(true);
+  };
+
+  const handleOperationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFlow) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(`/api/process-flows/${selectedFlow.id}/operations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationName: operationFormData.operationName,
+          operationCode: operationFormData.operationCode,
+          sequence: operationFormData.sequence,
+          stationId: operationFormData.stationId ? parseInt(operationFormData.stationId) : null,
+          estimatedTime: operationFormData.estimatedTime || null,
+          standardOutput: operationFormData.standardOutput || null,
+          isParallel: operationFormData.isParallel,
+          isCriticalPath: operationFormData.isCriticalPath,
+          description: operationFormData.description || null
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to create operation');
+
+      setIsOperationModalOpen(false);
+      resetOperationForm();
+      await fetchFlows();
+
+      // Refresh selected flow
+      const updatedFlows = await listProcessFlows({ projectId: projectFilter, status: statusFilter });
+      const updatedFlow = updatedFlows.find(f => f.id === selectedFlow.id);
+      if (updatedFlow) setSelectedFlow(updatedFlow);
+    } catch (error) {
+      console.error('Error creating operation:', error);
+      alert('Failed to create operation');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -223,8 +311,8 @@ const ProcessFlowsPage = () => {
               const StatusIcon = status.icon;
               const totalDuration = calculateTotalDuration(flow.operations);
               return (
-                <div 
-                  key={flow.id} 
+                <div
+                  key={flow.id}
                   className={`bg-white rounded-lg shadow p-4 cursor-pointer transition-all ${selectedFlow?.id === flow.id ? 'ring-2 ring-blue-500' : 'hover:shadow-md'}`}
                   onClick={() => setSelectedFlow(flow)}
                 >
@@ -254,7 +342,7 @@ const ProcessFlowsPage = () => {
                       </button>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-3 gap-2 text-sm">
                     <div>
                       <p className="text-gray-600">Operations</p>
@@ -291,7 +379,10 @@ const ProcessFlowsPage = () => {
                     Operations Flow ({selectedFlow.operations.length})
                   </h3>
                   {selectedFlow.operations.length > 0 && (
-                    <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                    <button
+                      onClick={handleOpenOperationModal}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                    >
                       <Plus size={16} />
                       Add Operation
                     </button>
@@ -301,7 +392,10 @@ const ProcessFlowsPage = () => {
                 {selectedFlow.operations.length === 0 ? (
                   <div className="text-center py-8 bg-gray-50 rounded-lg">
                     <p className="text-gray-500">No operations defined yet</p>
-                    <button className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                    <button
+                      onClick={handleOpenOperationModal}
+                      className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    >
                       Add First Operation
                     </button>
                   </div>
@@ -327,8 +421,21 @@ const ProcessFlowsPage = () => {
                                   Parallel
                                 </span>
                               )}
+                              <div className="ml-auto">
+                                <ContextualTaskReminder
+                                  context={{
+                                    module: 'Process Operations',
+                                    projectId: selectedFlow.projectId,
+                                    processId: selectedFlow.id,
+                                    operationId: op.id,
+                                    contextUrl: window.location.pathname,
+                                    contextTitle: `${selectedFlow.flowName} - ${op.operationName}`,
+                                    contextDescription: `Operation: ${op.operationName} (${op.operationCode}) at ${op.station?.name || 'Unassigned Station'}`
+                                  }}
+                                />
+                              </div>
                             </div>
-                            
+
                             <div className="grid grid-cols-3 gap-3 text-sm mb-3">
                               <div>
                                 <p className="text-gray-600">Station</p>
@@ -438,6 +545,137 @@ const ProcessFlowsPage = () => {
                   <button type="button" onClick={() => { setIsModalOpen(false); setEditingFlow(null); }} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Cancel</button>
                   <button type="submit" disabled={isLoading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                     {isLoading ? 'Saving...' : editingFlow ? 'Update' : 'Create'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isOperationModalOpen && selectedFlow && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <h2 className="text-2xl font-bold mb-2">{editingOperation ? 'Edit' : 'Add'} Operation</h2>
+              <p className="text-gray-600 mb-6">Flow: {selectedFlow.flowName}</p>
+              <form onSubmit={handleOperationSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Operation Name *</label>
+                    <input
+                      required
+                      type="text"
+                      value={operationFormData.operationName}
+                      onChange={(e) => setOperationFormData({ ...operationFormData, operationName: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      placeholder="e.g., Cutting, Assembly, QC"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Operation Code *</label>
+                    <input
+                      required
+                      type="text"
+                      value={operationFormData.operationCode}
+                      onChange={(e) => setOperationFormData({ ...operationFormData, operationCode: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      placeholder="e.g., OP-001"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Sequence *</label>
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      value={operationFormData.sequence}
+                      onChange={(e) => setOperationFormData({ ...operationFormData, sequence: parseInt(e.target.value) })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Station</label>
+                    <select
+                      value={operationFormData.stationId}
+                      onChange={(e) => setOperationFormData({ ...operationFormData, stationId: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    >
+                      <option value="">No Station Assigned</option>
+                      {stations.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Estimated Time (minutes)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={operationFormData.estimatedTime}
+                      onChange={(e) => setOperationFormData({ ...operationFormData, estimatedTime: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      placeholder="e.g., 30"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Standard Output (units/hour)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={operationFormData.standardOutput}
+                      onChange={(e) => setOperationFormData({ ...operationFormData, standardOutput: parseFloat(e.target.value) || 0 })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      placeholder="e.g., 100"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium mb-2">Description</label>
+                    <textarea
+                      value={operationFormData.description}
+                      onChange={(e) => setOperationFormData({ ...operationFormData, description: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      rows={3}
+                      placeholder="Detailed description of the operation..."
+                    />
+                  </div>
+                  <div className="col-span-2 flex gap-4">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={operationFormData.isParallel}
+                        onChange={(e) => setOperationFormData({ ...operationFormData, isParallel: e.target.checked })}
+                        className="rounded"
+                      />
+                      <span className="text-sm font-medium">Can Run in Parallel</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={operationFormData.isCriticalPath}
+                        onChange={(e) => setOperationFormData({ ...operationFormData, isCriticalPath: e.target.checked })}
+                        className="rounded"
+                      />
+                      <span className="text-sm font-medium">Critical Path Operation</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => { setIsOperationModalOpen(false); resetOperationForm(); }}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {isLoading ? 'Saving...' : editingOperation ? 'Update Operation' : 'Add Operation'}
                   </button>
                 </div>
               </form>

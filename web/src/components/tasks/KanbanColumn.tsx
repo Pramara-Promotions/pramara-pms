@@ -32,6 +32,7 @@ interface ColumnConfig {
 interface KanbanColumnProps {
   column: ColumnConfig;
   tasks: Task[];
+  projectId?: number;
   onTaskClick?: (task: Task) => void;
   onAddTask?: () => void;
   onColumnMenu?: () => void;
@@ -40,13 +41,14 @@ interface KanbanColumnProps {
 export default function KanbanColumn({
   column,
   tasks,
+  projectId,
   onTaskClick,
   onAddTask,
   onColumnMenu
 }: KanbanColumnProps) {
   const [collapsed, setCollapsed] = useState(false);
   const reducedMotion = useReducedMotion();
-  
+
   const { setNodeRef, isOver } = useDroppable({
     id: column.section
   });
@@ -80,8 +82,8 @@ export default function KanbanColumn({
               </h3>
               <span className={`
                 px-2 py-0.5 text-xs font-medium rounded-full
-                ${isOverLimit 
-                  ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' 
+                ${isOverLimit
+                  ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
                   : 'bg-gray-100 text-gray-600 dark:bg-neutral-800 dark:text-neutral-400'
                 }
               `}>
@@ -165,6 +167,7 @@ export default function KanbanColumn({
                 <TaskCard
                   key={task.id}
                   task={task}
+                  projectId={projectId}
                   onClick={() => onTaskClick?.(task)}
                 />
               ))

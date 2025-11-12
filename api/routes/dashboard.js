@@ -21,7 +21,7 @@ router.get('/action-items', authGuard, async (req, res) => {
   try {
     const userId = req.user.id
     const userRoles = req.user.roles || []
-    
+
     // Fetch user with role details
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -33,19 +33,19 @@ router.get('/action-items', authGuard, async (req, res) => {
         }
       }
     })
-    
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' })
     }
-    
+
     const roleNames = user.roles.map(ur => ur.role.name)
     const isProjectManager = roleNames.includes('PROJECT_MANAGER') || roleNames.includes('ADMIN')
     const isProductionWorker = roleNames.includes('PRODUCTION_WORKER')
     const isQCInspector = roleNames.includes('QC_INSPECTOR')
     const isAdmin = roleNames.includes('ADMIN')
-    
+
     let actionItems = []
-    
+
     // 1. Fetch Approvals (for managers and admins)
     if (isProjectManager || isAdmin) {
       const approvals = await prisma.approval.findMany({
@@ -62,13 +62,13 @@ router.get('/action-items', authGuard, async (req, res) => {
         orderBy: { dueDate: 'asc' },
         take: 10
       })
-      
+
       for (const approval of approvals) {
         const isOverdue = approval.dueDate && isPast(approval.dueDate)
-        const bufferHours = approval.dueDate 
+        const bufferHours = approval.dueDate
           ? Math.round((approval.dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60))
           : null
-        
+
         actionItems.push({
           id: `approval_${approval.id}`,
           type: 'approval',
@@ -90,7 +90,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         })
       }
     }
-    
+
     // 2. Fetch User's Tasks
     const myTasks = await prisma.task.findMany({
       where: {
@@ -107,10 +107,10 @@ router.get('/action-items', authGuard, async (req, res) => {
       orderBy: { dueDate: 'asc' },
       take: 10
     })
-    
+
     for (const task of myTasks) {
       const isOverdue = task.dueDate && isPast(task.dueDate)
-      
+
       actionItems.push({
         id: `task_${task.id}`,
         type: 'task',
@@ -126,7 +126,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         link: `/tasks/${task.id}`
       })
     }
-    
+
     // 3. Production Issues (for production workers)
     if (isProductionWorker || isAdmin) {
       const productionIssues = await prisma.productionEntry.findMany({
@@ -139,7 +139,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         },
         take: 5
       })
-      
+
       for (const issue of productionIssues) {
         actionItems.push({
           id: `production_${issue.id}`,
@@ -156,7 +156,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         })
       }
     }
-    
+
     // 4. QC Inspections (for QC inspectors)
     if (isQCInspector || isAdmin) {
       const qcPending = await prisma.qcInspection.findMany({
@@ -170,10 +170,10 @@ router.get('/action-items', authGuard, async (req, res) => {
         orderBy: { dueDate: 'asc' },
         take: 10
       })
-      
+
       for (const qc of qcPending) {
         const isOverdue = qc.dueDate && isPast(qc.dueDate)
-        
+
         actionItems.push({
           id: `qc_${qc.id}`,
           type: 'inspection',
@@ -190,7 +190,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         })
       }
     }
-    
+
     // 5. Material Shortages
     const materialShortages = await prisma.material.findMany({
       where: {
@@ -198,7 +198,7 @@ router.get('/action-items', authGuard, async (req, res) => {
       },
       take: 5
     })
-    
+
     for (const material of materialShortages) {
       actionItems.push({
         id: `material_${material.id}`,
@@ -213,7 +213,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         link: `/planning/materials/${material.id}`
       })
     }
-    
+
     // 6. Compliance Issues
     const complianceDue = await prisma.projectCompliance.findMany({
       where: {
@@ -226,10 +226,10 @@ router.get('/action-items', authGuard, async (req, res) => {
       orderBy: { deadline: 'asc' },
       take: 5
     })
-    
+
     for (const compliance of complianceDue) {
       const isOverdue = compliance.deadline && isPast(compliance.deadline)
-      
+
       actionItems.push({
         id: `compliance_${compliance.id}`,
         type: 'compliance',
@@ -245,7 +245,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         link: `/compliance/projects/${compliance.projectId}`
       })
     }
-    
+
     // Sort by priority and date
     const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 }
     actionItems.sort((a, b) => {
@@ -257,7 +257,7 @@ router.get('/action-items', authGuard, async (req, res) => {
       }
       return 0
     })
-    
+
     // Calculate summary
     const summary = {
       critical: actionItems.filter(i => i.priority === 'critical').length,
@@ -265,12 +265,12 @@ router.get('/action-items', authGuard, async (req, res) => {
       medium: actionItems.filter(i => i.priority === 'medium').length,
       low: actionItems.filter(i => i.priority === 'low').length
     }
-    
+
     res.json({
       actionItems,
       summary
     })
-    
+
   } catch (error) {
     console.error('Error fetching action items:', error)
     res.status(500).json({ error: 'Failed to fetch action items' })
@@ -286,19 +286,19 @@ router.get('/overview', authGuard, async (req, res) => {
     const { days = 30 } = req.query;
     const daysNum = parseInt(days);
     const startDate = subDays(new Date(), daysNum);
-    
-    // Production Analytics
+
+    // Production Analytics (using ShiftEntry data)
     const [productionStats, productionTrend] = await Promise.all([
-      prisma.productionEntry.aggregate({
-        where: { entryDate: { gte: startDate } },
-        _sum: { totalProduced: true, approvedQty: true, rejectedQty: true },
+      prisma.shiftEntry.aggregate({
+        where: { shiftDate: { gte: startDate } },
+        _sum: { totalProduced: true, qualityPassed: true, qualityRejected: true },
         _count: true,
       }),
-      prisma.productionEntry.groupBy({
-        by: ['entryDate'],
-        where: { entryDate: { gte: startDate } },
-        _sum: { totalProduced: true, approvedQty: true },
-        orderBy: { entryDate: 'asc' },
+      prisma.shiftEntry.groupBy({
+        by: ['shiftDate'],
+        where: { shiftDate: { gte: startDate } },
+        _sum: { totalProduced: true, qualityPassed: true },
+        orderBy: { shiftDate: 'asc' },
       }),
     ]);
 
@@ -344,18 +344,18 @@ router.get('/overview', authGuard, async (req, res) => {
 
     // Fetch operator names
     const operatorIds = topPerformers.map(op => op.operatorId).filter(Boolean);
-    const operators = operatorIds.length > 0 
+    const operators = operatorIds.length > 0
       ? await prisma.user.findMany({
-          where: { id: { in: operatorIds } },
-          select: { id: true, name: true, firstName: true, lastName: true },
-        })
+        where: { id: { in: operatorIds } },
+        select: { id: true, name: true, firstName: true, lastName: true },
+      })
       : [];
 
     const topPerformersWithNames = topPerformers.map(op => {
       const operator = operators.find(u => u.id === op.operatorId);
       return {
         operatorId: op.operatorId,
-        operatorName: operator 
+        operatorName: operator
           ? (operator.name || `${operator.firstName || ''} ${operator.lastName || ''}`.trim() || 'Unknown')
           : 'Unknown',
         totalOutput: op._sum.quantity || 0,
@@ -390,13 +390,13 @@ router.get('/overview', authGuard, async (req, res) => {
       },
       production: {
         totalOutput: productionStats._sum.totalProduced || 0,
-        approved: productionStats._sum.approvedQty || 0,
-        rejected: productionStats._sum.rejectedQty || 0,
+        approved: productionStats._sum.qualityPassed || 0,
+        rejected: productionStats._sum.qualityRejected || 0,
         entries: productionStats._count,
         trend: productionTrend.map(t => ({
-          date: t.entryDate,
+          date: t.shiftDate,
           output: t._sum.totalProduced || 0,
-          approved: t._sum.approvedQty || 0,
+          approved: t._sum.qualityPassed || 0,
         })),
       },
       quality: {
@@ -428,7 +428,7 @@ router.get('/overview', authGuard, async (req, res) => {
         })),
       },
     });
-    
+
   } catch (error) {
     console.error('Error fetching dashboard overview:', error);
     res.status(500).json({ error: 'Failed to fetch dashboard overview' });

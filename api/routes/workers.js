@@ -393,7 +393,7 @@ router.get('/:id', async (req, res) => {
           take: 30,
           include: {
             Project: {
-              select: { projectCode: true, projectName: true }
+              select: { code: true, name: true }
             },
             Station: {
               select: { code: true, name: true }

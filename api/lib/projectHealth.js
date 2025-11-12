@@ -31,11 +31,10 @@ async function calculateProjectHealth(projectId) {
             status: true
           }
         },
-        ProjectSku: {
+        skus: {
           select: {
             id: true,
-            targetQuantity: true,
-            producedQuantity: true
+            orderQty: true
           }
         }
       }
@@ -154,17 +153,16 @@ function calculateBudgetMetrics(project) {
  * Calculate output metrics
  */
 function calculateOutputMetrics(project) {
-  // From ProjectSku
-  const skuTarget = project.ProjectSku?.reduce((sum, sku) => sum + (sku.targetQuantity || 0), 0) || 0;
-  const skuProduced = project.ProjectSku?.reduce((sum, sku) => sum + (sku.producedQuantity || 0), 0) || 0;
+  // From SKUs (using orderQty as target)
+  const skuTarget = project.skus?.reduce((sum, sku) => sum + (sku.orderQty || 0), 0) || 0;
 
   // From Batch
   const batchTarget = project.Batch?.reduce((sum, batch) => sum + (batch.targetQty || 0), 0) || 0;
   const batchProduced = project.Batch?.reduce((sum, batch) => sum + (batch.currentQty || 0), 0) || 0;
 
-  // Use SKU if available, otherwise batch
+  // Use SKU if available, otherwise batch or project quantity
   const targetQuantity = skuTarget > 0 ? skuTarget : (project.quantity || batchTarget);
-  const producedQuantity = skuProduced > 0 ? skuProduced : batchProduced;
+  const producedQuantity = batchProduced;
   const percentComplete = targetQuantity > 0 ? (producedQuantity / targetQuantity) * 100 : 0;
 
   return {
@@ -248,10 +246,10 @@ function identifyAttentionItems(project, timeline, taskProgress) {
 
   // Overdue tasks
   const tasks = project.Task || [];
-  const overdueTasks = tasks.filter(t => 
-    t.dueDate && 
-    new Date(t.dueDate) < now && 
-    t.status !== 'done' && 
+  const overdueTasks = tasks.filter(t =>
+    t.dueDate &&
+    new Date(t.dueDate) < now &&
+    t.status !== 'done' &&
     t.status !== 'completed'
   );
   if (overdueTasks.length > 0) {

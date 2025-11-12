@@ -12,46 +12,46 @@ router.use(requireAuth);
 router.post('/reminders/auto-send', async (req, res) => {
   try {
     const { daysThreshold = 3 } = req.body;
-    
+
     const threshold = new Date();
     threshold.setDate(threshold.getDate() + parseInt(daysThreshold));
-    
+
     // Find approvals due within threshold
     const approvals = await prisma.approvalRequest.findMany({
       where: {
         status: 'pending',
-        dueDate: {
+        cutoffDate: {
           lte: threshold,
           gte: new Date()
         }
       },
       include: {
-        reminders: {
+        ApprovalReminder: {
           orderBy: { sentAt: 'desc' },
           take: 1
         }
       }
     });
-    
+
     const remindersSent = [];
-    
+
     for (const approval of approvals) {
       // Check if reminder was sent in last 24 hours
-      const lastReminder = approval.reminders[0];
+      const lastReminder = approval.ApprovalReminder[0];
       const daysSinceReminder = lastReminder
         ? (new Date() - new Date(lastReminder.sentAt)) / (1000 * 60 * 60 * 24)
         : 999;
-      
+
       if (daysSinceReminder >= 1) {
-        const message = `Urgent: ${approval.title} is due on ${approval.dueDate.toLocaleDateString()}. Buffer: ${approval.bufferDays || 0} days.`;
-        
+        const message = `Urgent: ${approval.description} is due on ${approval.cutoffDate.toLocaleDateString()}. Buffer: ${approval.bufferDays || 0} days.`;
+
         // Send via preferred channels
-        if (approval.contactEmail) {
+        if (approval.requiredFromContact) {
           await prisma.approvalReminder.create({
             data: {
               approvalRequestId: approval.id,
               channel: 'email',
-              recipientEmail: approval.contactEmail,
+              recipientEmail: approval.requiredFromContact,
               message,
               sentAt: new Date(),
               sentBy: 'system'
@@ -59,23 +59,24 @@ router.post('/reminders/auto-send', async (req, res) => {
           });
           remindersSent.push({ id: approval.id, channel: 'email' });
         }
-        
-        if (approval.contactPhone) {
-          await prisma.approvalReminder.create({
-            data: {
-              approvalRequestId: approval.id,
-              channel: 'whatsapp',
-              recipientPhone: approval.contactPhone,
-              message,
-              sentAt: new Date(),
-              sentBy: 'system'
-            }
-          });
-          remindersSent.push({ id: approval.id, channel: 'whatsapp' });
-        }
+
+        // Note: Phone reminders disabled - no contactPhone field in schema
+        // if (approval.contactPhone) {
+        //   await prisma.approvalReminder.create({
+        //     data: {
+        //       approvalRequestId: approval.id,
+        //       channel: 'whatsapp',
+        //       recipientPhone: approval.contactPhone,
+        //       message,
+        //       sentAt: new Date(),
+        //       sentBy: 'system'
+        //     }
+        //   });
+        //   remindersSent.push({ id: approval.id, channel: 'whatsapp' });
+        // }
       }
     }
-    
+
     res.json({
       message: `Sent ${remindersSent.length} reminders`,
       reminders: remindersSent
@@ -90,39 +91,39 @@ router.post('/reminders/auto-send', async (req, res) => {
 router.get('/analytics/buffer-status', async (req, res) => {
   try {
     const { projectId } = req.query;
-    
+
     const where = { status: 'pending' };
     if (projectId) where.projectId = projectId;
-    
+
     const approvals = await prisma.approvalRequest.findMany({
       where,
       include: {
         Project: {
-          select: { projectCode: true, projectName: true }
+          select: { code: true, name: true }
         }
       }
     });
-    
+
     const now = new Date();
-    
+
     const bufferAnalysis = approvals.map(approval => {
-      const bufferDays = approval.expectedDate 
+      const bufferDays = approval.expectedDate
         ? Math.ceil((new Date(approval.expectedDate) - now) / (1000 * 60 * 60 * 24))
         : null;
-      
-      const dueDays = approval.dueDate
-        ? Math.ceil((new Date(approval.dueDate) - now) / (1000 * 60 * 60 * 24))
+
+      const dueDays = approval.cutoffDate
+        ? Math.ceil((new Date(approval.cutoffDate) - now) / (1000 * 60 * 60 * 24))
         : null;
-      
+
       let status = 'healthy';
       if (dueDays !== null && dueDays < 0) status = 'overdue';
       else if (bufferDays !== null && bufferDays < 0) status = 'critical';
       else if (bufferDays !== null && bufferDays < 3) status = 'at-risk';
       else if (bufferDays !== null && bufferDays < 7) status = 'warning';
-      
+
       return {
         id: approval.id,
-        title: approval.title,
+        title: approval.description,
         approvalType: approval.approvalType,
         project: approval.Project,
         bufferDays,
@@ -130,7 +131,7 @@ router.get('/analytics/buffer-status', async (req, res) => {
         status
       };
     });
-    
+
     // Group by status
     const summary = {
       total: bufferAnalysis.length,
@@ -140,7 +141,7 @@ router.get('/analytics/buffer-status', async (req, res) => {
       warning: bufferAnalysis.filter(a => a.status === 'warning').length,
       healthy: bufferAnalysis.filter(a => a.status === 'healthy').length
     };
-    
+
     res.json({ summary, approvals: bufferAnalysis });
   } catch (error) {
     console.error('Error analyzing buffer status:', error);
@@ -152,25 +153,25 @@ router.get('/analytics/buffer-status', async (req, res) => {
 router.get('/dashboard/summary', async (req, res) => {
   try {
     const totalApprovals = await prisma.approvalRequest.count();
-    
+
     const byStatus = await prisma.approvalRequest.groupBy({
       by: ['status'],
       _count: true
     });
-    
+
     const byType = await prisma.approvalRequest.groupBy({
       by: ['approvalType'],
       _count: true,
       where: { status: 'pending' }
     });
-    
+
     const overdueCount = await prisma.approvalRequest.count({
       where: {
         status: 'pending',
-        dueDate: { lt: new Date() }
+        cutoffDate: { lt: new Date() }
       }
     });
-    
+
     const avgResponseTime = await prisma.approvalRequest.aggregate({
       _avg: {
         bufferDays: true
@@ -179,7 +180,7 @@ router.get('/dashboard/summary', async (req, res) => {
         status: { in: ['approved', 'rejected'] }
       }
     });
-    
+
     res.json({
       totalApprovals,
       byStatus: byStatus.reduce((acc, item) => {
@@ -202,45 +203,44 @@ router.get('/dashboard/summary', async (req, res) => {
 // GET /api/approvals - List approval requests
 router.get('/', async (req, res) => {
   try {
-    const { projectId, approvalType, status, priority } = req.query;
-    
+    const { projectId, approvalType, status } = req.query;
+
     const where = {};
     if (projectId) where.projectId = projectId;
     if (approvalType) where.approvalType = approvalType;
     if (status) where.status = status;
-    if (priority) where.priority = priority;
-    
+
     const approvals = await prisma.approvalRequest.findMany({
       where,
       include: {
         Project: {
           select: {
             id: true,
-            projectCode: true,
-            projectName: true
+            code: true,
+            name: true
           }
         },
-        reminders: {
+        ApprovalReminder: {
           orderBy: { sentAt: 'desc' }
         }
       },
       orderBy: [
-        { priority: 'desc' },
-        { dueDate: 'asc' }
+        { cutoffDate: 'asc' },
+        { requestedAt: 'desc' }
       ]
     });
-    
+
     // Calculate buffer days for each
     const approvalsWithBuffer = approvals.map(approval => {
       const now = new Date();
-      const bufferDays = approval.expectedDate 
+      const bufferDays = approval.expectedDate
         ? Math.ceil((new Date(approval.expectedDate) - now) / (1000 * 60 * 60 * 24))
         : null;
-      
-      const dueDays = approval.dueDate
-        ? Math.ceil((new Date(approval.dueDate) - now) / (1000 * 60 * 60 * 24))
+
+      const dueDays = approval.cutoffDate
+        ? Math.ceil((new Date(approval.cutoffDate) - now) / (1000 * 60 * 60 * 24))
         : null;
-      
+
       return {
         ...approval,
         bufferDays,
@@ -249,7 +249,7 @@ router.get('/', async (req, res) => {
         isAtRisk: bufferDays !== null && bufferDays < 3
       };
     });
-    
+
     res.json({ approvals: approvalsWithBuffer });
   } catch (error) {
     console.error('Error fetching approvals:', error);
@@ -261,32 +261,32 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const approval = await prisma.approvalRequest.findUnique({
       where: { id },
       include: {
         Project: true,
-        reminders: {
+        ApprovalReminder: {
           orderBy: { sentAt: 'desc' }
         }
       }
     });
-    
+
     if (!approval) {
       return res.status(404).json({ error: 'Approval request not found' });
     }
-    
+
     // Calculate buffer
     const now = new Date();
-    const bufferDays = approval.expectedDate 
+    const bufferDays = approval.expectedDate
       ? Math.ceil((new Date(approval.expectedDate) - now) / (1000 * 60 * 60 * 24))
       : null;
-    
+
     res.json({
       approval: {
         ...approval,
         bufferDays,
-        isOverdue: approval.dueDate && new Date(approval.dueDate) < now,
+        isOverdue: approval.cutoffDate && new Date(approval.cutoffDate) < now,
         isAtRisk: bufferDays !== null && bufferDays < 3
       }
     });
@@ -301,58 +301,56 @@ router.post('/', async (req, res) => {
   try {
     const {
       projectId,
+      workflowStageId,
       approvalType,
-      title,
       description,
-      contactPerson,
-      contactEmail,
-      contactPhone,
-      dueDate,
+      requiredFrom,
+      requiredFromContact,
+      cutoffDate,
       expectedDate,
-      priority,
-      documents
+      attachments
     } = req.body;
-    
-    if (!projectId || !approvalType || !title) {
-      return res.status(400).json({ error: 'Project ID, approval type, and title are required' });
+
+    if (!projectId || !approvalType || !description || !requiredFrom) {
+      return res.status(400).json({ error: 'Project ID, approval type, description, and requiredFrom are required' });
     }
-    
+
     // Calculate buffer days
-    let bufferDays = null;
-    if (dueDate && expectedDate) {
-      const due = new Date(dueDate);
+    let bufferDays = 0;
+    if (cutoffDate && expectedDate) {
+      const due = new Date(cutoffDate);
       const expected = new Date(expectedDate);
       bufferDays = Math.ceil((expected - due) / (1000 * 60 * 60 * 24));
     }
-    
+
     const approval = await prisma.approvalRequest.create({
       data: {
-        projectId,
+        id: `APR-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        projectId: parseInt(projectId),
+        workflowStageId: workflowStageId || null,
         approvalType,
-        title,
-        description: description || null,
-        contactPerson: contactPerson || null,
-        contactEmail: contactEmail || null,
-        contactPhone: contactPhone || null,
-        dueDate: dueDate ? new Date(dueDate) : null,
-        expectedDate: expectedDate ? new Date(expectedDate) : null,
+        description,
+        requiredFrom,
+        requiredFromContact: requiredFromContact || null,
+        cutoffDate: new Date(cutoffDate),
+        expectedDate: new Date(expectedDate),
         bufferDays,
-        priority: priority || 'medium',
         status: 'pending',
-        documents: documents || null,
+        attachments: attachments || [],
         requestedBy: req.user.userId,
         requestedAt: new Date()
       },
       include: {
         Project: {
           select: {
-            projectCode: true,
-            projectName: true
+            id: true,
+            code: true,
+            name: true
           }
         }
       }
     });
-    
+
     res.status(201).json({ approval });
   } catch (error) {
     console.error('Error creating approval:', error);
@@ -365,44 +363,45 @@ router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = {};
-    
-    const fields = ['title', 'description', 'contactPerson', 'contactEmail', 
-                    'contactPhone', 'dueDate', 'expectedDate', 'priority', 'documents'];
-    
+
+    const fields = ['description', 'requiredFrom', 'requiredFromContact',
+      'cutoffDate', 'expectedDate', 'bufferDays', 'attachments'];
+
     fields.forEach(field => {
       if (req.body[field] !== undefined) {
-        if (field === 'dueDate' || field === 'expectedDate') {
-          updateData[field] = req.body[field] ? new Date(req.body[field]) : null;
+        if (field === 'cutoffDate' || field === 'expectedDate') {
+          updateData[field] = new Date(req.body[field]);
         } else {
           updateData[field] = req.body[field];
         }
       }
     });
-    
+
     // Recalculate buffer if dates changed
-    if (updateData.dueDate || updateData.expectedDate) {
+    if (updateData.cutoffDate || updateData.expectedDate) {
       const current = await prisma.approvalRequest.findUnique({ where: { id } });
-      const due = updateData.dueDate || current.dueDate;
+      const due = updateData.cutoffDate || current.cutoffDate;
       const expected = updateData.expectedDate || current.expectedDate;
-      
+
       if (due && expected) {
         updateData.bufferDays = Math.ceil((new Date(expected) - new Date(due)) / (1000 * 60 * 60 * 24));
       }
     }
-    
+
     const approval = await prisma.approvalRequest.update({
       where: { id },
       data: updateData,
       include: {
         Project: {
           select: {
-            projectCode: true,
-            projectName: true
+            id: true,
+            code: true,
+            name: true
           }
         }
       }
     });
-    
+
     res.json({ approval });
   } catch (error) {
     console.error('Error updating approval:', error);
@@ -415,7 +414,7 @@ router.post('/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
     const { notes, approvalDocument } = req.body;
-    
+
     const approval = await prisma.approvalRequest.update({
       where: { id },
       data: {
@@ -428,13 +427,13 @@ router.post('/:id/approve', async (req, res) => {
       include: {
         Project: {
           select: {
-            projectCode: true,
-            projectName: true
+            code: true,
+            name: true
           }
         }
       }
     });
-    
+
     res.json({ approval });
   } catch (error) {
     console.error('Error approving request:', error);
@@ -447,7 +446,7 @@ router.post('/:id/reject', async (req, res) => {
   try {
     const { id } = req.params;
     const { notes } = req.body;
-    
+
     const approval = await prisma.approvalRequest.update({
       where: { id },
       data: {
@@ -459,13 +458,13 @@ router.post('/:id/reject', async (req, res) => {
       include: {
         Project: {
           select: {
-            projectCode: true,
-            projectName: true
+            code: true,
+            name: true
           }
         }
       }
     });
-    
+
     res.json({ approval });
   } catch (error) {
     console.error('Error rejecting request:', error);
@@ -478,11 +477,11 @@ router.post('/:id/override', async (req, res) => {
   try {
     const { id } = req.params;
     const { reason, riskAssessment } = req.body;
-    
+
     if (!reason) {
       return res.status(400).json({ error: 'Override reason is required' });
     }
-    
+
     const approval = await prisma.approvalRequest.update({
       where: { id },
       data: {
@@ -495,13 +494,13 @@ router.post('/:id/override', async (req, res) => {
       include: {
         Project: {
           select: {
-            projectCode: true,
-            projectName: true
+            code: true,
+            name: true
           }
         }
       }
     });
-    
+
     // Log audit trail
     await prisma.auditLog.create({
       data: {
@@ -516,7 +515,7 @@ router.post('/:id/override', async (req, res) => {
         }
       }
     }).catch(err => console.error('Failed to log override:', err));
-    
+
     res.json({ approval });
   } catch (error) {
     console.error('Error overriding approval:', error);
@@ -529,42 +528,42 @@ router.post('/:id/reminders', async (req, res) => {
   try {
     const { id } = req.params;
     const { channel, message } = req.body;
-    
+
     if (!channel) {
       return res.status(400).json({ error: 'Channel is required (email, whatsapp, sms)' });
     }
-    
+
     const approval = await prisma.approvalRequest.findUnique({
       where: { id },
       include: {
         Project: {
-          select: { projectCode: true, projectName: true }
+          select: { code: true, name: true }
         }
       }
     });
-    
+
     if (!approval) {
       return res.status(404).json({ error: 'Approval request not found' });
     }
-    
+
     // Create reminder record
     const reminder = await prisma.approvalReminder.create({
       data: {
         approvalRequestId: id,
         channel,
-        recipientEmail: channel === 'email' ? approval.contactEmail : null,
-        recipientPhone: (channel === 'whatsapp' || channel === 'sms') ? approval.contactPhone : null,
-        message: message || `Reminder: ${approval.title} is due on ${approval.dueDate}`,
+        recipientEmail: channel === 'email' ? approval.requiredFromContact : null,
+        recipientPhone: null, // Note: No phone field in ApprovalRequest schema
+        message: message || `Reminder: ${approval.description} is due on ${approval.cutoffDate}`,
         sentAt: new Date(),
         sentBy: req.user.userId
       }
     });
-    
+
     // TODO: Integrate with actual email/SMS/WhatsApp service
     // For now, just log it
     console.log(`Reminder sent via ${channel} for approval ${id}`);
-    
-    res.json({ 
+
+    res.json({
       reminder,
       message: 'Reminder sent successfully'
     });

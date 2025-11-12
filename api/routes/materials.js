@@ -24,7 +24,7 @@ router.get('/alerts/summary', async (req, res) => {
         unit: true
       }
     });
-    
+
     // Materials needing reorder
     const needsReorder = await prisma.material.findMany({
       where: {
@@ -39,11 +39,11 @@ router.get('/alerts/summary', async (req, res) => {
         unit: true
       }
     });
-    
+
     // Expiring materials (next 30 days)
     const thirtyDaysFromNow = new Date();
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-    
+
     const expiringSoon = await prisma.materialLot.findMany({
       where: {
         status: 'active',
@@ -58,7 +58,7 @@ router.get('/alerts/summary', async (req, res) => {
         }
       }
     });
-    
+
     res.json({
       lowStock,
       needsReorder,
@@ -79,9 +79,9 @@ router.get('/alerts/summary', async (req, res) => {
 router.get('/forecast', async (req, res) => {
   try {
     const { days = 30, materialId } = req.query;
-    
+
     const where = materialId ? { materialId } : {};
-    
+
     const forecasts = await prisma.materialForecast.findMany({
       where: {
         ...where,
@@ -102,7 +102,7 @@ router.get('/forecast', async (req, res) => {
       },
       orderBy: { forecastDate: 'asc' }
     });
-    
+
     res.json({ forecasts });
   } catch (error) {
     console.error('Error fetching material forecast:', error);
@@ -114,11 +114,11 @@ router.get('/forecast', async (req, res) => {
 router.get('/movements', async (req, res) => {
   try {
     const { materialId, movementType, limit = 100 } = req.query;
-    
+
     const where = {};
     if (materialId) where.materialId = materialId;
     if (movementType) where.movementType = movementType;
-    
+
     const movements = await prisma.stockMovement.findMany({
       where,
       include: {
@@ -132,7 +132,7 @@ router.get('/movements', async (req, res) => {
       orderBy: { timestamp: 'desc' },
       take: parseInt(limit)
     });
-    
+
     res.json({ movements });
   } catch (error) {
     console.error('Error fetching stock movements:', error);
@@ -144,7 +144,7 @@ router.get('/movements', async (req, res) => {
 router.get('/dashboard/summary', async (req, res) => {
   try {
     const totalMaterials = await prisma.material.count();
-    
+
     const byType = await prisma.material.groupBy({
       by: ['type'],
       _count: true,
@@ -152,7 +152,7 @@ router.get('/dashboard/summary', async (req, res) => {
         stockQty: true
       }
     });
-    
+
     const totalValue = await prisma.material.aggregate({
       _sum: {
         stockQty: true
@@ -161,17 +161,17 @@ router.get('/dashboard/summary', async (req, res) => {
         costPerUnit: { not: null }
       }
     });
-    
+
     const lowStockCount = await prisma.material.count({
       where: {
         stockQty: { lte: prisma.material.fields.minStock }
       }
     });
-    
+
     const activeReservations = await prisma.materialReservation.count({
       where: { status: 'active' }
     });
-    
+
     res.json({
       totalMaterials,
       byType,
@@ -189,25 +189,25 @@ router.get('/dashboard/summary', async (req, res) => {
 router.post('/reserve', async (req, res) => {
   try {
     const { materialId, qty, dailyPlanId, stationId } = req.body;
-    
+
     if (!materialId || !qty) {
       return res.status(400).json({ error: 'Material ID and quantity are required' });
     }
-    
+
     // Check availability
     const material = await prisma.material.findUnique({
       where: { id: materialId }
     });
-    
+
     const availableQty = material.stockQty - (material.reservedQty || 0);
     if (availableQty < qty) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Insufficient stock',
         available: availableQty,
         requested: qty
       });
     }
-    
+
     // Create reservation
     const reservation = await prisma.materialReservation.create({
       data: {
@@ -219,7 +219,7 @@ router.post('/reserve', async (req, res) => {
         status: 'active'
       }
     });
-    
+
     // Update reserved quantity
     await prisma.material.update({
       where: { id: materialId },
@@ -227,7 +227,7 @@ router.post('/reserve', async (req, res) => {
         reservedQty: { increment: qty }
       }
     });
-    
+
     res.status(201).json({ reservation });
   } catch (error) {
     console.error('Error reserving material:', error);
@@ -239,15 +239,15 @@ router.post('/reserve', async (req, res) => {
 router.post('/reservations/:id/release', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const reservation = await prisma.materialReservation.findUnique({
       where: { id }
     });
-    
+
     if (!reservation) {
       return res.status(404).json({ error: 'Reservation not found' });
     }
-    
+
     // Update reservation status
     await prisma.materialReservation.update({
       where: { id },
@@ -256,7 +256,7 @@ router.post('/reservations/:id/release', async (req, res) => {
         releasedAt: new Date()
       }
     });
-    
+
     // Update material reserved quantity
     await prisma.material.update({
       where: { id: reservation.materialId },
@@ -264,7 +264,7 @@ router.post('/reservations/:id/release', async (req, res) => {
         reservedQty: { decrement: reservation.reservedQty }
       }
     });
-    
+
     res.json({ message: 'Reservation released successfully' });
   } catch (error) {
     console.error('Error releasing reservation:', error);
@@ -276,15 +276,15 @@ router.post('/reservations/:id/release', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { type, status, lowStock } = req.query;
-    
+
     const where = {};
     if (type) where.type = type;
-    
+
     // Filter by low stock
     if (lowStock === 'true') {
       where.stockQty = { lte: prisma.material.fields.minStock };
     }
-    
+
     const materials = await prisma.material.findMany({
       where,
       include: {
@@ -302,7 +302,7 @@ router.get('/', async (req, res) => {
       },
       orderBy: { name: 'asc' }
     });
-    
+
     // Calculate derived fields
     const enrichedMaterials = materials.map(m => ({
       ...m,
@@ -310,7 +310,7 @@ router.get('/', async (req, res) => {
       isLowStock: m.minStock ? m.stockQty <= m.minStock : false,
       needsReorder: m.reorderPoint ? m.stockQty <= m.reorderPoint : false
     }));
-    
+
     res.json({ materials: enrichedMaterials });
   } catch (error) {
     console.error('Error fetching materials:', error);
@@ -322,7 +322,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const material = await prisma.material.findUnique({
       where: { id },
       include: {
@@ -334,7 +334,7 @@ router.get('/:id', async (req, res) => {
           take: 20,
           include: {
             Project: {
-              select: { projectCode: true, projectName: true }
+              select: { code: true, name: true }
             }
           }
         },
@@ -352,11 +352,11 @@ router.get('/:id', async (req, res) => {
         }
       }
     });
-    
+
     if (!material) {
       return res.status(404).json({ error: 'Material not found' });
     }
-    
+
     res.json({
       material: {
         ...material,
@@ -384,11 +384,11 @@ router.post('/', async (req, res) => {
       expiryTracking,
       supplier
     } = req.body;
-    
+
     if (!name || !type || !unit) {
       return res.status(400).json({ error: 'Name, type, and unit are required' });
     }
-    
+
     const material = await prisma.material.create({
       data: {
         name,
@@ -404,7 +404,7 @@ router.post('/', async (req, res) => {
         supplier: supplier || null
       }
     });
-    
+
     res.status(201).json({ material });
   } catch (error) {
     console.error('Error creating material:', error);
@@ -417,21 +417,21 @@ router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = {};
-    
-    const fields = ['name', 'type', 'unit', 'costPerUnit', 'minStock', 
-                    'reorderPoint', 'leadTimeDays', 'expiryTracking', 'supplier'];
-    
+
+    const fields = ['name', 'type', 'unit', 'costPerUnit', 'minStock',
+      'reorderPoint', 'leadTimeDays', 'expiryTracking', 'supplier'];
+
     fields.forEach(field => {
       if (req.body[field] !== undefined) {
         updateData[field] = req.body[field];
       }
     });
-    
+
     const material = await prisma.material.update({
       where: { id },
       data: updateData
     });
-    
+
     res.json({ material });
   } catch (error) {
     console.error('Error updating material:', error);
@@ -443,11 +443,11 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     await prisma.material.delete({
       where: { id }
     });
-    
+
     res.json({ message: 'Material deleted successfully' });
   } catch (error) {
     console.error('Error deleting material:', error);
@@ -459,20 +459,81 @@ router.delete('/:id', async (req, res) => {
 router.post('/:id/receive', async (req, res) => {
   try {
     const { id } = req.params;
-    const { qty, lotNumber, supplier, expiryDate, notes } = req.body;
-    
+    const { qty, lotNumber, supplier, expiryDate, notes, projectId } = req.body;
+
     if (!qty || qty <= 0) {
       return res.status(400).json({ error: 'Valid quantity is required' });
     }
-    
+
+    // Get material details for budget check
+    const material = await prisma.material.findUnique({
+      where: { id }
+    });
+
+    if (!material) {
+      return res.status(404).json({ error: 'Material not found' });
+    }
+
+    // Budget approval threshold check (₹50,000)
+    const BUDGET_APPROVAL_THRESHOLD = 50000;
+    const totalCost = qty * material.costPerUnit;
+
+    if (totalCost > BUDGET_APPROVAL_THRESHOLD) {
+      // Check if budget approval exists for this material receipt
+      const existingApproval = await prisma.approval.findFirst({
+        where: {
+          projectId: projectId || null,
+          approvalType: 'budget',
+          category: 'material_purchase',
+          status: 'approved',
+          metadata: {
+            path: ['materialId'],
+            equals: id
+          }
+        }
+      });
+
+      if (!existingApproval) {
+        // Create budget approval request
+        const approval = await prisma.approval.create({
+          data: {
+            projectId: projectId || null,
+            approvalType: 'budget',
+            category: 'material_purchase',
+            title: `Budget Approval: ${material.name}`,
+            description: `Purchase of ${qty} ${material.unit} at ₹${material.costPerUnit}/${material.unit}. Total cost: ₹${totalCost.toLocaleString()}`,
+            requestedById: req.user?.id || null,
+            status: 'pending',
+            cutoffDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 days
+            expectedDate: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000), // 4 days (1 day buffer)
+            bufferDays: 1,
+            metadata: {
+              materialId: id,
+              materialName: material.name,
+              qty,
+              costPerUnit: material.costPerUnit,
+              totalCost
+            }
+          }
+        });
+
+        return res.status(202).json({
+          requiresApproval: true,
+          approvalId: approval.id,
+          message: `Budget approval required for purchase exceeding ₹${BUDGET_APPROVAL_THRESHOLD.toLocaleString()}. Total cost: ₹${totalCost.toLocaleString()}`,
+          approval
+        });
+      }
+    }
+
     // Update stock
-    const material = await prisma.material.update({
+    const updatedMaterial = await prisma.material.update({
       where: { id },
       data: {
         stockQty: { increment: qty }
       }
     });
-    
+
     // Create stock movement
     await prisma.stockMovement.create({
       data: {
@@ -484,14 +545,14 @@ router.post('/:id/receive', async (req, res) => {
         performedBy: req.user?.id || 'system'
       }
     });
-    
+
     // Create material lot if lot number provided
-    if (lotNumber && material.expiryTracking) {
+    if (lotNumber && updatedMaterial.expiryTracking) {
       await prisma.materialLot.create({
         data: {
           materialId: id,
           lotNumber,
-          supplier: supplier || material.supplier,
+          supplier: supplier || updatedMaterial.supplier,
           receivedDate: new Date(),
           expiryDate: expiryDate ? new Date(expiryDate) : null,
           initialQty: qty,
@@ -500,10 +561,10 @@ router.post('/:id/receive', async (req, res) => {
         }
       });
     }
-    
-    res.json({ 
-      material,
-      message: `Received ${qty} ${material.unit}` 
+
+    res.json({
+      material: updatedMaterial,
+      message: `Received ${qty} ${updatedMaterial.unit}`
     });
   } catch (error) {
     console.error('Error receiving material:', error);
@@ -516,18 +577,18 @@ router.post('/:id/adjust', async (req, res) => {
   try {
     const { id } = req.params;
     const { qty, reason, notes } = req.body;
-    
+
     if (!qty || !reason) {
       return res.status(400).json({ error: 'Quantity and reason are required' });
     }
-    
+
     const material = await prisma.material.update({
       where: { id },
       data: {
         stockQty: { increment: qty }
       }
     });
-    
+
     await prisma.stockMovement.create({
       data: {
         materialId: id,
@@ -537,7 +598,7 @@ router.post('/:id/adjust', async (req, res) => {
         performedBy: req.user?.id || 'system'
       }
     });
-    
+
     res.json({ material, message: 'Stock adjusted successfully' });
   } catch (error) {
     console.error('Error adjusting stock:', error);
@@ -557,12 +618,12 @@ router.post('/:id/adjust', async (req, res) => {
 router.get('/workflow-config/:projectId', async (req, res) => {
   try {
     const projectId = parseInt(req.params.projectId);
-    
+
     // Check if project has custom workflow config
     const config = await prisma.systemSetting.findUnique({
       where: { key: `material_workflow_${projectId}` }
     });
-    
+
     if (!config) {
       // Return default workflow
       return res.json({
@@ -580,7 +641,7 @@ router.get('/workflow-config/:projectId', async (req, res) => {
         }
       });
     }
-    
+
     res.json({
       projectId,
       hasCustomWorkflow: true,
@@ -588,7 +649,7 @@ router.get('/workflow-config/:projectId', async (req, res) => {
       updatedAt: config.updatedAt,
       updatedBy: config.updatedBy
     });
-    
+
   } catch (error) {
     console.error('[materials] Error fetching workflow config:', error);
     res.status(500).json({ error: 'Failed to fetch workflow configuration' });
@@ -603,22 +664,22 @@ router.put('/workflow-config/:projectId', async (req, res) => {
   try {
     const projectId = parseInt(req.params.projectId);
     const { stages, customFields } = req.body;
-    
+
     if (!stages || !Array.isArray(stages)) {
       return res.status(400).json({ error: 'Stages array is required' });
     }
-    
+
     // Validate stages
     const requiredStages = ['request', 'approval', 'sourcing', 'ordering', 'receiving'];
     const stageIds = stages.map(s => s.id);
     const missingRequired = requiredStages.filter(r => !stageIds.includes(r));
-    
+
     if (missingRequired.length > 0) {
-      return res.status(400).json({ 
-        error: `Missing required stages: ${missingRequired.join(', ')}` 
+      return res.status(400).json({
+        error: `Missing required stages: ${missingRequired.join(', ')}`
       });
     }
-    
+
     // Save workflow config
     const config = await prisma.systemSetting.upsert({
       where: { key: `material_workflow_${projectId}` },
@@ -640,13 +701,13 @@ router.put('/workflow-config/:projectId', async (req, res) => {
         updatedBy: req.user?.id || 'system'
       }
     });
-    
+
     res.json({
       message: 'Workflow configuration saved successfully',
       projectId,
       workflow: config.value
     });
-    
+
   } catch (error) {
     console.error('[materials] Error saving workflow config:', error);
     res.status(500).json({ error: 'Failed to save workflow configuration' });
@@ -666,17 +727,17 @@ router.post('/sourcing/:projectId', async (req, res) => {
       requiredBy,
       customFieldData = {}
     } = req.body;
-    
+
     if (!materialId || !quantity) {
       return res.status(400).json({ error: 'Material ID and quantity are required' });
     }
-    
+
     // Get workflow config
     const configKey = `material_workflow_${projectId}`;
     const config = await prisma.systemSetting.findUnique({
       where: { key: configKey }
     });
-    
+
     const workflow = config?.value || {
       stages: [
         { id: 'request', name: 'Material Request', order: 1, required: true },
@@ -687,12 +748,12 @@ router.post('/sourcing/:projectId', async (req, res) => {
       ],
       customFields: []
     };
-    
+
     // Create sourcing request (using SystemSetting as storage for now)
     // In production, you'd create a MaterialSourcingRequest model
     const requestId = `MAT_${projectId}_${Date.now()}`;
     const requestKey = `material_sourcing_${requestId}`;
-    
+
     await prisma.systemSetting.create({
       data: {
         key: requestKey,
@@ -720,13 +781,13 @@ router.post('/sourcing/:projectId', async (req, res) => {
         updatedBy: req.user?.id || 'system'
       }
     });
-    
+
     // Get material name for response
     const material = await prisma.material.findUnique({
       where: { id: materialId },
       select: { name: true, unit: true }
     });
-    
+
     res.status(201).json({
       requestId,
       projectId,
@@ -737,7 +798,7 @@ router.post('/sourcing/:projectId', async (req, res) => {
       status: 'pending',
       message: 'Sourcing request created successfully'
     });
-    
+
   } catch (error) {
     console.error('[materials] Error creating sourcing request:', error);
     res.status(500).json({ error: 'Failed to create sourcing request' });
@@ -752,29 +813,29 @@ router.put('/sourcing/:requestId/advance', async (req, res) => {
   try {
     const { requestId } = req.params;
     const { stageData = {} } = req.body;
-    
+
     const requestKey = `material_sourcing_${requestId}`;
     const setting = await prisma.systemSetting.findUnique({
       where: { key: requestKey }
     });
-    
+
     if (!setting) {
       return res.status(404).json({ error: 'Sourcing request not found' });
     }
-    
+
     const request = setting.value;
     const currentStageIndex = request.workflow.findIndex(s => s.id === request.currentStage);
-    
+
     if (currentStageIndex === -1) {
       return res.status(400).json({ error: 'Invalid current stage' });
     }
-    
+
     const nextStage = request.workflow[currentStageIndex + 1];
-    
+
     if (!nextStage) {
       return res.status(400).json({ error: 'Already at final stage' });
     }
-    
+
     // Update request
     const updatedRequest = {
       ...request,
@@ -793,7 +854,7 @@ router.put('/sourcing/:requestId/advance', async (req, res) => {
       ],
       lastUpdated: new Date().toISOString()
     };
-    
+
     await prisma.systemSetting.update({
       where: { key: requestKey },
       data: {
@@ -801,7 +862,7 @@ router.put('/sourcing/:requestId/advance', async (req, res) => {
         updatedBy: req.user?.id || 'system'
       }
     });
-    
+
     res.json({
       requestId,
       currentStage: nextStage.id,
@@ -809,7 +870,7 @@ router.put('/sourcing/:requestId/advance', async (req, res) => {
       status: updatedRequest.status,
       message: `Advanced to ${nextStage.name}`
     });
-    
+
   } catch (error) {
     console.error('[materials] Error advancing sourcing request:', error);
     res.status(500).json({ error: 'Failed to advance sourcing request' });
@@ -823,7 +884,7 @@ router.put('/sourcing/:requestId/advance', async (req, res) => {
 router.get('/sourcing/:projectId', async (req, res) => {
   try {
     const projectId = parseInt(req.params.projectId);
-    
+
     // Get all sourcing requests for this project
     // Pattern: material_sourcing_MAT_{projectId}_*
     const allSettings = await prisma.systemSetting.findMany({
@@ -833,7 +894,7 @@ router.get('/sourcing/:projectId', async (req, res) => {
         }
       }
     });
-    
+
     const requests = allSettings.map(setting => ({
       requestId: setting.value.requestId,
       materialId: setting.value.materialId,
@@ -844,9 +905,9 @@ router.get('/sourcing/:projectId', async (req, res) => {
       createdBy: setting.value.createdBy,
       lastUpdated: setting.value.lastUpdated
     }));
-    
+
     res.json(requests);
-    
+
   } catch (error) {
     console.error('[materials] Error fetching sourcing requests:', error);
     res.status(500).json({ error: 'Failed to fetch sourcing requests' });

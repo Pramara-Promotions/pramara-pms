@@ -36,11 +36,11 @@ export default function TemporaryPermissionsModal({
   onSuccess,
 }: TemporaryPermissionsModalProps) {
   const [activeTab, setActiveTab] = useState<'grant' | 'view'>('view');
-  
+
   // View existing permissions
   const [tempPermissions, setTempPermissions] = useState<TemporaryPermission[]>([]);
   const [loadingPerms, setLoadingPerms] = useState(false);
-  
+
   // Grant new permission
   const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
   const [selectedPermission, setSelectedPermission] = useState('');
@@ -54,11 +54,11 @@ export default function TemporaryPermissionsModal({
     if (isOpen) {
       fetchTempPermissions();
       fetchAllPermissions();
-      
+
       // Set default start date to now
       const now = new Date();
       setStartDate(now.toISOString().slice(0, 16));
-      
+
       // Set default end date to 7 days from now
       const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       setEndDate(weekLater.toISOString().slice(0, 16));
@@ -183,11 +183,13 @@ export default function TemporaryPermissionsModal({
   if (!isOpen) return null;
 
   // Group permissions by module
-  const permissionsByModule = allPermissions.reduce((acc, perm) => {
-    if (!acc[perm.module]) acc[perm.module] = [];
-    acc[perm.module].push(perm);
-    return acc;
-  }, {} as Record<string, Permission[]>);
+  const permissionsByModule = Array.isArray(allPermissions)
+    ? allPermissions.reduce((acc, perm) => {
+      if (!acc[perm.module]) acc[perm.module] = [];
+      acc[perm.module].push(perm);
+      return acc;
+    }, {} as Record<string, Permission[]>)
+    : {};
 
   const formatDateTime = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('en-US', {
@@ -243,21 +245,19 @@ export default function TemporaryPermissionsModal({
         <div className="flex border-b border-gray-200 dark:border-gray-700 px-6">
           <button
             onClick={() => setActiveTab('view')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'view'
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'view'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            }`}
+              }`}
           >
             Current Permissions
           </button>
           <button
             onClick={() => setActiveTab('grant')}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'grant'
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'grant'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            }`}
+              }`}
           >
             Grant New Permission
           </button>

@@ -35,8 +35,8 @@ router.get('/stages', async (req, res) => {
         Project: {
           select: {
             id: true,
-            projectCode: true,
-            projectName: true
+            code: true,
+            name: true
           }
         }
       },
@@ -398,8 +398,8 @@ router.get('/projects/:projectId/blocked', async (req, res) => {
       include: {
         Project: {
           select: {
-            projectCode: true,
-            projectName: true
+            code: true,
+            name: true
           }
         }
       }

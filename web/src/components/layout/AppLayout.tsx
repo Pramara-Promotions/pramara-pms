@@ -25,7 +25,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [searchInitialQuery, setSearchInitialQuery] = useState('')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const pathname = useRouterState({ select: s => s.location.pathname })
-  const { user, logout, loading } = useAuth()
+  const { user, logout, loading, hasRole, isSuperAdmin } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -36,10 +36,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/user/preferences', {
         credentials: 'include'
       })
-      if (!res.ok) throw new Error('Failed to fetch preferences')
+      if (!res.ok) {
+        // Silently fail for 401/403 - user might not have permissions yet
+        if (res.status === 401 || res.status === 403) {
+          return { pinnedItems: [], theme: 'light' }
+        }
+        throw new Error('Failed to fetch preferences')
+      }
       return res.json()
     },
-    enabled: !!user
+    enabled: !!user && !loading,
+    retry: (failureCount, error: any) => {
+      // Don't retry on auth errors
+      if (error?.message?.includes('401') || error?.message?.includes('403')) {
+        return false
+      }
+      return failureCount < 2
+    },
+    staleTime: 5 * 60 * 1000, // Consider data fresh for 5 minutes
   })
 
   const pinnedItems = Array.isArray(preferences?.pinnedItems) ? preferences.pinnedItems : []
@@ -152,7 +166,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Link to={to as any} className={clsx(
         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm",
         active
-          ? "bg-accent/10 text-accent"
+          ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white"
           : "text-gray-700 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
       )}>
         <Icon className="h-4 w-4" />
@@ -273,17 +287,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                           {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
                           {theme === 'light' ? 'Dark Mode' : 'Light Mode'}
                         </button>
-                        {/* Admin Actions moved from Projects page */}
-                        {user?.roles?.some((r: any) => r.role?.name === 'ADMIN') && (
+                        {/* Super Admin Actions */}
+                        {isSuperAdmin() && (
                           <>
-                            <Link
-                              to={"/projects/new" as any}
-                              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
-                              onClick={() => setUserMenuOpen(false)}
-                            >
-                              <Plus className="h-4 w-4" />
-                              Create Project
-                            </Link>
+                            <div className="border-t border-gray-200 dark:border-gray-800 my-1" />
+                            <div className="px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                              ADMIN ACTIONS
+                            </div>
                             <Link
                               to={"/admin" as any}
                               className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
@@ -292,16 +302,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                               <Settings className="h-4 w-4" />
                               Manage Users
                             </Link>
-                            <Link
-                              to={"/projects?status=critical" as any}
-                              className="flex items-center gap-2 px-3 py-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
-                              onClick={() => setUserMenuOpen(false)}
-                            >
-                              <AlertTriangle className="h-4 w-4" />
-                              Critical Projects
-                            </Link>
                           </>
                         )}
+                        <div className="border-t border-gray-200 dark:border-gray-800 my-1" />
                         <button
                           onClick={() => {
                             logout();

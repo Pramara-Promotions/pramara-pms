@@ -1,14 +1,36 @@
 // web/src/pages/projects/tabs/ExecutionTab.tsx
 // Execution section - accessed INSIDE project as a tab
-import { Factory, Activity, CheckSquare, Package, BarChart3, Box } from 'lucide-react';
+import { Factory, Activity, CheckSquare, Package, BarChart3, Box, AlertTriangle, Lock } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
 import { useProjectContext } from '../ProjectContext';
+import { useState, useEffect } from 'react';
 
 export default function ExecutionTab() {
   const project = useProjectContext();
-  
+  const [productionApproved, setProductionApproved] = useState<boolean | null>(null);
+
   const projectId = project.id;
-  
+
+  // Check if production is approved
+  useEffect(() => {
+    async function checkProductionApproval() {
+      try {
+        const res = await fetch(`/api/approvals?projectId=${projectId}&approvalType=stage_gate&status=approved`);
+        if (!res.ok) {
+          setProductionApproved(false);
+          return;
+        }
+        const approvals = await res.json();
+        const hasApproval = approvals.some((a: any) => a.category === 'production_readiness');
+        setProductionApproved(hasApproval);
+      } catch (error) {
+        console.error('Error checking approval:', error);
+        setProductionApproved(false);
+      }
+    }
+    checkProductionApproval();
+  }, [projectId]);
+
   const executionCards = [
     {
       title: 'Shift Entries',
@@ -53,7 +75,7 @@ export default function ExecutionTab() {
       color: 'bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400'
     },
   ];
-  
+
   return (
     <div>
       <div className="mb-6">
@@ -64,10 +86,74 @@ export default function ExecutionTab() {
           Production execution and workflow management for {project.name}
         </p>
       </div>
-      
+
+      {/* Production Approval Enforcement Banner */}
+      {productionApproved === false && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6">
+          <div className="flex items-start gap-3">
+            <Lock className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="font-semibold text-red-900 dark:text-red-100 mb-1">
+                Production Access Blocked
+              </h3>
+              <p className="text-sm text-red-700 dark:text-red-300 mb-2">
+                This project requires production approval before execution activities can begin.
+                Production readiness must be verified and approved by authorized personnel.
+              </p>
+              <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+                → Go to the <strong>Pre-Prod</strong> tab to request production approval
+              </p>
+            </div>
+            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+          </div>
+        </div>
+      )}
+
+      {productionApproved === null && (
+        <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 mb-6">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <h3 className="font-semibold text-yellow-900 dark:text-yellow-100 mb-1">
+                Checking Production Approval Status...
+              </h3>
+              <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                Verifying if this project has been approved for production execution.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {executionCards.map((card) => {
           const Icon = card.icon;
+          const isBlocked = productionApproved === false;
+
+          if (isBlocked) {
+            // Disabled card when not approved
+            return (
+              <div
+                key={card.link}
+                className="block p-6 bg-gray-100 dark:bg-neutral-800/50 rounded-lg border border-gray-300 dark:border-neutral-700 opacity-60 cursor-not-allowed relative"
+              >
+                <Lock className="absolute top-4 right-4 h-5 w-5 text-red-500 dark:text-red-400" />
+                <div className={`inline-flex p-3 rounded-lg ${card.color} mb-4 opacity-50`}>
+                  <Icon className="h-6 w-6" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-600 dark:text-gray-400 mb-2">
+                  {card.title}
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-500">
+                  {card.description}
+                </p>
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-2">
+                  Approval required
+                </p>
+              </div>
+            );
+          }
+
           return (
             <Link
               key={card.link}

@@ -14,9 +14,12 @@ import {
   Trash2,
   UserPlus,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Bell,
+  CheckSquare
 } from 'lucide-react';
 import { useReducedMotion } from '../../utils/animations';
+import ContextualTaskReminder from '../ContextualTaskReminder';
 
 interface TaskCardProps {
   task: {
@@ -28,14 +31,16 @@ interface TaskCardProps {
     dueDate?: string;
     tags?: string[];
     attachments?: number;
+    section?: string;
   };
+  projectId?: number;
   onClick?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onAssign?: () => void;
 }
 
-export default function TaskCard({ task, onClick, onEdit, onDelete, onAssign }: TaskCardProps) {
+export default function TaskCard({ task, projectId, onClick, onEdit, onDelete, onAssign }: TaskCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = useReducedMotion();
@@ -68,21 +73,21 @@ export default function TaskCard({ task, onClick, onEdit, onDelete, onAssign }: 
 
   // Priority config with gradient backgrounds
   const priorityConfig = {
-    Low: { 
-      bg: 'bg-gradient-to-r from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-900/20', 
-      text: 'text-blue-700 dark:text-blue-300', 
+    Low: {
+      bg: 'bg-gradient-to-r from-blue-100 to-blue-50 dark:from-blue-900/40 dark:to-blue-900/20',
+      text: 'text-blue-700 dark:text-blue-300',
       icon: '🔵',
       border: 'border-blue-300 dark:border-blue-700'
     },
-    Med: { 
-      bg: 'bg-gradient-to-r from-yellow-100 to-yellow-50 dark:from-yellow-900/40 dark:to-yellow-900/20', 
-      text: 'text-yellow-700 dark:text-yellow-300', 
+    Med: {
+      bg: 'bg-gradient-to-r from-yellow-100 to-yellow-50 dark:from-yellow-900/40 dark:to-yellow-900/20',
+      text: 'text-yellow-700 dark:text-yellow-300',
       icon: '🟡',
       border: 'border-yellow-300 dark:border-yellow-700'
     },
-    High: { 
-      bg: 'bg-gradient-to-r from-red-100 to-red-50 dark:from-red-900/40 dark:to-red-900/20', 
-      text: 'text-red-700 dark:text-red-300', 
+    High: {
+      bg: 'bg-gradient-to-r from-red-100 to-red-50 dark:from-red-900/40 dark:to-red-900/20',
+      text: 'text-red-700 dark:text-red-300',
       icon: '🔴',
       border: 'border-red-300 dark:border-red-700'
     }
@@ -100,36 +105,36 @@ export default function TaskCard({ task, onClick, onEdit, onDelete, onAssign }: 
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays < 0) {
-      return { 
-        text: `${Math.abs(diffDays)}d overdue`, 
+      return {
+        text: `${Math.abs(diffDays)}d overdue`,
         color: 'text-red-600 dark:text-red-400',
         bg: 'bg-red-100 dark:bg-red-900/40',
         urgent: true
       };
     } else if (diffDays === 0) {
-      return { 
-        text: 'Due today', 
+      return {
+        text: 'Due today',
         color: 'text-amber-600 dark:text-amber-400',
         bg: 'bg-amber-100 dark:bg-amber-900/40',
         urgent: true
       };
     } else if (diffDays === 1) {
-      return { 
-        text: 'Due tomorrow', 
+      return {
+        text: 'Due tomorrow',
         color: 'text-amber-600 dark:text-amber-400',
         bg: 'bg-amber-100 dark:bg-amber-900/40',
         urgent: false
       };
     } else if (diffDays <= 7) {
-      return { 
-        text: `${diffDays}d left`, 
+      return {
+        text: `${diffDays}d left`,
         color: 'text-gray-600 dark:text-gray-400',
         bg: 'bg-gray-100 dark:bg-gray-800',
         urgent: false
       };
     }
-    return { 
-      text: dueDate.toLocaleDateString(), 
+    return {
+      text: dueDate.toLocaleDateString(),
       color: 'text-gray-500 dark:text-gray-500',
       bg: 'bg-gray-100 dark:bg-gray-800',
       urgent: false
@@ -166,7 +171,7 @@ export default function TaskCard({ task, onClick, onEdit, onDelete, onAssign }: 
       <div className="absolute top-2 right-2 flex items-center gap-1">
         {/* Status Indicator Dot */}
         <div className={`w-2 h-2 rounded-full ${statusStyle.dot} animate-pulse`} />
-        
+
         {/* Quick Actions Menu (on hover) */}
         <div className="relative opacity-0 group-hover:opacity-100 transition-opacity">
           <button
@@ -178,9 +183,9 @@ export default function TaskCard({ task, onClick, onEdit, onDelete, onAssign }: 
           >
             <MoreVertical className="w-3 h-3 text-gray-600 dark:text-neutral-400" />
           </button>
-          
+
           {showMenu && (
-            <div className="absolute right-0 top-6 z-50 w-36 bg-white dark:bg-neutral-800 rounded-lg shadow-lg border border-gray-200 dark:border-neutral-700 overflow-hidden animate-[slideDown_150ms_ease-out]">
+            <div className="absolute right-0 top-6 z-50 w-48 bg-white dark:bg-neutral-800 rounded-lg shadow-lg border border-gray-200 dark:border-neutral-700 overflow-hidden animate-[slideDown_150ms_ease-out]">
               <button
                 onClick={(e) => handleMenuClick(e, () => onEdit?.())}
                 className="w-full px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-neutral-700 flex items-center gap-2"
@@ -195,6 +200,24 @@ export default function TaskCard({ task, onClick, onEdit, onDelete, onAssign }: 
                 <UserPlus className="w-3 h-3" />
                 Assign
               </button>
+              <div className="border-t border-gray-200 dark:border-neutral-700 my-1" />
+              <div className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+                {projectId && (
+                  <ContextualTaskReminder
+                    context={{
+                      module: 'board-task',
+                      projectId: projectId,
+                      operationId: task.id,
+                      contextUrl: `/projects/${projectId}/board`,
+                      contextTitle: task.name,
+                      contextDescription: `${task.section || 'Board'} - ${task.priority} Priority`,
+                    }}
+                    trigger="button"
+                    size="sm"
+                  />
+                )}
+              </div>
+              <div className="border-t border-gray-200 dark:border-neutral-700 my-1" />
               <button
                 onClick={(e) => handleMenuClick(e, () => onDelete?.())}
                 className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center gap-2"

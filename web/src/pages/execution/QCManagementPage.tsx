@@ -174,9 +174,44 @@ const QCManagementPage = () => {
 
   const handleApprove = async (submissionId: number) => {
     if (!confirm('Approve this QC submission?')) return;
-    
+
     try {
+      const submission = submissions.find(s => s.id === submissionId);
+
       await approveQCSubmission(submissionId, 'Approved');
+
+      // If QC result is 'pass' and has a batch code, create batch release approval
+      if (submission && submission.result === 'pass' && submission.batchCode) {
+        try {
+          const approvalResponse = await fetch('/api/approvals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId: submission.projectId,
+              approvalType: 'qc_release',
+              category: 'batch_release',
+              title: `Batch Release: ${submission.batchCode}`,
+              description: `QC inspection passed. Batch ${submission.batchCode} ready for release and shipment. Sample size: ${submission.sampleSize}, Passed: ${submission.passedQty || 0}`,
+              priority: 'high',
+              dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), // 2 days
+              metadata: {
+                qcSubmissionId: submissionId,
+                batchCode: submission.batchCode,
+                passedQty: submission.passedQty,
+                stationId: submission.stationId
+              }
+            })
+          });
+
+          if (approvalResponse.ok) {
+            alert(`QC Approved! Batch release approval created for ${submission.batchCode}`);
+          }
+        } catch (approvalError) {
+          console.error('Error creating batch release approval:', approvalError);
+          // Don't fail the QC approval if release approval creation fails
+        }
+      }
+
       fetchSubmissions();
       fetchAnalytics();
     } catch (error) {
@@ -187,7 +222,7 @@ const QCManagementPage = () => {
   const handleReject = async (submissionId: number) => {
     const notes = prompt('Reason for rejection:');
     if (!notes) return;
-    
+
     try {
       await rejectQCSubmission(submissionId, notes);
       fetchSubmissions();

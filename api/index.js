@@ -40,7 +40,7 @@ const { verifyTransport, sendEmail } = require('./lib/emailService');
 
 const projectsRouter = require('./routes/projects');
 let uploadRouter = null;
-try { uploadRouter = require('./routes/upload'); } catch {}
+try { uploadRouter = require('./routes/upload'); } catch { }
 const { documentsRouter } = require('./routes/documents');
 const rolesRouter = require('./routes/roles');
 const { adminRouter } = require('./routes/admin');
@@ -88,6 +88,8 @@ const factoriesRouter = require('./routes/factories');
 const remindersRouter = require('./routes/reminders');
 const workforceRouter = require('./routes/workforce');
 const executionRouter = require('./routes/execution');
+const timePlanningRouter = require('./routes/time-planning');
+const costingRouter = require('./routes/costing');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -206,6 +208,8 @@ app.use('/api', factoriesRouter);
 app.use('/api', remindersRouter);
 app.use('/api/workforce', workforceRouter);
 app.use('/api/execution', executionRouter);
+app.use('/api/time-planning', timePlanningRouter);
+app.use('/api/costing', costingRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';
@@ -244,7 +248,7 @@ app.get('/', (_req, res) => {
 // ====================================================================
 
 const DEV_AUTH_EMAIL = process.env.DEV_AUTH_EMAIL || 'admin@pramara.local';
-const DEV_AUTH_NAME  = process.env.DEV_AUTH_NAME  || 'Admin User';
+const DEV_AUTH_NAME = process.env.DEV_AUTH_NAME || 'Admin User';
 
 // Helper: read boolean from env
 function envTrue(v) { return String(v || '').toLowerCase() === 'true'; }
@@ -445,7 +449,7 @@ app.post('/api/projects/:id/po/confirm', async (req, res) => {
     let url = null;
     try {
       url = (await getPresignedGetUrl({ key: po.fileKey })).url;
-    } catch (_) {}
+    } catch (_) { }
 
     res.json({ ok: true, poNumber: po.poNumber, url });
   } catch (e) {
@@ -507,7 +511,7 @@ app.get('/api/projects/:id/po/:poNumber', async (req, res) => {
       const { getPresignedGetUrl } = require('./lib/storage');
       const signed = await getPresignedGetUrl({ key: po.fileKey });
       url = signed?.url || null;
-    } catch (_) {}
+    } catch (_) { }
 
     return res.status(200).json({ exists: true, poNumber, url, createdAt: po.createdAt });
   } catch (e) {
@@ -591,7 +595,7 @@ app.post('/api/projects/:id/sku-image/presign', async (req, res) => {
     if (!publicUrl) {
       try {
         publicUrl = (await getPresignedGetUrl({ key })).url;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     res.json({ putUrl: url, key, publicUrl: publicUrl || null });
@@ -621,7 +625,7 @@ app.post('/api/projects/:id/documents/presign', async (req, res) => {
     if (!publicUrl) {
       try {
         publicUrl = (await getPresignedGetUrl({ key })).url;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     res.json({ putUrl: url, key, publicUrl: publicUrl || null });
@@ -840,11 +844,11 @@ async function ensureRules(projectId) {
   if (count === 0) {
     await prisma.alertRule.createMany({
       data: [
-        { projectId, key: 'QC.rejected',         level: 'AMBER', threshold: 1,    recipients: 'lead@local',            enabled: true },
-        { projectId, key: 'QC.rejected',         level: 'RED',   threshold: 1000, recipients: 'ops@local,admin@local', enabled: true },
-        { projectId, key: 'Inventory.shortfall', level: 'AMBER', threshold: 1,    recipients: 'lead@local',            enabled: true },
-        { projectId, key: 'Inventory.shortfall', level: 'RED',   threshold: 3000, recipients: 'ops@local,admin@local', enabled: true },
-        { projectId, key: 'Pantone.mismatch',    level: 'AMBER', threshold: 0,    recipients: 'lead@local',            enabled: true },
+        { projectId, key: 'QC.rejected', level: 'AMBER', threshold: 1, recipients: 'lead@local', enabled: true },
+        { projectId, key: 'QC.rejected', level: 'RED', threshold: 1000, recipients: 'ops@local,admin@local', enabled: true },
+        { projectId, key: 'Inventory.shortfall', level: 'AMBER', threshold: 1, recipients: 'lead@local', enabled: true },
+        { projectId, key: 'Inventory.shortfall', level: 'RED', threshold: 3000, recipients: 'ops@local,admin@local', enabled: true },
+        { projectId, key: 'Pantone.mismatch', level: 'AMBER', threshold: 0, recipients: 'lead@local', enabled: true },
       ],
     });
   }
@@ -965,11 +969,13 @@ app.post('/api/alerts/:alertId/resolve', async (req, res) => {
       where: { id: alertId },
       data: {
         status: close ? 'RESOLVED' : 'ACKNOWLEDGED',
-        actions: { create: {
-          action: 'RESOLVE',
-          by, note, correctiveActions, preventRecurrence,
-          costImpactCents: toCents(costImpact), costNote,
-        } },
+        actions: {
+          create: {
+            action: 'RESOLVE',
+            by, note, correctiveActions, preventRecurrence,
+            costImpactCents: toCents(costImpact), costNote,
+          }
+        },
       },
       include: { actions: true },
     });
@@ -1676,7 +1682,7 @@ if (require.main === module) {
   const jwt = require('jsonwebtoken');
 
   const server = http.createServer(app);
-  
+
   io = new Server(server, {
     cors: {
       origin: process.env.WEB_ORIGIN || 'http://localhost:5173',
@@ -1690,7 +1696,7 @@ if (require.main === module) {
     try {
       // Try to get token from auth (client-sent) or from cookies (httpOnly)
       let token = socket.handshake.auth.token;
-      
+
       // If no token in auth, try to extract from cookies
       if (!token) {
         const cookieHeader = socket.handshake.headers.cookie;
@@ -1703,11 +1709,11 @@ if (require.main === module) {
           token = cookies.token || cookies.pms_token;
         }
       }
-      
+
       console.log('[Socket.IO Auth] Connection attempt from:', socket.handshake.address);
       console.log('[Socket.IO Auth] Token source:', socket.handshake.auth.token ? 'auth' : 'cookie');
       console.log('[Socket.IO Auth] Token received:', token ? `YES (${token.substring(0, 20)}...)` : 'NO');
-      
+
       if (!token) {
         console.log('[Socket.IO Auth] ❌ Rejected: No token in auth or cookies');
         return next(new Error('Authentication error: No token provided'));
@@ -1724,10 +1730,10 @@ if (require.main === module) {
       // Verify JWT token
       const secret = process.env.JWT_SECRET || 'dev-secret';
       const payload = jwt.verify(token, secret);
-      
+
       socket.userId = String(payload.sub || '');
       socket.userEmail = payload.email || null;
-      
+
       console.log('[Socket.IO Auth] ✅ JWT token accepted for:', socket.userEmail);
       next();
     } catch (err) {

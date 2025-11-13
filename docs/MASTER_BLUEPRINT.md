@@ -3285,14 +3285,48 @@ GET    /api/mrp/learning/patterns               (view detected patterns)
 
 ---
 
-### Phase 3: Time & Cutoff Planning (Not Started)
+### Phase 3: Time & Cutoff Planning (In Progress)
 
-#### 🔴 All Pending:
-- Backward Scheduling
-- Immediate Alerts on slip
-- Multi-Project Resource Planning
-- Rolling-Horizon Scheduler (policy-driven)
-- Resource Reallocation Planner
+This phase introduces backward scheduling from project cutoff dates, proactive slip detection with alerts, and a first-cut rolling-horizon simulator for multi-project prioritization. Initial endpoints and data flows are live; refinement and UI wiring will continue.
+
+#### ✅ Delivered (MVP)
+- Backward scheduling engine that computes stage start/end dates from project cutoff and buffers
+- Status endpoint to assess overdue/at-risk workflow stages
+- Slip-to-Alert bridge that auto-creates project Alerts for late stages
+- Rolling-horizon simulator (heuristic) to prioritize projects across a short planning window
+
+#### 🛠️ Next Up
+- Policy-driven scheduler parameters (weights for urgency, value, effort)
+- Resource-aware planning (station/worker availability constraints)
+- Auto reallocation suggestions when risk thresholds exceeded
+- UI: Planner dashboard for time buffers, slips, and quick fixes
+
+#### API Endpoints
+```
+POST   /api/time-planning/projects/:projectId/backward-schedule
+  - Input: { buffers: { shippingDays, qcDays }, stageDurations?: [{stageId|name, estimatedDays}], overwrite?: boolean }
+  - Behavior: Writes planned start/end into WorkflowStage if present (respects overwrite flag)
+
+GET    /api/time-planning/projects/:projectId/status
+  - Output: { summary: { overdueCount, atRiskCount }, stages: [{id, name, startDate, endDate, overdueDays, atRisk}] }
+
+POST   /api/time-planning/alerts/check
+  - Input: { projectIds?: number[], riskThresholdDays?: number }
+  - Behavior: Creates Alert rows for stages overdue beyond threshold
+
+POST   /api/time-planning/rolling-horizon/simulate
+  - Input: { projectIds?: number[], windowDays?: number }
+  - Output: prioritized list by urgency (cutoff proximity) and quantity (heuristic)
+```
+
+#### Data Model Leverage
+- Uses existing `Project.cutoffDate`
+- Schedules are written to `WorkflowStage.startDate` and `WorkflowStage.endDate`
+- Alerts recorded via existing `Alert` model
+
+#### Notes
+- Also see legacy simulator: `POST /api/projects/:id/plan/simulate` (kept for comparison)
+- Future iterations will add persisted schedule versions and resource constraints
 
 ---
 

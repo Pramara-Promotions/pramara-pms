@@ -2688,3 +2688,106 @@ model WIPLedger {
   @@index([itemCode])
   @@index([status])
 }
+
+// =====================================================
+// PHASE 4: COST & ADVISORY (Pricing & Costing Models)
+// =====================================================
+
+model CostTemplate {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  category     String   // material, labor, overhead, asset
+  defaultValue Float?
+  unit         String?
+  customizable Boolean  @default(true)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category])
+}
+
+model ProjectCosting {
+  id            String           @id @default(cuid())
+  projectId     Int
+  version       Int              @default(1)
+  status        String           @default("draft") // draft, submitted, approved, rejected
+  exFactoryCost Float?
+  fobCost       Float?
+  sellingPrice  Float?
+  createdBy     String
+  approvedBy    String?
+  approvedAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  Project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  components    CostComponent[]
+  pricingTiers  PricingTier[]
+  approvals     CostingApproval[]
+
+  @@index([projectId])
+  @@index([status])
+}
+
+model CostComponent {
+  id                String         @id @default(cuid())
+  projectCostingId  String
+  category          String         // material, labor, overhead, asset, logistics, misc
+  name              String
+  unit              String?
+  allocation        String         @default("per_unit") // per_unit, per_batch, one_time
+  quantity          Float?
+  costPerUnit       Float?
+  totalCost         Float?         // denormalized for quick rollups
+  oneTime           Boolean        @default(false)
+  notes             String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  ProjectCosting    ProjectCosting @relation(fields: [projectCostingId], references: [id], onDelete: Cascade)
+
+  @@index([projectCostingId])
+  @@index([category])
+}
+
+model PricingTier {
+  id               String         @id @default(cuid())
+  projectCostingId String
+  minQty           Int
+  pricePerUnit     Float
+  currency         String         @default("USD")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  ProjectCosting   ProjectCosting @relation(fields: [projectCostingId], references: [id], onDelete: Cascade)
+
+  @@index([projectCostingId])
+}
+
+model MarginRule {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  criteria      Json?    // e.g., { customer: 'X', region: 'EU' }
+  marginPercent Float
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active])
+}
+
+model CostingApproval {
+  id               String         @id @default(cuid())
+  projectCostingId String
+  status           String         @default("pending") // pending, approved, rejected
+  approverId       String?
+  comments         String?
+  actedAt          DateTime?
+
+  ProjectCosting   ProjectCosting @relation(fields: [projectCostingId], references: [id], onDelete: Cascade)
+
+  @@index([projectCostingId])
+  @@index([status])
+}

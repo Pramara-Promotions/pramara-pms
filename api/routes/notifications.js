@@ -232,7 +232,7 @@ router.post('/notifications/test-rich', authGuard, async (req, res) => {
 async function createNotification({ userId, type, title, message, link = null }, io = null) {
   try {
     const notification = await prisma.notification.create({
-      data: { userId, type, title, message, link, read: false, dismissed: false }
+      data: { userId, type, title, message, read: false, dismissed: false, priority: 'medium' }
     });
 
     // Emit real-time notification via Socket.IO if io instance is provided
@@ -255,9 +255,9 @@ async function notifyUsers(userIds, { type, title, message, link = null }, io = 
       type,
       title,
       message,
-      link,
       read: false,
       dismissed: false,
+      priority: 'medium',
     }));
     
     const result = await prisma.notification.createMany({

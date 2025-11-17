@@ -193,7 +193,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <NavItem to="/" icon={Home} label="Home" />
           <NavItem to="/projects" icon={ClipboardList} label="Projects" />
           <NavItem to="/reminders" icon={Bell} label="Tasks & Reminders" />
-          <NavItem to="/workforce" icon={Users} label="Workforce" />
 
           {/* Pinned Items Section */}
           {pinnedItems.length > 0 && (

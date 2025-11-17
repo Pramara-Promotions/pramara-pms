@@ -7,6 +7,14 @@ const router = express.Router();
 
 router.use(requireAuth);
 
+// Helper: load policy weights from SystemSetting
+async function loadPolicy() {
+    try {
+        const s = await prisma.systemSetting.findUnique({ where: { key: 'timePlanningPolicy' } });
+        return s?.value || { urgencyWeight: 0.6, valueWeight: 0.3, effortWeight: 0.1, atRiskThresholdDays: 3 };
+    } catch { return { urgencyWeight: 0.6, valueWeight: 0.3, effortWeight: 0.1, atRiskThresholdDays: 3 }; }
+}
+
 // POST /api/time-planning/projects/:projectId/backward-schedule
 // Computes a backward schedule from project cutoff and writes planned dates on WorkflowStage.
 router.post('/projects/:projectId/backward-schedule', async (req, res) => {
@@ -52,11 +60,27 @@ router.post('/projects/:projectId/backward-schedule', async (req, res) => {
         const productionEnd = new Date(afterShipping);
         productionEnd.setDate(productionEnd.getDate() - Number(buffers.qcDays || 0));
 
-        // Calculate backward dates
+        // Calculate backward dates (policy-aware ordering heuristic)
+        const policy = await loadPolicy();
+
+        // Optional: reorder stages by weighted score (urgency/value/effort)
+        // When explicit stageDurations provided, we respect order; else sort by heuristic
+        const stagesForOrdering = [...planningStages];
+        if (!stageDurations?.length && stagesForOrdering.length) {
+            // Compute simple score: urgency ~ nearer to end; value ~ stage days; effort ~ stage days
+            stagesForOrdering.forEach((s, idx) => {
+                const urgencyScore = (idx + 1) / stagesForOrdering.length;
+                const valueScore = (s.estimatedDays || 1);
+                const effortScore = (s.estimatedDays || 1);
+                s._score = policy.urgencyWeight * urgencyScore + policy.valueWeight * valueScore + policy.effortWeight * effortScore;
+            });
+            stagesForOrdering.sort((a, b) => (b._score || 0) - (a._score || 0));
+        }
+
         let cursor = new Date(productionEnd);
         const planned = [];
-        for (let i = planningStages.length - 1; i >= 0; i--) {
-            const s = planningStages[i];
+        for (let i = stagesForOrdering.length - 1; i >= 0; i--) {
+            const s = stagesForOrdering[i];
             const days = Math.max(1, Math.ceil(Number(s.estimatedDays || 1)));
             const endDate = new Date(cursor);
             const startDate = new Date(cursor);
@@ -81,9 +105,21 @@ router.post('/projects/:projectId/backward-schedule', async (req, res) => {
         const planStart = new Date(planned[0].startDate);
         const today = new Date();
         const slackDays = Math.floor((planStart - today) / (24 * 3600 * 1000));
-        const risk = slackDays < 0 ? 'RED' : slackDays < 3 ? 'AMBER' : 'GREEN';
+        const risk = slackDays < 0 ? 'RED' : slackDays < (policy.atRiskThresholdDays || 3) ? 'AMBER' : 'GREEN';
 
-        res.json({ projectId, cutoffDate: cutoff.toISOString(), buffers, planned, risk, slackDays });
+        // Resource awareness (lightweight): if any day overlaps with a station marked down or fully allocated, flag a warning
+        const resourceWarnings = [];
+        try {
+            const allocations = await prisma.resourceAllocation.findMany({ where: { projectId } });
+            if (allocations?.length) {
+                // naive: if there are allocations but no slack, warn
+                if (slackDays < (policy.atRiskThresholdDays || 3)) {
+                    resourceWarnings.push('Limited slack with existing allocations; consider rebalancing.');
+                }
+            }
+        } catch {}
+
+        res.json({ projectId, cutoffDate: cutoff.toISOString(), buffers, policy, planned, risk, slackDays, resourceWarnings });
     } catch (e) {
         console.error('time-planning:backward-schedule', e);
         res.status(500).json({ error: 'Failed to compute backward schedule' });
@@ -211,5 +247,159 @@ router.post('/rolling-horizon/simulate', async (req, res) => {
         res.status(500).json({ error: 'Failed to simulate rolling-horizon plan' });
     }
 });
+
+// POST /api/time-planning/auto-reallocate { projectIds?: number[], thresholdDays?: number }
+// For at-risk projects, return resource reallocation suggestions
+router.post('/auto-reallocate', async (req, res) => {
+    try {
+        const { projectIds, thresholdDays } = req.body || {};
+        const policy = await loadPolicy();
+        const atRiskThreshold = Number(thresholdDays ?? policy.atRiskThresholdDays ?? 3);
+
+        const ids = projectIds?.length
+            ? projectIds.map(Number)
+            : (await prisma.project.findMany({ select: { id: true } })).map(p => p.id);
+
+        const suggestions = [];
+        for (const projectId of ids) {
+            const status = await prisma.workflowStage.findMany({ where: { projectId } });
+            const today = new Date();
+            const atRisk = status.some(s => s.endDate && ((new Date(s.endDate) - today) / (24 * 3600 * 1000)) < atRiskThreshold);
+            if (!atRisk) continue;
+
+            // Lightweight suggestion using existing allocations data
+            const allocations = await prisma.resourceAllocation.findMany({ where: { projectId } });
+            const totalAlloc = allocations.length;
+            suggestions.push({ projectId, atRisk: true, summary: { totalAllocations: totalAlloc }, proposal: 'Increase machine allocations or shift priority for earlier stages.' });
+        }
+
+        res.json({ thresholdDays: atRiskThreshold, suggestions });
+    } catch (e) {
+        console.error('time-planning:auto-reallocate', e);
+        res.status(500).json({ error: 'Failed to generate auto reallocation suggestions' });
+    }
+});
+
+    // =============================
+    // Capacity and Conflict Endpoints
+    // =============================
+
+    // Helper: count available machines for a station or fallback to station.capacity or 1
+    async function stationCapacity(stationId) {
+        try {
+            const machines = await prisma.stationMachine.count({ where: { stationId: Number(stationId), status: 'available' } });
+            if (machines && machines > 0) return machines;
+        } catch {}
+        try {
+            const st = await prisma.station.findUnique({ where: { id: Number(stationId) }, select: { capacity: true } });
+            if (st?.capacity && st.capacity > 0) return st.capacity;
+        } catch {}
+        return 1;
+    }
+
+    function dayKey(d) { const dt = new Date(d); return dt.toISOString().slice(0, 10); }
+    function clampDateToDay(d) { const x = new Date(d); x.setUTCHours(0,0,0,0); return x; }
+
+    // GET /api/time-planning/capacity?start=YYYY-MM-DD&end=YYYY-MM-DD&stationId?=123
+    // Returns per-day capacity vs allocations for stations within window
+    router.get('/capacity', async (req, res) => {
+        try {
+            const { start, end, stationId } = req.query || {};
+            const startDate = start ? new Date(String(start)) : new Date();
+            const endDate = end ? new Date(String(end)) : new Date(new Date().getTime() + 7 * 24 * 3600 * 1000);
+            if (endDate < startDate) return res.status(400).json({ error: 'end must be >= start' });
+
+            const whereAlloc = {
+                ...(stationId ? { stationId: Number(stationId) } : {}),
+                // overlap condition: alloc.start <= end AND alloc.end >= start
+                AND: [
+                    { startDate: { lte: endDate } },
+                    { endDate: { gte: startDate } },
+                ],
+            };
+
+            const allocations = await prisma.resourceAllocation.findMany({ where: whereAlloc });
+            const byStation = new Map();
+            for (const a of allocations) {
+                if (!byStation.has(a.stationId)) byStation.set(a.stationId, []);
+                byStation.get(a.stationId).push(a);
+            }
+
+            const result = [];
+            for (const [sid, allocs] of byStation.entries()) {
+                const cap = await stationCapacity(sid);
+                const days = {};
+                for (const a of allocs) {
+                    const s = clampDateToDay(a.startDate);
+                    const e = clampDateToDay(a.endDate);
+                    for (let t = new Date(s); t <= e; t.setUTCDate(t.getUTCDate() + 1)) {
+                        const key = dayKey(t);
+                        if (!days[key]) days[key] = { date: key, allocated: 0 };
+                        days[key].allocated += Math.max(1, a.machinesAllocated || 1);
+                    }
+                }
+                const series = Object.values(days)
+                    .sort((a, b) => a.date.localeCompare(b.date))
+                    .map(d => ({ date: d.date, capacity: cap, allocated: d.allocated, utilization: Math.min(1, d.allocated / cap) }));
+                result.push({ stationId: sid, capacity: cap, series });
+            }
+
+            res.json({ start: startDate.toISOString(), end: endDate.toISOString(), stations: result });
+        } catch (e) {
+            console.error('time-planning:capacity', e);
+            res.status(500).json({ error: 'Failed to compute capacity' });
+        }
+    });
+
+    // GET /api/time-planning/conflicts?start=YYYY-MM-DD&end=YYYY-MM-DD&stationId?=123
+    // Returns days where allocated machines exceed available capacity
+    router.get('/conflicts', async (req, res) => {
+        try {
+            const { start, end, stationId } = req.query || {};
+            const startDate = start ? new Date(String(start)) : new Date();
+            const endDate = end ? new Date(String(end)) : new Date(new Date().getTime() + 7 * 24 * 3600 * 1000);
+            if (endDate < startDate) return res.status(400).json({ error: 'end must be >= start' });
+
+            const whereAlloc = {
+                ...(stationId ? { stationId: Number(stationId) } : {}),
+                AND: [
+                    { startDate: { lte: endDate } },
+                    { endDate: { gte: startDate } },
+                ],
+            };
+            const allocations = await prisma.resourceAllocation.findMany({ where: whereAlloc });
+            const byStation = new Map();
+            for (const a of allocations) {
+                if (!byStation.has(a.stationId)) byStation.set(a.stationId, []);
+                byStation.get(a.stationId).push(a);
+            }
+
+            const conflicts = [];
+            for (const [sid, allocs] of byStation.entries()) {
+                const cap = await stationCapacity(sid);
+                const days = {};
+                for (const a of allocs) {
+                    const s = clampDateToDay(a.startDate);
+                    const e = clampDateToDay(a.endDate);
+                    for (let t = new Date(s); t <= e; t.setUTCDate(t.getUTCDate() + 1)) {
+                        const key = dayKey(t);
+                        if (!days[key]) days[key] = 0;
+                        days[key] += Math.max(1, a.machinesAllocated || 1);
+                    }
+                }
+                for (const [date, allocated] of Object.entries(days)) {
+                    if (allocated > cap) {
+                        conflicts.push({ stationId: sid, date, allocated, capacity: cap, overBy: allocated - cap });
+                    }
+                }
+            }
+
+            conflicts.sort((a, b) => a.date.localeCompare(b.date) || a.stationId - b.stationId);
+            res.json({ start: startDate.toISOString(), end: endDate.toISOString(), conflicts });
+        } catch (e) {
+            console.error('time-planning:conflicts', e);
+            res.status(500).json({ error: 'Failed to compute conflicts' });
+        }
+    });
 
 module.exports = router;

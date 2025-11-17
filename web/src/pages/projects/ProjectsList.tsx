@@ -94,8 +94,8 @@ export default function ProjectsList() {
       setError(null);
       // For workers, only load projects with their assigned tasks
       const endpoint = isWorker
-        ? `/api/projects?includeHealth=true&assignedTo=${user?.id}`
-        : `/api/projects?includeHealth=true`;
+        ? `/api/projects?includeHealth=true&includeSnapshot=true&assignedTo=${user?.id}`
+        : `/api/projects?includeHealth=true&includeSnapshot=true`;
 
       const res = await http(endpoint, { headers: { Accept: "application/json" } });
       console.log('[ProjectsList] API response status:', res.status);

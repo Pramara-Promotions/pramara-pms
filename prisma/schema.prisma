@@ -375,6 +375,22 @@ model Project {
   materialRequirements MaterialRequirement[]
   mrpLearning          MRPLearning[]
   mrpRecommendations   MRPRecommendation[]
+
+  // Phase 3 Relations - BOM & Components
+  components           ProductComponent[]
+
+  // Phase 3 Relations - Resource Management
+  resourceAllocations  ResourceAllocation[]
+  changeoversFrom      ChangeoverHistory[]  @relation("ChangeoverFromProject")
+  changeoversTo        ChangeoverHistory[]  @relation("ChangeoverToProject")
+
+  // Phase 3 Relations - Auto Daily Planning
+  dailyPlanGenerations DailyPlanGeneration[]
+  dailyPlanStationsAuto DailyPlanStationAuto[]
+  planAdaptations      PlanAdaptation[] // reusing existing model, enhanced
+
+  // Phase 4 Relations - Costing
+  costings             ProjectCosting[]
 }
 
 model ProjectPref {
@@ -419,6 +435,17 @@ model ProjectSku {
   bomItems             BOMItem[]
   mrpLearning          MRPLearning[]
   mrpRecommendations   MRPRecommendation[]
+
+  // Phase 3 Relations - BOM & Components
+  components           ProductComponent[]
+
+  // Phase 3 Relations - Resource Management
+  resourceAllocations  ResourceAllocation[]
+  changeoversFrom      ChangeoverHistory[]  @relation("ChangeoverFromSku")
+  changeoversTo        ChangeoverHistory[]  @relation("ChangeoverToSku")
+
+  // Phase 3 Relations - Auto Daily Planning
+  dailyPlanStationsAuto DailyPlanStationAuto[]
 
   @@unique([projectId, code])
   @@index([projectId])
@@ -579,6 +606,11 @@ model Station {
 
   // Asset Management Relations
   WorkstationAssets WorkstationAsset[] @relation("StationAssets")
+
+  // Phase 3 Relations - Machine & Resource Management
+  machines              StationMachine[]
+  resourceAllocations   ResourceAllocation[]
+  dailyPlanStationsAuto DailyPlanStationAuto[]
 
   @@index([code])
   @@index([projectId])
@@ -1277,6 +1309,13 @@ model Material {
   MaterialReservation MaterialReservation[]
   StockMovement       StockMovement[]
 
+  // Phase 3 Relations - BOM & Components
+  componentMaterials  ComponentMaterial[]
+
+  // MRP Relations (already exist but adding here for clarity)
+  bomItems            BOMItem[]
+  mrpLearning         MRPLearning[]
+
   @@index([stockQty])
   @@index([type])
 }
@@ -1397,6 +1436,7 @@ model BOMItem {
 
   // Relations
   ProjectSku ProjectSku @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  Material   Material   @relation(fields: [materialId], references: [id])
 
   @@unique([skuId, materialId])
   @@index([skuId])
@@ -1418,6 +1458,7 @@ model MRPLearning {
   recordedBy         String?
 
   // Relations
+  Material   Material    @relation(fields: [materialId], references: [id])
   Project    Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   ProjectSku ProjectSku? @relation(fields: [skuId], references: [id], onDelete: Cascade)
 
@@ -1454,20 +1495,39 @@ model MRPRecommendation {
 // ==================== END MRP MODELS ====================
 
 model PlanAdaptation {
-  id                String    @id
-  dailyPlanId       String
-  trigger           String
-  affectedStationId Int?
-  systemSuggestion  Json
-  plannerDecision   String?
-  plannerReason     String?
-  outcome           String?
-  createdAt         DateTime  @default(now())
-  resolvedAt        DateTime?
-  DailyPlan         DailyPlan @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
+  id                   String    @id
+  dailyPlanId          String?
+  planGenerationId     String?   // NEW: link to auto-generated plans
+  projectId            Int
+  trigger              String
+  type                 String?   // NEW: reallocation, bottleneck_fix, material_shortage, machine_breakdown
+  title                String?   // NEW
+  description          String?   // NEW
+  reasoning            String?   // NEW
+  affectedStationId    Int?
+  systemSuggestion     Json
+  suggestedAction      Json?     // NEW: structured action details
+  expectedImpact       String?   // NEW
+  confidence           Float?    // NEW
+  status               String    @default("pending") // NEW: pending, accepted, rejected, implemented
+  plannerDecision      String?
+  plannerReason        String?
+  decidedBy            String?   // NEW
+  decidedAt            DateTime? // NEW
+  outcome              String?
+  createdAt            DateTime  @default(now())
+  resolvedAt           DateTime?
+  
+  DailyPlan            DailyPlan? @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
+  DailyPlanGeneration  DailyPlanGeneration? @relation(fields: [planGenerationId], references: [id], onDelete: Cascade)
+  Project              Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([dailyPlanId])
+  @@index([planGenerationId])
+  @@index([projectId])
   @@index([trigger])
+  @@index([type])
+  @@index([status])
 }
 
 model PlannerPreference {
@@ -2789,5 +2849,217 @@ model CostingApproval {
   ProjectCosting   ProjectCosting @relation(fields: [projectCostingId], references: [id], onDelete: Cascade)
 
   @@index([projectCostingId])
+  @@index([status])
+}
+
+// ============================================================================
+// PHASE 3: BOM & COMPONENT MANAGEMENT
+// ============================================================================
+
+model ProductComponent {
+  id              String   @id @default(cuid())
+  projectId       Int
+  skuId           Int?
+  name            String
+  type            String   // frame, temple, lens, screw, packaging, etc.
+  material        String?  // ABS, PP, PC, PPCP, Tritan, etc.
+  color           String?
+  pantoneCode     String?
+  isRubberised    Boolean  @default(false)
+  qtyPerUnit      Float    @default(1) // how many of this component per finished product
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku      ProjectSku? @relation(fields: [skuId], references: [id])
+  materials       ComponentMaterial[]
+
+  @@index([projectId])
+  @@index([skuId])
+  @@index([type])
+}
+
+model ComponentMaterial {
+  id              String   @id @default(cuid())
+  componentId     String
+  materialId      String
+  qtyPerComponent Float    // kg, liters, ml, pieces per component
+  unit            String   // kg, liter, ml, piece
+  stage           String?  // which workflow stage consumes this
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  ProductComponent ProductComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  Material        Material @relation(fields: [materialId], references: [id])
+
+  @@index([componentId])
+  @@index([materialId])
+}
+
+// ============================================================================
+// PHASE 3: MACHINE & RESOURCE MANAGEMENT
+// ============================================================================
+
+model MoldMaster {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  cavities        Int      @default(1)
+  cavityConfig    Json?    // { cavity1: "Frame", cavity2: "Temple L", ... }
+  cycleTimeSec    Int
+  material        String   // ABS, PP, etc.
+  productType     String?  // frame, temple, body, etc.
+  status          String   @default("active") // active, maintenance, retired
+  location        String?
+  manufacturer    String?
+  purchaseDate    DateTime?
+  maintenanceSchedule String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  machines        StationMachine[]
+
+  @@index([material])
+  @@index([status])
+}
+
+model StationMachine {
+  id              String   @id @default(cuid())
+  stationId       Int
+  code            String   @unique
+  name            String
+  machineType     String   // molding, painting, screwing, pad_printing, etc.
+  moldMasterId    String?  // for molding machines
+  cycleTimeSec    Int?     // can override mold cycle time
+  cavities        Int      @default(1)
+  status          String   @default("available") // available, in_use, maintenance, broken
+  currentProjectId Int?
+  currentSkuId    Int?
+  location        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  Station         Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  MoldMaster      MoldMaster? @relation(fields: [moldMasterId], references: [id])
+  allocations     ResourceAllocation[]
+  changeovers     ChangeoverHistory[]
+
+  @@index([stationId])
+  @@index([status])
+  @@index([currentProjectId])
+}
+
+model ResourceAllocation {
+  id              String   @id @default(cuid())
+  projectId       Int
+  skuId           Int?
+  stationId       Int
+  machineId       String
+  startDate       DateTime
+  endDate         DateTime
+  machinesAllocated Int    @default(1)
+  status          String   @default("planned") // planned, active, completed, cancelled
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String?
+
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku      ProjectSku? @relation(fields: [skuId], references: [id])
+  Station         Station  @relation(fields: [stationId], references: [id])
+  StationMachine  StationMachine @relation(fields: [machineId], references: [id])
+
+  @@index([projectId])
+  @@index([stationId])
+  @@index([machineId])
+  @@index([startDate, endDate])
+  @@index([status])
+}
+
+model ChangeoverHistory {
+  id                String   @id @default(cuid())
+  machineId         String
+  fromProjectId     Int?
+  fromSkuId         Int?
+  toProjectId       Int
+  toSkuId           Int?
+  changeoverStart   DateTime
+  changeoverEnd     DateTime?
+  changeoverMinutes Int?
+  rampUpEnd         DateTime?
+  rampUpMinutes     Int?
+  changeType        String   // material, color, sku, project
+  notes             String?
+  recordedBy        String?
+  createdAt         DateTime @default(now())
+
+  StationMachine    StationMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  FromProject       Project? @relation("ChangeoverFromProject", fields: [fromProjectId], references: [id])
+  ToProject         Project  @relation("ChangeoverToProject", fields: [toProjectId], references: [id])
+  FromSku           ProjectSku? @relation("ChangeoverFromSku", fields: [fromSkuId], references: [id])
+  ToSku             ProjectSku? @relation("ChangeoverToSku", fields: [toSkuId], references: [id])
+
+  @@index([machineId])
+  @@index([fromSkuId, toSkuId])
+  @@index([changeoverStart])
+}
+
+// ============================================================================
+// PHASE 3: ENHANCED DAILY PLANNING (AUTO-GENERATION)
+// ============================================================================
+
+model DailyPlanGeneration {
+  id              String   @id @default(cuid())
+  projectId       Int
+  generatedAt     DateTime @default(now())
+  generatedBy     String?
+  status          String   @default("draft") // draft, pending_approval, approved, active, completed
+  approvedAt      DateTime?
+  approvedBy      String?
+  startDate       DateTime
+  endDate         DateTime
+  totalDays       Int
+  notes           String?
+  
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  stationPlans    DailyPlanStationAuto[]
+  adaptations     PlanAdaptation[]
+
+  @@index([projectId])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+model DailyPlanStationAuto {
+  id              String   @id @default(cuid())
+  planGenerationId String
+  projectId       Int
+  skuId           Int
+  stationId       Int
+  date            DateTime
+  targetQty       Int
+  actualQty       Int      @default(0)
+  allocatedMachines Int    @default(1)
+  theoreticalCapacity Int
+  effectiveCapacity Int    // after changeover deduction
+  changeoverMinutes Int    @default(0)
+  status          String   @default("pending") // pending, in_progress, completed, blocked
+  blockedReason   String?
+  completedAt     DateTime?
+  variance        Int      @default(0) // actualQty - targetQty
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  DailyPlanGeneration DailyPlanGeneration @relation(fields: [planGenerationId], references: [id], onDelete: Cascade)
+  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProjectSku      ProjectSku @relation(fields: [skuId], references: [id])
+  Station         Station  @relation(fields: [stationId], references: [id])
+
+  @@index([planGenerationId])
+  @@index([projectId])
+  @@index([skuId])
+  @@index([stationId])
+  @@index([date])
   @@index([status])
 }

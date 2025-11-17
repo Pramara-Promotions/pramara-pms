@@ -1,11 +1,44 @@
 import { useState, useEffect, useRef } from 'react';
 import { MoreVertical, Calendar, DollarSign, Package, CheckCircle, AlertCircle, TrendingUp, Users, Activity, Target, Zap } from 'lucide-react';
 import { PieChart, Pie, Cell, RadialBarChart, RadialBar, ResponsiveContainer } from 'recharts';
+import clsx from 'clsx';
 
 interface ProjectHealth {
   score: number;
   status: 'healthy' | 'at-risk' | 'critical';
   attentionItemCount: number;
+  output?: {
+    target: number;
+    produced: number;
+    remaining: number;
+    percentComplete: number;
+    status: string;
+  };
+  quality?: {
+    totalProduced: number;
+    totalGood: number;
+    totalRejected: number;
+    passRate: number;
+    defectRate: number;
+    status: string;
+  };
+  taskProgress?: {
+    total: number;
+    completed: number;
+    inProgress: number;
+    percentComplete: number;
+  };
+  timeline?: {
+    percentComplete?: number;
+    daysRemaining?: number | null;
+    status?: string;
+  };
+  budget?: {
+    total?: number;
+    spent?: number;
+    percentUsed?: number;
+    status?: string;
+  };
 }
 
 interface Project {
@@ -18,6 +51,13 @@ interface Project {
   budget?: number;
   budgetSpent?: number;
   health?: ProjectHealth;
+  snapshot?: {
+    documents?: { count: number };
+    throughput7d?: number;
+    throughputTrend?: { date: string; output: number }[];
+    tasks?: { total: number; atRisk: number };
+    nextStage?: { id: string; name: string; status: string; startDate?: string | null; endDate?: string | null; sequence: number } | null;
+  };
 }
 
 interface ProjectCardProps {
@@ -32,24 +72,42 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
   const [currentViz, setCurrentViz] = useState<VisualizationType>('progress-bars');
   const [isPaused, setIsPaused] = useState(false);
   const timerRef = useRef<number | null>(null);
+  const vizOrderRef = useRef<VisualizationType[]>([]);
+
+  const VIZ_TYPES: VisualizationType[] = ['progress-bars', 'pie-chart', 'radial-chart', 'heat-map', 'pulse-animation'];
+  const shuffle = (arr: VisualizationType[]) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+
+  // Initialize randomized visualization order per card
+  useEffect(() => {
+    if (vizOrderRef.current.length === 0) {
+      vizOrderRef.current = shuffle([...VIZ_TYPES]);
+      setCurrentViz(vizOrderRef.current[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-rotate visualizations every 5-7 seconds
   useEffect(() => {
     if (isPaused) return;
-
-    const vizTypes: VisualizationType[] = ['progress-bars', 'pie-chart', 'radial-chart', 'heat-map', 'pulse-animation'];
-    const randomDelay = 5000 + Math.random() * 2000; // 5-7 seconds
-
+    const order = vizOrderRef.current.length ? vizOrderRef.current : VIZ_TYPES;
+    const randomDelay = 4000 + Math.random() * 4000; // 4-8 seconds
     timerRef.current = setTimeout(() => {
-      const currentIndex = vizTypes.indexOf(currentViz);
-      const nextIndex = (currentIndex + 1) % vizTypes.length;
-      setCurrentViz(vizTypes[nextIndex]);
+      const currentIndex = order.indexOf(currentViz);
+      const nextIndex = (currentIndex + 1) % order.length;
+      setCurrentViz(order[nextIndex]);
     }, randomDelay);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, [currentViz, isPaused]);
+
 
   // Status indicator based on health
   const getStatusConfig = () => {
@@ -70,43 +128,73 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
 
   const statusConfig = getStatusConfig();
 
-  // Calculate progress percentages
-  const timelineProgress = project.cutoffDate ? calculateTimelineProgress(project.cutoffDate) : null;
-  const budgetProgress = project.budget && project.budgetSpent
-    ? (project.budgetSpent / project.budget) * 100
-    : null;
+  // Extract real production metrics
   const healthScore = project.health?.score || 0;
+  const productionProgress = project.health?.output?.percentComplete || 0;
+  const qualityPassRate = project.health?.quality?.passRate || 100;
+  const processProgress = project.health?.taskProgress?.percentComplete || 0;
+  
+  // Defect/rejection percentage
+  const rejectionRate = project.health?.quality?.defectRate || 0;
+  const totalProduced = project.health?.output?.produced || 0;
+  const targetQty = project.health?.output?.target || project.quantity || 0;
+  const docsCount = project.snapshot?.documents?.count || 0;
+  const throughput7d = project.snapshot?.throughput7d || 0;
+  const throughputTrend = project.snapshot?.throughputTrend || [];
+  const tasksTotal = project.snapshot?.tasks?.total ?? project.health?.taskProgress?.total ?? 0;
+  const tasksCompleted = project.health?.taskProgress?.completed ?? 0;
+
+  // ---- Diversified Metric Sets (moved earlier to avoid temporal dead zone) ----
+  type MetricItem = { key: string; label: string; value: number; unit?: string; severity?: 'good'|'warn'|'bad'|'info' };
+  const metricSets: MetricItem[][] = [];
+  metricSets.push([
+    { key: 'production', label: 'Production', value: productionProgress, unit: '%', severity: productionProgress >= 75 ? 'good' : productionProgress >= 50 ? 'warn' : 'bad' },
+    { key: 'quality', label: 'Quality Pass', value: qualityPassRate, unit: '%', severity: qualityPassRate >= 95 ? 'good' : qualityPassRate >= 90 ? 'warn' : 'bad' },
+    { key: 'process', label: 'Process Steps', value: processProgress, unit: '%', severity: processProgress >= 75 ? 'good' : processProgress >= 50 ? 'warn' : 'bad' }
+  ]);
+  metricSets.push([
+    { key: 'reject', label: 'Rejection', value: rejectionRate, unit: '%', severity: rejectionRate < 5 ? 'good' : rejectionRate < 10 ? 'warn' : 'bad' },
+    { key: 'attention', label: 'Attention', value: project.health?.attentionItemCount || 0, unit: '', severity: (project.health?.attentionItemCount || 0) === 0 ? 'good' : (project.health?.attentionItemCount || 0) < 3 ? 'warn' : 'bad' },
+    { key: 'tasks', label: 'Tasks Done', value: project.health?.taskProgress?.percentComplete || 0, unit: '%', severity: (project.health?.taskProgress?.percentComplete || 0) >= 75 ? 'good' : (project.health?.taskProgress?.percentComplete || 0) >= 50 ? 'warn' : 'bad' }
+  ]);
+  metricSets.push([
+    { key: 'budget', label: 'Budget Used', value: project.health?.budget?.percentUsed || 0, unit: '%', severity: (project.health?.budget?.percentUsed || 0) <= 90 ? 'good' : (project.health?.budget?.percentUsed || 0) <= 100 ? 'warn' : 'bad' },
+    { key: 'timeline', label: 'Timeline', value: project.health?.timeline?.percentComplete || 0, unit: '%', severity: project.health?.timeline?.status === 'overdue' ? 'bad' : (project.health?.timeline?.daysRemaining || 999) < 7 ? 'warn' : 'good' },
+    { key: 'docs', label: 'Docs', value: docsCount, unit: '', severity: docsCount > 0 ? 'info' : 'warn' }
+  ]);
+  metricSets.push([
+    { key: 'health', label: 'Health Score', value: healthScore, unit: '', severity: healthScore >= 70 ? 'good' : healthScore >= 50 ? 'warn' : 'bad' },
+    { key: 'throughput7d', label: '7d Output', value: throughput7d, unit: '', severity: throughput7d > 0 ? 'info' : 'warn' },
+    { key: 'defect', label: 'Defect Rate', value: project.health?.quality?.defectRate || 0, unit: '%', severity: (project.health?.quality?.defectRate || 0) < 5 ? 'good' : (project.health?.quality?.defectRate || 0) < 10 ? 'warn' : 'bad' }
+  ]);
+  const shuffledMetricSetsRef = useRef<MetricItem[][]>([]);
+  if (shuffledMetricSetsRef.current.length === 0) {
+    const copy = [...metricSets];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    shuffledMetricSetsRef.current = copy;
+  }
+  const [metricSetIndex, setMetricSetIndex] = useState(0);
+
+  // Advance metric set whenever visualization changes (kept here after refs are initialized)
+  useEffect(() => {
+    if (!shuffledMetricSetsRef.current.length) return;
+    setMetricSetIndex((prev) => (prev + 1) % shuffledMetricSetsRef.current.length);
+  }, [currentViz]);
 
   // Prepare data for different visualizations
-  const pieData = [
-    { name: 'Health', value: healthScore, color: '#10b981' },
-    { name: 'Timeline', value: timelineProgress || 0, color: '#3b82f6' },
-    { name: 'Budget', value: budgetProgress || 0, color: '#8b5cf6' },
-  ];
-
-  const radialData = [
-    {
-      name: 'Health',
-      value: healthScore,
-      fill: healthScore >= 70 ? '#10b981' : healthScore >= 50 ? '#f59e0b' : '#ef4444',
-    },
-    {
-      name: 'Timeline',
-      value: timelineProgress || 0,
-      fill: '#3b82f6',
-    },
-    {
-      name: 'Budget',
-      value: budgetProgress || 0,
-      fill: budgetProgress && budgetProgress > 90 ? '#ef4444' : '#8b5cf6',
-    },
-  ];
+  const currentMetricSet = shuffledMetricSetsRef.current[metricSetIndex] || [];
+  const pieData = currentMetricSet.map(m => ({ name: m.label, value: m.value, color: m.severity === 'good' ? '#10b981' : m.severity === 'warn' ? '#f59e0b' : m.severity === 'bad' ? '#ef4444' : '#3b82f6' }));
+  const radialData = currentMetricSet.map(m => ({ name: m.label, value: m.value, fill: m.severity === 'good' ? '#10b981' : m.severity === 'warn' ? '#f59e0b' : m.severity === 'bad' ? '#ef4444' : '#3b82f6' }));
 
   // Heat map cells for critical metrics
   const heatMapData = [
-    { label: 'Health', value: healthScore, max: 100 },
-    { label: 'Timeline', value: timelineProgress || 0, max: 100 },
-    { label: 'Budget', value: budgetProgress || 0, max: 100 },
+    { label: 'Prod', value: productionProgress, max: 100 },
+    { label: 'Qual', value: qualityPassRate, max: 100 },
+    { label: 'Proc', value: processProgress, max: 100 },
+    { label: 'Reject', value: rejectionRate, max: 10 },
     { label: 'Attention', value: project.health?.attentionItemCount || 0, max: 10 },
   ];
 
@@ -119,87 +207,49 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
     return 'bg-emerald-500';
   };
 
+
   // Render different visualization types
   const renderVisualization = () => {
     switch (currentViz) {
       case 'progress-bars':
         return (
           <div className="space-y-4 transition-all duration-500">
-            {/* Health Score */}
-            {project.health && (
-              <div className="animate-fade-in">
+            {currentMetricSet.map((m, idx) => (
+              <div key={m.key} className="animate-fade-in" style={{ animationDelay: `${idx * 120}ms` }}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                    <Activity className="w-4 h-4" />
-                    Health Score
+                    {idx === 0 && <Package className="w-4 h-4" />}
+                    {idx === 1 && <CheckCircle className="w-4 h-4" />}
+                    {idx === 2 && <Target className="w-4 h-4" />}
+                    {m.label}
                   </span>
-                  <span className={`text-lg font-bold ${healthScore >= 70 ? 'text-green-600' : healthScore >= 50 ? 'text-yellow-600' : 'text-red-600'
-                    }`}>
-                    {healthScore}/100
+                  <span className={clsx('text-sm font-bold',
+                    m.severity === 'good' && 'text-green-600',
+                    m.severity === 'warn' && 'text-yellow-600',
+                    m.severity === 'bad' && 'text-red-600',
+                    m.severity === 'info' && 'text-blue-600'
+                  )}>
+                    {m.value.toFixed(1)}{m.unit}
                   </span>
                 </div>
                 <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
                   <div
-                    className={`h-2 rounded-full transition-all duration-500 ${healthScore >= 70
-                      ? 'bg-gradient-to-r from-green-500 to-emerald-500'
-                      : healthScore >= 50
-                        ? 'bg-gradient-to-r from-yellow-500 to-orange-500'
-                        : 'bg-gradient-to-r from-red-500 to-pink-500'
-                      }`}
-                    style={{ width: `${healthScore}%` }}
+                    className={clsx('h-2 rounded-full transition-all duration-500',
+                      m.severity === 'good' && 'bg-gradient-to-r from-green-500 to-emerald-500',
+                      m.severity === 'warn' && 'bg-gradient-to-r from-yellow-500 to-orange-500',
+                      m.severity === 'bad' && 'bg-gradient-to-r from-red-500 to-pink-500',
+                      m.severity === 'info' && 'bg-gradient-to-r from-blue-500 to-indigo-500'
+                    )}
+                    style={{ width: `${Math.min(100, m.value)}%` }}
                   />
                 </div>
-              </div>
-            )}
-
-            {/* Timeline Progress */}
-            {timelineProgress !== null && (
-              <div className="animate-fade-in" style={{ animationDelay: '100ms' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <Calendar className="w-4 h-4" />
-                    <span>Timeline</span>
-                  </div>
-                  <span className="text-sm font-medium">{timelineProgress.toFixed(0)}%</span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
-                  <div
-                    className="h-2 rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-500"
-                    style={{ width: `${Math.min(100, timelineProgress)}%` }}
-                  />
-                </div>
-                {project.cutoffDate && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Due: {new Date(project.cutoffDate).toLocaleDateString()}
+                {m.key === 'reject' && m.value > 0 && (
+                  <p className="text-xs text-red-500 dark:text-red-400 mt-1">
+                    {m.value.toFixed(1)}% Rejection
                   </p>
                 )}
               </div>
-            )}
-
-            {/* Budget Progress */}
-            {budgetProgress !== null && project.budget && (
-              <div className="animate-fade-in" style={{ animationDelay: '200ms' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <DollarSign className="w-4 h-4" />
-                    <span>Budget</span>
-                  </div>
-                  <span className="text-sm font-medium">{budgetProgress.toFixed(0)}%</span>
-                </div>
-                <div className="w-full bg-gray-200 dark:bg-slate-700 rounded-full h-2">
-                  <div
-                    className={`h-2 rounded-full transition-all duration-500 ${budgetProgress > 90
-                      ? 'bg-gradient-to-r from-red-500 to-orange-500'
-                      : 'bg-gradient-to-r from-green-500 to-teal-500'
-                      }`}
-                    style={{ width: `${Math.min(100, budgetProgress)}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  ${(project.budgetSpent || 0).toLocaleString()} / ${project.budget.toLocaleString()}
-                </p>
-              </div>
-            )}
+            ))}
           </div>
         );
 
@@ -225,18 +275,17 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
               </PieChart>
             </ResponsiveContainer>
             <div className="flex justify-center gap-4 text-xs">
-              <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-green-500" />
-                <span className="text-gray-600 dark:text-gray-400">Health {healthScore}%</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-blue-500" />
-                <span className="text-gray-600 dark:text-gray-400">Timeline {(timelineProgress || 0).toFixed(0)}%</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <div className="w-3 h-3 rounded-full bg-purple-500" />
-                <span className="text-gray-600 dark:text-gray-400">Budget {(budgetProgress || 0).toFixed(0)}%</span>
-              </div>
+              {currentMetricSet.map(m => (
+                <div key={m.key} className="flex items-center gap-1">
+                  <div className={clsx('w-3 h-3 rounded-full',
+                    m.severity === 'good' && 'bg-green-500',
+                    m.severity === 'warn' && 'bg-yellow-500',
+                    m.severity === 'bad' && 'bg-red-500',
+                    m.severity === 'info' && 'bg-blue-500'
+                  )} />
+                  <span className="text-gray-600 dark:text-gray-400">{m.label} {m.value.toFixed(0)}{m.unit}</span>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -263,18 +312,12 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
               </RadialBarChart>
             </ResponsiveContainer>
             <div className="grid grid-cols-3 gap-2 text-xs text-center">
-              <div>
-                <div className="font-semibold text-gray-900 dark:text-white">{healthScore}%</div>
-                <div className="text-gray-500">Health</div>
-              </div>
-              <div>
-                <div className="font-semibold text-gray-900 dark:text-white">{(timelineProgress || 0).toFixed(0)}%</div>
-                <div className="text-gray-500">Timeline</div>
-              </div>
-              <div>
-                <div className="font-semibold text-gray-900 dark:text-white">{(budgetProgress || 0).toFixed(0)}%</div>
-                <div className="text-gray-500">Budget</div>
-              </div>
+              {currentMetricSet.map(m => (
+                <div key={m.key}>
+                  <div className="font-semibold text-gray-900 dark:text-white">{m.value.toFixed(0)}{m.unit}</div>
+                  <div className="text-gray-500 truncate" title={m.label}>{m.label}</div>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -334,14 +377,14 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
             </div>
 
             {/* Floating metrics */}
-            <div className="absolute top-4 right-4 bg-blue-500 rounded-lg px-3 py-2 shadow-lg animate-float">
-              <div className="text-xs text-white opacity-80">Timeline</div>
-              <div className="text-lg font-bold text-white">{(timelineProgress || 0).toFixed(0)}%</div>
+            <div className="absolute top-4 right-4 bg-green-500 rounded-lg px-3 py-2 shadow-lg animate-float">
+              <div className="text-xs text-white opacity-80">Production</div>
+              <div className="text-lg font-bold text-white">{productionProgress.toFixed(0)}%</div>
             </div>
 
-            <div className="absolute bottom-4 left-4 bg-purple-500 rounded-lg px-3 py-2 shadow-lg animate-float-delayed">
-              <div className="text-xs text-white opacity-80">Budget</div>
-              <div className="text-lg font-bold text-white">{(budgetProgress || 0).toFixed(0)}%</div>
+            <div className="absolute bottom-4 left-4 bg-blue-500 rounded-lg px-3 py-2 shadow-lg animate-float-delayed">
+              <div className="text-xs text-white opacity-80">Quality</div>
+              <div className="text-lg font-bold text-white">{qualityPassRate.toFixed(0)}%</div>
             </div>
           </div>
         );
@@ -422,6 +465,27 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
         {renderVisualization()}
       </div>
 
+      {/* Mini throughput sparkline (last 7 days) */}
+      {throughputTrend.length > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+            <span>7-day Throughput</span>
+            <span className="font-medium text-gray-700 dark:text-gray-300">{throughput7d.toLocaleString()} units</span>
+          </div>
+          <div className="flex items-end gap-1 h-10">
+            {throughputTrend.map((t, idx) => {
+              const max = Math.max(...throughputTrend.map(x => x.output || 0)) || 1;
+              const h = Math.max(2, Math.round((t.output / max) * 36));
+              return (
+                <div key={idx} className="flex-1 bg-gray-200 dark:bg-slate-700 rounded">
+                  <div className="bg-emerald-500 rounded" style={{ height: `${h}px` }} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Visualization Indicator Dots */}
       <div className="flex justify-center gap-1.5 mb-4">
         {['progress-bars', 'pie-chart', 'radial-chart', 'heat-map', 'pulse-animation'].map((viz) => (
@@ -470,20 +534,18 @@ export default function ProjectCard({ project, onClick }: ProjectCardProps) {
       )}
 
       {/* Footer Stats */}
-      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1">
-            <CheckCircle className="w-3 h-3" />
-            <span>Tasks</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Users className="w-3 h-3" />
-            <span>Team</span>
-          </div>
+      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-700 grid grid-cols-3 gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <div className="flex items-center gap-1">
+          <CheckCircle className="w-3 h-3" />
+          <span>Tasks {tasksCompleted}/{tasksTotal}</span>
         </div>
         <div className="flex items-center gap-1">
+          <Users className="w-3 h-3" />
+          <span>Docs {docsCount}</span>
+        </div>
+        <div className="flex items-center gap-1 justify-end">
           <TrendingUp className="w-3 h-3" />
-          <span>View Details →</span>
+          <span>7d {throughput7d.toLocaleString()}</span>
         </div>
       </div>
     </div>

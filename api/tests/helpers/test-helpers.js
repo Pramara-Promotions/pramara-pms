@@ -127,7 +127,12 @@ async function cleanupTestData(prisma, resourceType, ids) {
     users: () => prisma.user.deleteMany({ where: { id: { in: validIds } } }),
     projects: () => prisma.project.deleteMany({ where: { id: { in: validIds } } }),
     stations: () => prisma.station.deleteMany({ where: { id: { in: validIds } } }),
-    materials: () => prisma.material.deleteMany({ where: { id: { in: validIds } } }),
+    materials: async () => {
+      // Clean dependent MRP records first to avoid FK violations
+      await prisma.mRPRecommendation.deleteMany({ where: { materialId: { in: validIds } } }).catch(() => {});
+      await prisma.mRPLearning.deleteMany({ where: { materialId: { in: validIds } } }).catch(() => {});
+      await prisma.material.deleteMany({ where: { id: { in: validIds } } });
+    },
     workers: () => prisma.worker.deleteMany({ where: { id: { in: validIds } } }),
     processConfigs: () => prisma.processConfig.deleteMany({ where: { id: { in: validIds } } }),
     workflowStages: () => prisma.workflowStage.deleteMany({ where: { id: { in: validIds } } }),

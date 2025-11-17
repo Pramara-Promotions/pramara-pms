@@ -150,6 +150,14 @@ const LabTestsPage = () => {
     }
   };
 
+  // Summary metrics
+  const totalTests = tests.length;
+  const passCount = tests.filter(t => t.result === 'pass').length;
+  const failCount = tests.filter(t => t.result === 'fail').length;
+  const conditionalCount = tests.filter(t => t.result === 'conditional').length;
+  const pendingCount = tests.filter(t => !t.result || t.result === 'pending').length;
+  const passRate = totalTests > 0 ? Math.round((passCount / totalTests) * 100) : 0;
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -190,6 +198,41 @@ const LabTestsPage = () => {
           <option value="fail">Fail</option>
           <option value="conditional">Conditional</option>
         </select>
+      </div>
+
+      {/* Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Total Tests</p>
+          <p className="text-2xl font-bold text-gray-900">{totalTests}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Pass</p>
+          <p className="text-2xl font-bold text-green-700">{passCount}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Fail</p>
+          <p className="text-2xl font-bold text-red-700">{failCount}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Conditional</p>
+          <p className="text-2xl font-bold text-yellow-700">{conditionalCount}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Pending</p>
+          <p className="text-2xl font-bold text-gray-700">{pendingCount}</p>
+        </div>
+      </div>
+
+      {/* Simple pass rate bar */}
+      <div className="mb-6 bg-white rounded-lg shadow p-4">
+        <div className="flex justify-between text-sm text-gray-600 mb-2">
+          <span>Pass rate</span>
+          <span>{passRate}%</span>
+        </div>
+        <div className="h-2 w-full bg-gray-100 rounded">
+          <div className="h-2 bg-green-500 rounded" style={{ width: `${passRate}%` }} />
+        </div>
       </div>
 
       <div className="space-y-4">

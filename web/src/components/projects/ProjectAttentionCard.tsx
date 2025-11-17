@@ -6,6 +6,27 @@ interface ProjectHealth {
     score: number;
     status: 'healthy' | 'at-risk' | 'critical';
     attentionItemCount: number;
+    output?: {
+        target: number;
+        produced: number;
+        remaining: number;
+        percentComplete: number;
+        status: string;
+    };
+    quality?: {
+        totalProduced: number;
+        totalGood: number;
+        totalRejected: number;
+        passRate: number;
+        defectRate: number;
+        status: string;
+    };
+    taskProgress?: {
+        total: number;
+        completed: number;
+        inProgress: number;
+        percentComplete: number;
+    };
 }
 
 interface Project {

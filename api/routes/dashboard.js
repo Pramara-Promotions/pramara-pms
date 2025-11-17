@@ -302,19 +302,39 @@ router.get('/overview', authGuard, async (req, res) => {
       }),
     ]);
 
-    // Quality Analytics
-    const [qcStats, qcByResult] = await Promise.all([
-      prisma.qCSubmission.aggregate({
-        where: { submissionDate: { gte: startDate } },
+    // Quality Analytics (QCSubmission)
+    // Use submittedAt (existing column) instead of non-existent submissionDate
+    // Some schemas may not have sampleSize/passedQty/failedQty; fall back to counts by overallPass
+    let qcStats = { _count: 0, _sum: { sampleSize: 0, passedQty: 0, failedQty: 0 } };
+    let qcByResult = [];
+    try {
+      qcStats = await prisma.qCSubmission.aggregate({
+        where: { submittedAt: { gte: startDate } },
         _sum: { sampleSize: true, passedQty: true, failedQty: true },
         _count: true,
-      }),
-      prisma.qCSubmission.groupBy({
-        by: ['result'],
-        where: { submissionDate: { gte: startDate } },
+      });
+    } catch (e) {
+      // If summarized fields don't exist, compute pass/fail via groupBy on overallPass
+      const grouped = await prisma.qCSubmission.groupBy({
+        by: ['overallPass'],
+        where: { submittedAt: { gte: startDate } },
         _count: true,
-      }),
-    ]);
+      });
+      const pass = grouped.find(g => g.overallPass === true)?._count || 0;
+      const fail = grouped.find(g => g.overallPass === false)?._count || 0;
+      qcStats = { _count: pass + fail, _sum: { sampleSize: pass + fail, passedQty: pass, failedQty: fail } };
+      qcByResult = grouped.map(g => ({ result: g.overallPass ? 'pass' : 'fail', _count: g._count }));
+    }
+    if (qcByResult.length === 0) {
+      // If aggregate succeeded, also return breakdown by overallPass
+      try {
+        qcByResult = await prisma.qCSubmission.groupBy({
+          by: ['overallPass'],
+          where: { submittedAt: { gte: startDate } },
+          _count: true,
+        });
+      } catch {}
+    }
 
     const totalChecked = (qcStats._sum.sampleSize || 0);
     const totalPassed = (qcStats._sum.passedQty || 0);
@@ -405,8 +425,8 @@ router.get('/overview', authGuard, async (req, res) => {
         totalPassed,
         totalFailed: (qcStats._sum.failedQty || 0),
         passRate: Math.round(passRate * 100) / 100,
-        byResult: qcByResult.map(r => ({
-          result: r.result,
+        byResult: (Array.isArray(qcByResult) ? qcByResult : []).map(r => ({
+          result: (r.result !== undefined ? r.result : (r.overallPass ? 'pass' : 'fail')),
           count: r._count,
         })),
       },

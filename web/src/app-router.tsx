@@ -60,11 +60,21 @@ import WorkflowBuilderPage from "./pages/WorkflowBuilderPage";
 import MaterialDashboardPage from "./pages/MaterialDashboardPage";
 import WorkforceManagementPage from "./pages/WorkforceManagementPage";
 import DailyPlanningPage from "./pages/DailyPlanningPage";
+import AutoPlanningPage from "./pages/AutoPlanningPage";
+import { AdaptivePlanningDashboard } from "./pages/AdaptivePlanningDashboard";
+import ProjectCostingPage from "./pages/ProjectCostingPage";
 import ApprovalTrackerPage from "./pages/ApprovalTrackerPage";
 import MRPCalculatorPage from "./pages/MRPCalculatorPage";
 import StageView from "./pages/cross-project/StageView";
 import { FacilityManagementPage } from "./pages/admin/FacilityManagementPage";
 import TasksRemindersHub from "./pages/inbox/TasksRemindersHub";
+import TimePlanningDashboard from "./pages/TimePlanningDashboard";
+import MarginRulesPage from "./pages/MarginRulesPage";
+import CostTemplatesPage from "./pages/CostTemplatesPage";
+import CostingPnlPage from "./pages/CostingPnlPage";
+import FactoryHierarchyPage from "./pages/FactoryHierarchyPage";
+import StationAssignmentPage from "./pages/execution/StationAssignmentPage";
+import { WorkforceSkillMatrixPage } from "./pages/WorkforceSkillMatrixPage";
 
 /****************************************************
  * [LMK-02] ROOT ROUTE (no context)
@@ -303,6 +313,11 @@ const stationsRoute = createRoute({
   path: "execution/stations",
   component: StationsPage,
 });
+const stationAssignmentRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "execution/station-assignment",
+  component: StationAssignmentPage,
+});
 
 const workflowRoute = createRoute({
   getParentRoute: () => layoutRoute,
@@ -351,11 +366,34 @@ const workforceManagementRoute = createRoute({
   path: "workforce",
   component: WorkforceManagementPage,
 });
+const workforceSkillsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "workforce/skills",
+  component: WorkforceSkillMatrixPage,
+});
 
 const dailyPlanningRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "planning/daily",
   component: DailyPlanningPage,
+});
+
+const autoPlanningRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/auto",
+  component: AutoPlanningPage,
+});
+
+const adaptivePlanningRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/adaptive",
+  component: AdaptivePlanningDashboard,
+});
+
+const projectCostingRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/costing",
+  component: ProjectCostingPage,
 });
 
 const approvalTrackerRoute = createRoute({
@@ -368,6 +406,36 @@ const mrpCalculatorRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "planning/mrp",
   component: MRPCalculatorPage,
+});
+
+const timePlanningRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/time",
+  component: TimePlanningDashboard,
+});
+
+const marginRulesRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/margin-rules",
+  component: MarginRulesPage,
+});
+
+const costTemplatesRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/cost-templates",
+  component: CostTemplatesPage,
+});
+
+const costingPnlRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/costing/pnl",
+  component: CostingPnlPage,
+});
+
+const factoryHierarchyRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "admin/factory-hierarchy",
+  component: FactoryHierarchyPage,
 });
 
 const stageViewRoute = createRoute({
@@ -412,6 +480,26 @@ const newProjectRoute = createRoute({
   component: NewProject,
 });
 
+// Project-scoped execution subpages
+const stationAssignmentProjectRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "execution/station-assignment",
+  component: StationAssignmentPage,
+});
+
+// Project-scoped planning and workforce subpages
+const adaptivePlanningProjectRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "planning/adaptive",
+  component: AdaptivePlanningDashboard,
+});
+
+const workforceSkillsProjectRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "workforce/skills",
+  component: WorkforceSkillMatrixPage,
+});
+
 /****************************************************
  * [LMK-04] ROUTE TREE
  ****************************************************/
@@ -442,6 +530,7 @@ const routeTree = rootRoute.addChildren([
     shiftEntriesRoute,
     wipLedgerRoute,
     stationsRoute,
+  stationAssignmentRoute,
     workflowRoute,
     qcManagementRoute,
     productionEntryRoute,
@@ -450,9 +539,18 @@ const routeTree = rootRoute.addChildren([
     workflowBuilderRoute,
     materialDashboardRoute,
     workforceManagementRoute,
+  workforceSkillsRoute,
     dailyPlanningRoute,
+    autoPlanningRoute,
+  adaptivePlanningRoute,
+    projectCostingRoute,
     approvalTrackerRoute,
     mrpCalculatorRoute,
+    timePlanningRoute,
+    marginRulesRoute,
+    costTemplatesRoute,
+    costingPnlRoute,
+    factoryHierarchyRoute,
     stageViewRoute,
     accountRoute,
   ]),
@@ -475,6 +573,9 @@ projectDetailRoute.addChildren([
   planningTabRoute,
   filesTabRoute,
   messagesTabRoute,
+  stationAssignmentProjectRoute,
+  adaptivePlanningProjectRoute,
+  workforceSkillsProjectRoute,
 ]);
 
 /****************************************************

@@ -37,7 +37,8 @@
     "test:performance": "cd api && npm run test:performance",
     "test:all": "npm run test:api && npm run test:e2e && npm run test:integration",
     "test:report": "npx playwright show-report",
-    "test:debug": "npx playwright test --debug"
+    "test:debug": "npx playwright test --debug",
+    "db:reset-seed": "node scripts/reset-and-seed-e2e.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

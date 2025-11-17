@@ -302,6 +302,15 @@ const CertificationsPage = () => {
     }
   };
 
+  // KPI counts for summary cards
+  const totalCerts = certifications.length;
+  const expiringSoonCount = certifications.filter(c => {
+    const d = getDaysUntilExpiry(c.expiryDate);
+    return d > 0 && d <= 30;
+  }).length;
+  const expiredCount = certifications.filter(c => getDaysUntilExpiry(c.expiryDate) <= 0).length;
+  const activeCount = Math.max(0, totalCerts - expiringSoonCount - expiredCount);
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -319,6 +328,26 @@ const CertificationsPage = () => {
           <Plus size={20} />
           Add Certification
         </button>
+      </div>
+
+      {/* KPI Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Total Certifications</p>
+          <p className="text-2xl font-bold text-gray-900">{totalCerts}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Active</p>
+          <p className="text-2xl font-bold text-green-700">{activeCount}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Expiring ≤ 30d</p>
+          <p className="text-2xl font-bold text-yellow-700">{expiringSoonCount}</p>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <p className="text-sm text-gray-600">Expired</p>
+          <p className="text-2xl font-bold text-red-700">{expiredCount}</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-6">

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiPost, apiPut, apiDelete } from '../lib/api';
+import { Plus, Edit2, Trash2, CheckCircle, Clock, AlertCircle, Link as LinkIcon, FileText, User, Save, ArrowRight } from 'lucide-react';
 
 interface WorkflowStage {
   id: string;
@@ -8,25 +9,39 @@ interface WorkflowStage {
   status: string;
   dependencies: string[];
   approverType?: string;
+  approverId?: string | null;
+  responsibleId?: string | null;
   bufferDays: number;
+  requiredDocs: string[];
+  materialIds: string[];
   SubStages?: WorkflowStage[];
+}
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
 }
 
 export default function WorkflowBuilderPage() {
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [stages, setStages] = useState<WorkflowStage[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [blockedStages, setBlockedStages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingStage, setEditingStage] = useState<WorkflowStage | null>(null);
   
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<Partial<WorkflowStage>>({
     name: '',
-    order: '',
+    order: 0,
     approverType: 'internal',
-    bufferDays: '2',
-    dependencies: [] as string[]
+    bufferDays: 2,
+    dependencies: [],
+    requiredDocs: [],
+    materialIds: [],
+    status: 'not-started'
   });
 
   useEffect(() => {
@@ -84,10 +99,14 @@ export default function WorkflowBuilderPage() {
       const payload = {
         projectId: parseInt(selectedProjectId),
         name: formData.name,
-        order: parseInt(formData.order),
+        order: formData.order || 0,
         approverType: formData.approverType,
-        bufferDays: parseInt(formData.bufferDays),
-        dependencies: formData.dependencies
+        approverId: formData.approverId,
+        responsibleId: formData.responsibleId,
+        bufferDays: formData.bufferDays || 2,
+        dependencies: formData.dependencies || [],
+        requiredDocs: formData.requiredDocs || [],
+        materialIds: formData.materialIds || []
       };
 
       if (editingStage) {
@@ -133,10 +152,13 @@ export default function WorkflowBuilderPage() {
   const resetForm = () => {
     setFormData({
       name: '',
-      order: '',
+      order: 0,
       approverType: 'internal',
-      bufferDays: '2',
-      dependencies: []
+      bufferDays: 2,
+      dependencies: [],
+      requiredDocs: [],
+      materialIds: [],
+      status: 'not-started'
     });
     setEditingStage(null);
   };
@@ -145,10 +167,15 @@ export default function WorkflowBuilderPage() {
     setEditingStage(stage);
     setFormData({
       name: stage.name,
-      order: stage.order.toString(),
+      order: stage.order,
       approverType: stage.approverType || 'internal',
-      bufferDays: stage.bufferDays.toString(),
-      dependencies: stage.dependencies || []
+      approverId: stage.approverId,
+      responsibleId: stage.responsibleId,
+      bufferDays: stage.bufferDays,
+      dependencies: stage.dependencies || [],
+      requiredDocs: stage.requiredDocs || [],
+      materialIds: stage.materialIds || [],
+      status: stage.status
     });
     setShowModal(true);
   };
@@ -227,70 +254,123 @@ export default function WorkflowBuilderPage() {
       {/* Stages List */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="p-4 border-b">
-          <h2 className="font-bold text-lg">Workflow Stages</h2>
+          <h2 className="font-bold text-lg flex items-center gap-2">
+            <ArrowRight className="w-5 h-5" />
+            Workflow Timeline ({stages.length} stages)
+          </h2>
         </div>
         
         <div className="divide-y divide-gray-200">
-          {stages.sort((a, b) => a.order - b.order).map(stage => (
-            <div key={stage.id} className="p-4 hover:bg-gray-50">
+          {stages.sort((a, b) => a.order - b.order).map((stage, index) => (
+            <div key={stage.id} className="p-4 hover:bg-gray-50 transition">
               <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="text-gray-400 font-bold">#{stage.order}</span>
-                    <h3 className="font-bold text-lg text-gray-900">{stage.name}</h3>
-                    <span className={`px-2 py-1 rounded text-xs ${getStatusColor(stage.status)}`}>
-                      {stage.status}
-                    </span>
+                <div className="flex gap-4 flex-1">
+                  {/* Stage Number Circle */}
+                  <div className="flex flex-col items-center">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white ${
+                      stage.status === 'completed' ? 'bg-green-500' :
+                      stage.status === 'in-progress' ? 'bg-blue-500' :
+                      stage.status === 'blocked' ? 'bg-red-500' : 'bg-gray-400'
+                    }`}>
+                      {stage.order}
+                    </div>
+                    {index < stages.length - 1 && (
+                      <div className="w-0.5 h-12 bg-gray-300 mt-2" />
+                    )}
                   </div>
-                  
-                  <div className="flex gap-4 text-sm text-gray-600">
-                    <div>
-                      <span className="font-medium">Approver:</span> {stage.approverType || '-'}
+
+                  {/* Stage Details */}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="font-bold text-lg text-gray-900">{stage.name}</h3>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(stage.status)}`}>
+                        {stage.status === 'not-started' && <Clock className="w-3 h-3 inline mr-1" />}
+                        {stage.status === 'in-progress' && <Clock className="w-3 h-3 inline mr-1" />}
+                        {stage.status === 'completed' && <CheckCircle className="w-3 h-3 inline mr-1" />}
+                        {stage.status === 'blocked' && <AlertCircle className="w-3 h-3 inline mr-1" />}
+                        {stage.status}
+                      </span>
                     </div>
-                    <div>
-                      <span className="font-medium">Buffer:</span> {stage.bufferDays} days
+                    
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm text-gray-600 mb-3">
+                      <div className="flex items-center gap-2">
+                        <User className="w-4 h-4 text-gray-400" />
+                        <span className="font-medium">Approver:</span> 
+                        <span>{stage.approverType || 'Not set'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-gray-400" />
+                        <span className="font-medium">Buffer:</span> 
+                        <span>{stage.bufferDays} days</span>
+                      </div>
+                      {stage.dependencies && stage.dependencies.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <LinkIcon className="w-4 h-4 text-gray-400" />
+                          <span className="font-medium">Dependencies:</span> 
+                          <span>{stage.dependencies.length} stage(s)</span>
+                        </div>
+                      )}
+                      {stage.requiredDocs && stage.requiredDocs.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-gray-400" />
+                          <span className="font-medium">Documents:</span> 
+                          <span>{stage.requiredDocs.length} required</span>
+                        </div>
+                      )}
                     </div>
-                    {stage.dependencies && stage.dependencies.length > 0 && (
-                      <div>
-                        <span className="font-medium">Dependencies:</span> {stage.dependencies.length}
+
+                    {/* Required Documents List */}
+                    {stage.requiredDocs && stage.requiredDocs.length > 0 && (
+                      <div className="mb-3">
+                        <div className="flex flex-wrap gap-1">
+                          {stage.requiredDocs.map((doc, idx) => (
+                            <span key={idx} className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded">
+                              {doc}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Sub-stages */}
+                    {stage.SubStages && stage.SubStages.length > 0 && (
+                      <div className="mt-3 ml-6 space-y-2 border-l-2 border-gray-200 pl-4">
+                        {stage.SubStages.map(sub => (
+                          <div key={sub.id} className="text-sm text-gray-600 flex items-center gap-2">
+                            <span className="font-medium">{sub.name}</span>
+                            <span className={`px-2 py-0.5 rounded text-xs ${getStatusColor(sub.status)}`}>
+                              {sub.status}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
-                  
-                  {stage.SubStages && stage.SubStages.length > 0 && (
-                    <div className="mt-3 ml-6 space-y-2">
-                      {stage.SubStages.map(sub => (
-                        <div key={sub.id} className="text-sm text-gray-600 flex items-center gap-2">
-                          <span>└─</span>
-                          <span>{sub.name}</span>
-                          <span className={`px-2 py-0.5 rounded text-xs ${getStatusColor(sub.status)}`}>
-                            {sub.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 
+                {/* Action Buttons */}
                 <div className="flex gap-2 ml-4">
                   {stage.status === 'not-started' || stage.status === 'in-progress' ? (
                     <button
                       onClick={() => handleApprove(stage.id)}
-                      className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                      className="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 flex items-center gap-1"
                     >
+                      <CheckCircle className="w-4 h-4" />
                       Approve
                     </button>
                   ) : null}
                   <button
                     onClick={() => openEditModal(stage)}
-                    className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+                    className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center gap-1"
                   >
+                    <Edit2 className="w-4 h-4" />
                     Edit
                   </button>
                   <button
                     onClick={() => handleDelete(stage.id)}
-                    className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+                    className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 flex items-center gap-1"
                   >
+                    <Trash2 className="w-4 h-4" />
                     Delete
                   </button>
                 </div>
@@ -308,77 +388,158 @@ export default function WorkflowBuilderPage() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-md w-full">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-2xl w-full my-8">
             <div className="p-6">
-              <h2 className="text-2xl font-bold mb-4">
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                <FileText className="w-6 h-6" />
                 {editingStage ? 'Edit Stage' : 'Add New Stage'}
               </h2>
               
               <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Stage Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="e.g., Molding, Spray Painting"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Order *</label>
+                    <input
+                      type="number"
+                      required
+                      value={formData.order}
+                      onChange={(e) => setFormData({ ...formData, order: Number(e.target.value) })}
+                      className="w-full border rounded px-3 py-2"
+                      placeholder="1, 2, 3..."
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="flex items-center gap-1 text-sm font-medium mb-1">
+                      <User className="w-4 h-4" /> Approver Type
+                    </label>
+                    <select
+                      value={formData.approverType}
+                      onChange={(e) => setFormData({ ...formData, approverType: e.target.value })}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="internal">Internal</option>
+                      <option value="client">Client</option>
+                      <option value="vendor">Vendor</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="flex items-center gap-1 text-sm font-medium mb-1">
+                      <Clock className="w-4 h-4" /> Buffer Days
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.bufferDays}
+                      onChange={(e) => setFormData({ ...formData, bufferDays: Number(e.target.value) })}
+                      className="w-full border rounded px-3 py-2"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Approver Person</label>
+                    <select
+                      value={formData.approverId || ''}
+                      onChange={(e) => setFormData({ ...formData, approverId: e.target.value || undefined })}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="">Select Approver</option>
+                      {users.map(user => (
+                        <option key={user.id} value={user.id}>{user.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Responsible Person</label>
+                    <select
+                      value={formData.responsibleId || ''}
+                      onChange={(e) => setFormData({ ...formData, responsibleId: e.target.value || undefined })}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="">Select Responsible</option>
+                      {users.map(user => (
+                        <option key={user.id} value={user.id}>{user.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-sm font-medium mb-1">Stage Name *</label>
+                  <label className="flex items-center gap-1 text-sm font-medium mb-1">
+                    <LinkIcon className="w-4 h-4" /> Dependencies
+                  </label>
+                  <div className="border rounded p-3 max-h-32 overflow-y-auto">
+                    {stages.filter(s => s.id !== editingStage?.id).length === 0 ? (
+                      <p className="text-sm text-gray-500">No other stages available</p>
+                    ) : (
+                      stages.filter(s => s.id !== editingStage?.id).map(stage => (
+                        <label key={stage.id} className="flex items-center gap-2 py-1 hover:bg-gray-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.dependencies?.includes(stage.id)}
+                            onChange={(e) => {
+                              const newDeps = e.target.checked
+                                ? [...(formData.dependencies || []), stage.id]
+                                : (formData.dependencies || []).filter(id => id !== stage.id);
+                              setFormData({ ...formData, dependencies: newDeps });
+                            }}
+                          />
+                          <span className="text-sm">#{stage.order} {stage.name}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-1 text-sm font-medium mb-1">
+                    <FileText className="w-4 h-4" /> Required Documents
+                  </label>
                   <input
                     type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    value={formData.requiredDocs?.join(', ') || ''}
+                    onChange={(e) => setFormData({ ...formData, requiredDocs: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
                     className="w-full border rounded px-3 py-2"
-                    placeholder="e.g., Molding, Spray Painting"
+                    placeholder="Enter documents separated by commas"
                   />
+                  <p className="text-xs text-gray-500 mt-1">e.g., BOM, Technical Drawing, Quality Report</p>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1">Order *</label>
-                  <input
-                    type="number"
-                    required
-                    value={formData.order}
-                    onChange={(e) => setFormData({ ...formData, order: e.target.value })}
-                    className="w-full border rounded px-3 py-2"
-                    placeholder="1, 2, 3..."
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">Approver Type</label>
-                  <select
-                    value={formData.approverType}
-                    onChange={(e) => setFormData({ ...formData, approverType: e.target.value })}
-                    className="w-full border rounded px-3 py-2"
-                  >
-                    <option value="internal">Internal</option>
-                    <option value="client">Client</option>
-                    <option value="vendor">Vendor</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-1">Buffer Days</label>
-                  <input
-                    type="number"
-                    value={formData.bufferDays}
-                    onChange={(e) => setFormData({ ...formData, bufferDays: e.target.value })}
-                    className="w-full border rounded px-3 py-2"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-4">
+                <div className="flex gap-2 pt-4 border-t">
                   <button
                     type="button"
                     onClick={() => {
                       setShowModal(false);
                       resetForm();
                     }}
-                    className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-50"
+                    className="flex-1 border border-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-50 flex items-center justify-center gap-2"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex items-center justify-center gap-2"
                   >
-                    {editingStage ? 'Update' : 'Create'}
+                    <Save className="w-4 h-4" />
+                    {editingStage ? 'Update Stage' : 'Create Stage'}
                   </button>
                 </div>
               </form>

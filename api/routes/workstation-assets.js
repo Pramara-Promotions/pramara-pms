@@ -90,4 +90,89 @@ router.get('/asset/:id/stations', async (req, res) => {
   }
 });
 
+// POST /api/workstation-assets/move
+// Atomically move an asset from current station (if any) to a new station
+router.post('/move', async (req, res) => {
+  try {
+    const { assetId, toStationId, removedBy, assignedBy, notes } = req.body || {};
+    if (!assetId || !toStationId) return res.status(400).json({ error: 'assetId and toStationId are required' });
+
+    const now = new Date();
+    const existing = await prisma.workstationAsset.findFirst({ where: { assetId: String(assetId), removedAt: null } });
+
+    const result = await prisma.$transaction(async (tx) => {
+      if (existing) {
+        await tx.workstationAsset.update({ where: { id: existing.id }, data: { removedAt: now, removedBy: removedBy || null, isPrimary: false } });
+      }
+      const link = await tx.workstationAsset.create({
+        data: {
+          workstationId: Number(toStationId),
+          assetId: String(assetId),
+          isPrimary: true,
+          isRequired: true,
+          assignedBy: assignedBy || null,
+          notes: notes || null,
+        },
+      });
+
+      await tx.asset.update({ where: { id: String(assetId) }, data: { assignedToStation: String(toStationId), status: 'in_use' } }).catch(() => {});
+      return link;
+    });
+
+    res.json({ ok: true, link: result });
+  } catch (e) {
+    console.error('ws-assets:move', e);
+    res.status(500).json({ error: 'Failed to move asset' });
+  }
+});
+
+// GET /api/workstation-assets/asset/:id/history
+router.get('/asset/:id/history', async (req, res) => {
+  try {
+    const assetId = String(req.params.id);
+    const links = await prisma.workstationAsset.findMany({
+      where: { assetId },
+      orderBy: { assignedAt: 'desc' },
+      include: { Workstation: true },
+    });
+    const history = links.map(l => ({
+      workstationId: l.workstationId,
+      stationName: l.Workstation?.name || null,
+      assignedAt: l.assignedAt,
+      removedAt: l.removedAt,
+      isPrimary: l.isPrimary,
+      notes: l.notes || null,
+    }));
+    res.json({ assetId, history });
+  } catch (e) {
+    console.error('ws-assets:asset-history', e);
+    res.status(500).json({ error: 'Failed to fetch asset history' });
+  }
+});
+
+// GET /api/workstation-assets/station/:id/history
+router.get('/station/:id/history', async (req, res) => {
+  try {
+    const workstationId = Number(req.params.id);
+    const links = await prisma.workstationAsset.findMany({
+      where: { workstationId },
+      orderBy: { assignedAt: 'desc' },
+      include: { Asset: true },
+    });
+    const history = links.map(l => ({
+      assetId: l.assetId,
+      assetCode: l.Asset?.assetCode || null,
+      assetName: l.Asset?.assetName || null,
+      assignedAt: l.assignedAt,
+      removedAt: l.removedAt,
+      isPrimary: l.isPrimary,
+      notes: l.notes || null,
+    }));
+    res.json({ workstationId, history });
+  } catch (e) {
+    console.error('ws-assets:station-history', e);
+    res.status(500).json({ error: 'Failed to fetch station asset history' });
+  }
+});
+
 module.exports = router;

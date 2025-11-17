@@ -6,6 +6,122 @@ const prisma = new PrismaClient();
 const router = express.Router();
 
 router.use(requireAuth);
+// GET /api/workers/training-recommendations?projectId=
+router.get('/training-recommendations', async (req, res) => {
+  try {
+    const { projectId } = req.query;
+
+    // Scope to project stations if projectId provided
+    let requiredSkillHints = [];
+    if (projectId) {
+      const pid = Number(projectId);
+      const stations = await prisma.station.findMany({
+        where: { OR: [{ projectId: pid }, { projectId: null }], active: true },
+        select: { id: true, StationType: { select: { defaultSkills: true } }, requiredAssetTypes: true },
+      });
+      // Aggregate default skills and required asset types as hints
+      for (const s of stations) {
+        if (Array.isArray(s.StationType?.defaultSkills)) requiredSkillHints.push(...s.StationType.defaultSkills);
+        if (Array.isArray(s.requiredAssetTypes)) requiredSkillHints.push(...s.requiredAssetTypes);
+      }
+      requiredSkillHints = Array.from(new Set(requiredSkillHints));
+    }
+
+    // Pull recent performance to detect gaps
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    const perf = await prisma.workerPerformance.findMany({
+      where: { date: { gte: since }, ...(projectId ? { projectId: Number(projectId) } : {}) },
+      include: { Worker: { select: { id: true, name: true, skills: true, certifications: true } } },
+    });
+
+    // Group by worker
+    const byWorker = new Map();
+    for (const p of perf) {
+      if (!byWorker.has(p.workerId)) byWorker.set(p.workerId, { worker: p.Worker, rows: [] });
+      byWorker.get(p.workerId).rows.push(p);
+    }
+
+    const recs = [];
+    for (const [wid, data] of byWorker.entries()) {
+      const rows = data.rows;
+      const avgEff = rows.length ? rows.reduce((s, r) => s + (r.efficiency || 0), 0) / rows.length : 0;
+      const avgQual = rows.length ? rows.reduce((s, r) => s + (r.qualityRate || 0), 0) / rows.length : 0;
+
+      // Expiring/expired certifications if present
+      const certs = Array.isArray(data.worker.certifications) ? data.worker.certifications : [];
+      const now = Date.now();
+      const expiring = certs.filter((c) => c?.expiryDate && new Date(c.expiryDate).getTime() - now < 30 * 24 * 3600 * 1000);
+      const expired = certs.filter((c) => c?.expiryDate && new Date(c.expiryDate).getTime() < now);
+
+      // Skill gaps vs required hints
+      const skills = Array.isArray(data.worker.skills) ? data.worker.skills : [];
+      const missing = requiredSkillHints.filter((s) => !skills.includes(s)).slice(0, 3);
+
+      const reasons = [];
+      let priority = 'low';
+
+      if (avgQual && avgQual < 80) {
+        reasons.push({
+          skillGap: 'quality_assurance',
+          recommendedTraining: 'Quality standards refresher',
+          businessImpact: 'Reduce defect rate and rework',
+          priority: avgQual < 70 ? 'high' : 'medium',
+        });
+      }
+      if (avgEff && avgEff < 70) {
+        reasons.push({
+          skillGap: 'productivity_improvement',
+          recommendedTraining: 'Process efficiency & best practices',
+          businessImpact: 'Increase throughput at critical stations',
+          priority: avgEff < 60 ? 'high' : 'medium',
+        });
+      }
+      if (expired.length > 0) {
+        reasons.push({
+          skillGap: 'certifications',
+          recommendedTraining: 'Renew required certifications',
+          businessImpact: 'Compliance and safety adherence',
+          priority: 'high',
+        });
+      } else if (expiring.length > 0) {
+        reasons.push({
+          skillGap: 'certifications',
+          recommendedTraining: 'Certification renewal (expiring soon)',
+          businessImpact: 'Avoid compliance risk',
+          priority: 'medium',
+        });
+      }
+      if (missing.length > 0) {
+        reasons.push({
+          skillGap: `skills: ${missing.join(', ')}`,
+          recommendedTraining: `Cross-train on ${missing[0]}`,
+          businessImpact: 'Better flexibility for station assignments',
+          priority: 'medium',
+        });
+      }
+
+      // Normalize to TrainingRecommendation[] shape expected by UI
+      for (const r of reasons) {
+        recs.push({
+          id: `${wid}-${r.skillGap}`,
+          workerId: wid,
+          workerName: data.worker.name,
+          skillGap: r.skillGap,
+          recommendedTraining: r.recommendedTraining,
+          priority: r.priority,
+          estimatedDuration: '4h',
+          businessImpact: r.businessImpact,
+        });
+      }
+    }
+
+    res.json(recs);
+  } catch (e) {
+    console.error('workers:training-recommendations', e);
+    res.status(500).json({ error: 'Failed to fetch training recommendations' });
+  }
+});
+
 
 // GET /api/workers/performance/leaderboard - Worker leaderboard
 // MUST be before /:id route to avoid treating "performance" as an ID

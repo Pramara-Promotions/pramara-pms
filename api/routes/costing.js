@@ -283,4 +283,93 @@ router.post('/:id/reject', async (req, res) => {
     }
 });
 
+// POST /api/costing/:id/apply-margins - compute pricing from active margin rule and persist tiers
+router.post('/:id/apply-margins', async (req, res) => {
+    try {
+        const id = String(req.params.id);
+
+        // Get costing and components for rollup
+        const costing = await prisma.projectCosting.findUnique({ where: { id } });
+        if (!costing) return res.status(404).json({ error: 'Costing not found' });
+
+        // Determine ex-factory base (fallback to rollup if not set)
+        const components = await prisma.costComponent.findMany({ where: { projectCostingId: id } });
+        let exFactory = costing.exFactoryCost != null ? Number(costing.exFactoryCost) : null;
+        if (exFactory == null) {
+            exFactory = components.reduce((sum, c) => sum + (Number(c.totalCost || 0)), 0);
+            await prisma.projectCosting.update({ where: { id }, data: { exFactoryCost: exFactory } });
+        }
+
+        // Gather context for rule selection
+        const project = await prisma.project.findUnique({ where: { id: costing.projectId }, include: { customer: true, skus: true } });
+        const totalQty = (project?.skus || []).reduce((sum, sku) => sum + (Number(sku.orderQuantity || sku.orderQty || 0)), 0);
+        const customer = project?.customer || {};
+
+        // Select active margin rule using current schema
+        const activeRules = await prisma.marginRule.findMany({ where: { active: true }, orderBy: [{ priority: 'desc' }, { updatedAt: 'desc' }] });
+        function matches(rule) {
+            const volOk = (rule.minVolume == null || totalQty >= Number(rule.minVolume)) && (rule.maxVolume == null || totalQty <= Number(rule.maxVolume));
+            const custList = Array.isArray(rule.applicableToCustomer) ? rule.applicableToCustomer : [];
+            const marketList = Array.isArray(rule.applicableToMarket) ? rule.applicableToMarket : [];
+            const custOk = custList.length === 0 || custList.includes(String(customer.id)) || custList.includes(String(customer.tier)) || custList.includes('*');
+            const marketOk = marketList.length === 0 || marketList.includes(String(project?.market || 'default')) || marketList.includes('*');
+            return volOk && custOk && marketOk;
+        }
+        const rule = activeRules.find(matches) || null;
+        const marginPercent = rule?.marginValue != null ? Number(rule.marginValue) : 25; // default 25%
+
+        // Derive a unit base price; if no quantity, fall back to unitCost or exFactory
+        const unitBase = totalQty > 0 ? exFactory / totalQty : (costing.unitCost != null ? Number(costing.unitCost) : exFactory);
+        const basePrice = unitBase * (1 + marginPercent / 100);
+
+        // Tier definitions and prices
+        const tierDefs = [
+            { minQty: 0, discount: 0 },
+            { minQty: 1001, discount: 5 },
+            { minQty: 5001, discount: 10 },
+            { minQty: 10001, discount: 15 },
+        ];
+
+        const tiers = [];
+        for (const def of tierDefs) {
+            const pricePerUnit = basePrice * (1 - def.discount / 100);
+
+            // Upsert by (projectCostingId, minQty) — emulate unique via find + update/create
+            const existing = await prisma.pricingTier.findFirst({ where: { projectCostingId: id, minQty: def.minQty } });
+            let tier;
+            if (existing) {
+                tier = await prisma.pricingTier.update({
+                    where: { id: existing.id },
+                    data: { pricePerUnit, currency: existing.currency || 'USD' },
+                });
+            } else {
+                tier = await prisma.pricingTier.create({
+                    data: { projectCostingId: id, minQty: def.minQty, pricePerUnit, currency: 'USD' },
+                });
+            }
+            tiers.push({ id: tier.id, minQty: def.minQty, pricePerUnit });
+        }
+
+        // Persist headline selling price (unit price at base tier)
+        const updated = await prisma.projectCosting.update({
+            where: { id },
+            data: { sellingPrice: basePrice },
+        });
+
+        res.json({
+            costing: updated,
+            exFactory,
+            totalQty,
+            customer: { id: customer.id || null, tier: customer.tier || null },
+            marginPercent,
+            baseUnitPrice: basePrice,
+            tiers,
+            ruleApplied: rule ? { id: rule.id, name: rule.name, priority: rule.priority } : null,
+        });
+    } catch (e) {
+        console.error('costing:apply-margins', e);
+        res.status(500).json({ error: 'Failed to apply margin rules' });
+    }
+});
+
 module.exports = router;

@@ -11,7 +11,12 @@ type Project = {
   id: number;
   code: string;
   name: string;
-  status?: string | null; // kept for display if present
+  status?: string | null;
+  health?: {
+    score: number;
+    status: 'healthy' | 'at-risk' | 'critical';
+    attentionItemCount: number;
+  };
 };
 
 // Resolve API base; falls back to localhost for direct dev calls
@@ -68,7 +73,7 @@ export default function ProjectShell() {
       try {
         setLoading(true);
         setError(null);
-        const res = await http(`/api/projects/${projectId}`, { headers: { Accept: "application/json" } });
+        const res = await http(`/api/projects/${projectId}?includeHealth=true`, { headers: { Accept: "application/json" } });
         if (res.status === 401) {
           navigate({ to: "/login", replace: true });
           return;

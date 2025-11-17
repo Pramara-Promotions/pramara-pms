@@ -89,7 +89,19 @@ const remindersRouter = require('./routes/reminders');
 const workforceRouter = require('./routes/workforce');
 const executionRouter = require('./routes/execution');
 const timePlanningRouter = require('./routes/time-planning');
+const timePlanningPoliciesRouter = require('./routes/time-planning-policies');
 const costingRouter = require('./routes/costing');
+const costTemplatesRouter = require('./routes/cost-templates');
+const marginRulesRouter = require('./routes/margin-rules');
+const costingPnlRouter = require('./routes/costing-pnl');
+const costingCompareRouter = require('./routes/costing-compare');
+const planningRouter = require('./routes/planning');
+const assignmentsRouter = require('./routes/assignments');
+// Phase 3/4 new route modules
+const resourcesRouter = require('./routes/resources');
+const autoPlanningRouter = require('./routes/auto-planning');
+const bottlenecksRouter = require('./routes/bottlenecks');
+const bomRouter = require('./routes/bom');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -209,7 +221,19 @@ app.use('/api', remindersRouter);
 app.use('/api/workforce', workforceRouter);
 app.use('/api/execution', executionRouter);
 app.use('/api/time-planning', timePlanningRouter);
+app.use('/api/time-planning', timePlanningPoliciesRouter);
 app.use('/api/costing', costingRouter);
+app.use('/api/cost-templates', costTemplatesRouter);
+app.use('/api/margin-rules', marginRulesRouter);
+app.use('/api/costing', costingPnlRouter);
+app.use('/api/costing', costingCompareRouter);
+app.use('/api/planning', planningRouter);
+app.use('/api/assignments', assignmentsRouter);
+// Mount new Phase 3/4 feature routers
+app.use('/api/resources', resourcesRouter);
+app.use('/api/auto-planning', autoPlanningRouter);
+app.use('/api/bottlenecks', bottlenecksRouter);
+app.use('/api/bom', bomRouter);
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';
@@ -317,8 +341,31 @@ app.get('/api/projects', async (_req, res) => {
 app.get('/api/projects/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
+    const { includeHealth } = req.query;
+    
     const project = await prisma.project.findUnique({ where: { id } });
     if (!project) return res.status(404).json({ error: 'Project not found' });
+    
+    // Optionally calculate and attach health
+    if (includeHealth === 'true') {
+      try {
+        const { calculateProjectHealth } = require('./lib/projectHealth');
+        const health = await calculateProjectHealth(project.id);
+        project.health = {
+          score: health.healthScore,
+          status: health.status,
+          attentionItemCount: health.attentionItems.length,
+          output: health.output,
+          quality: health.quality,
+          taskProgress: health.taskProgress,
+          timeline: health.timeline,
+          budget: health.budget
+        };
+      } catch (error) {
+        console.error(`Failed to calculate health for project ${project.id}:`, error);
+      }
+    }
+    
     res.json(project);
   } catch (e) {
     console.error('projects:get', e);
@@ -1748,6 +1795,31 @@ if (require.main === module) {
 
     // Join user-specific room for targeted notifications
     socket.join(`user:${socket.userId}`);
+
+    // Allow clients to join/leave project-scoped rooms for broadcast events
+    socket.on('join:project', (projectId) => {
+      try {
+        if (!projectId) return;
+        const room = `project:${String(projectId)}`;
+        socket.join(room);
+        socket.emit('joined:project', { projectId });
+        console.log(`[WS] ${socket.id} joined ${room}`);
+      } catch (e) {
+        console.warn('[WS] join:project failed:', e?.message || e);
+      }
+    });
+
+    socket.on('leave:project', (projectId) => {
+      try {
+        if (!projectId) return;
+        const room = `project:${String(projectId)}`;
+        socket.leave(room);
+        socket.emit('left:project', { projectId });
+        console.log(`[WS] ${socket.id} left ${room}`);
+      } catch (e) {
+        console.warn('[WS] leave:project failed:', e?.message || e);
+      }
+    });
 
     // Handle ping for connection health check
     socket.on('ping', () => {

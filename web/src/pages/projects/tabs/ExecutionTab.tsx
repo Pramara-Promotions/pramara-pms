@@ -74,6 +74,13 @@ export default function ExecutionTab() {
       link: `/execution/stations?projectId=${projectId}`,
       color: 'bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400'
     },
+    {
+      title: 'Station Assignment',
+      description: 'Assign tasks to stations with suggestions',
+      icon: BarChart3,
+      link: `/projects/${projectId}/execution/station-assignment`,
+      color: 'bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400'
+    },
   ];
 
   return (

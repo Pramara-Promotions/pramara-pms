@@ -47,33 +47,78 @@ const {
 
 router.get('/projects', authGuard, permissionGuard('PROJECT_VIEW'), async (req, res) => {
   try {
-    const { includeHealth } = req.query;
+    const { includeHealth, includeSnapshot } = req.query;
     
     const items = await prisma.project.findMany({
       orderBy: [{ createdAt: 'desc' }],
     });
 
-    // If includeHealth requested, calculate health for all projects
-    if (includeHealth === 'true') {
-      const projectsWithHealth = await Promise.all(
-        items.map(async (project) => {
+    // Optionally attach health and/or snapshot metrics
+    if (includeHealth === 'true' || includeSnapshot === 'true') {
+      const start7d = new Date();
+      start7d.setDate(start7d.getDate() - 7);
+
+      const enriched = await Promise.all(items.map(async (project) => {
+        let out = { ...project };
+        if (includeHealth === 'true') {
           try {
             const health = await calculateProjectHealth(project.id);
-            return {
-              ...project,
-              health: {
-                score: health.healthScore,
-                status: health.status,
-                attentionItemCount: health.attentionItems.length
-              }
+            out.health = {
+              score: health.healthScore,
+              status: health.status,
+              attentionItemCount: health.attentionItems.length,
+              output: health.output,
+              quality: health.quality,
+              taskProgress: health.taskProgress,
+              // expose timeline & budget for richer front-end metric sets
+              timeline: health.timeline,
+              budget: health.budget
             };
           } catch (error) {
             console.error(`Failed to calculate health for project ${project.id}:`, error);
-            return project;
           }
-        })
-      );
-      return res.json(projectsWithHealth);
+        }
+
+        if (includeSnapshot === 'true') {
+          try {
+            const [docsCount, throughput7dAgg, throughputTrend, totalTasks, atRiskTasks, nextStages] = await Promise.all([
+              prisma.projectDocument.count({ where: { projectId: project.id } }),
+              prisma.shiftEntry.aggregate({
+                where: { projectId: project.id, shiftDate: { gte: start7d } },
+                _sum: { totalProduced: true }
+              }),
+              prisma.shiftEntry.groupBy({
+                by: ['shiftDate'],
+                where: { projectId: project.id, shiftDate: { gte: start7d } },
+                _sum: { totalProduced: true },
+                orderBy: { shiftDate: 'asc' }
+              }),
+              prisma.task.count({ where: { projectId: project.id } }),
+              prisma.task.count({ where: { projectId: project.id, status: { in: ['amber', 'red'] } } }),
+              prisma.workflowStage.findMany({
+                where: { projectId: project.id, status: { in: ['pending', 'in_progress'] } },
+                orderBy: [{ status: 'desc' }, { sequence: 'asc' }],
+                take: 1,
+                select: { id: true, name: true, status: true, startDate: true, endDate: true, sequence: true }
+              })
+            ]);
+
+            out.snapshot = {
+              documents: { count: docsCount },
+              throughput7d: throughput7dAgg._sum.totalProduced || 0,
+              throughputTrend: throughputTrend.map(t => ({ date: t.shiftDate, output: t._sum.totalProduced || 0 })),
+              tasks: { total: totalTasks, atRisk: atRiskTasks },
+              nextStage: nextStages && nextStages[0] ? nextStages[0] : null,
+            };
+          } catch (e) {
+            console.error(`Failed to build snapshot for project ${project.id}:`, e?.message);
+          }
+        }
+
+        return out;
+      }));
+
+      return res.json(enriched);
     }
 
     res.json(items);

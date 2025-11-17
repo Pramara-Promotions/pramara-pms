@@ -51,8 +51,25 @@ export default function OverviewTab() {
           {skuLoading ? "…" : skuQty ?? "—"}
         </Card>
 
-        <Card title="Status">
-          {project?.status ?? "—"}
+        <Card title="Health Status">
+          {project?.health?.status ? (
+            <span className={`inline-flex items-center gap-2 capitalize ${
+              project.health.status === 'healthy' ? 'text-green-600 dark:text-green-400' :
+              project.health.status === 'at-risk' ? 'text-yellow-600 dark:text-yellow-400' :
+              project.health.status === 'critical' ? 'text-red-600 dark:text-red-400' :
+              'text-gray-600 dark:text-gray-400'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${
+                project.health.status === 'healthy' ? 'bg-green-500' :
+                project.health.status === 'at-risk' ? 'bg-yellow-500' :
+                project.health.status === 'critical' ? 'bg-red-500' :
+                'bg-gray-400'
+              }`} />
+              {project.health.status}
+            </span>
+          ) : (
+            "—"
+          )}
         </Card>
       </div>
 

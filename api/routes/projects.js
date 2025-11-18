@@ -28,6 +28,81 @@ function hasModel(name) {
   return prisma[name] && typeof prisma[name].findMany === 'function';
 }
 
+/**
+ * Calculate project health from pre-fetched data (optimization to avoid N+1 queries)
+ * @param {Object} projectData - Project with Task, Batch, skus arrays
+ * @param {Object} shiftAgg - Aggregated shift entry data {totalProduced, qualityPassed, qualityRejected}
+ * @returns {Object} Health metrics
+ */
+function calculateHealthFromData(projectData, shiftAgg) {
+  const { Task = [], Batch = [], skus = [] } = projectData;
+  
+  // Timeline metrics
+  const startDate = projectData.startDate ? new Date(projectData.startDate) : new Date();
+  const endDate = projectData.endDate ? new Date(projectData.endDate) : new Date();
+  const now = new Date();
+  const totalDuration = Math.max(1, endDate - startDate);
+  const elapsed = Math.max(0, now - startDate);
+  const daysElapsed = Math.floor(elapsed / (1000 * 60 * 60 * 24));
+  const daysRemaining = Math.floor(Math.max(0, endDate - now) / (1000 * 60 * 60 * 24));
+  const percentTimeElapsed = Math.min(100, (elapsed / totalDuration) * 100);
+  
+  // Budget metrics
+  const totalBudget = projectData.totalBudget || 0;
+  const spentBudget = projectData.spentBudget || 0;
+  const percentBudgetUsed = totalBudget > 0 ? (spentBudget / totalBudget) * 100 : 0;
+  
+  // Output metrics
+  const totalTarget = skus.reduce((sum, sku) => sum + (sku.orderQty || 0), 0);
+  const totalProduced = Batch.reduce((sum, b) => sum + (b.currentQty || 0), 0);
+  const fallbackProduced = shiftAgg?.totalProduced || 0;
+  const actualProduced = totalProduced || fallbackProduced;
+  const percentComplete = totalTarget > 0 ? Math.min(100, (actualProduced / totalTarget) * 100) : 0;
+  
+  // Quality metrics
+  const totalRejected = Batch.reduce((sum, b) => sum + (b.rejectedQty || 0), 0);
+  const fallbackRejected = shiftAgg?.qualityRejected || 0;
+  const actualRejected = totalRejected || fallbackRejected;
+  const fallbackPassed = shiftAgg?.qualityPassed || 0;
+  const totalQualityChecked = actualProduced;
+  const passRate = totalQualityChecked > 0 ? ((totalQualityChecked - actualRejected) / totalQualityChecked) * 100 : 100;
+  const defectRate = totalQualityChecked > 0 ? (actualRejected / totalQualityChecked) * 100 : 0;
+  
+  // Task progress
+  const totalTasks = Task.length;
+  const completedTasks = Task.filter(t => t.status === 'done').length;
+  const taskCompletionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+  const overdueTasks = Task.filter(t => t.dueDate && new Date(t.dueDate) < now && t.status !== 'done').length;
+  
+  // Attention items
+  const attentionItems = [];
+  if (overdueTasks > 0) attentionItems.push(`${overdueTasks} overdue tasks`);
+  if (defectRate > 10) attentionItems.push(`High defect rate: ${defectRate.toFixed(1)}%`);
+  if (percentBudgetUsed > 90) attentionItems.push(`Budget ${percentBudgetUsed.toFixed(0)}% used`);
+  if (percentTimeElapsed > percentComplete + 20) attentionItems.push('Behind schedule');
+  
+  // Health score calculation
+  let healthScore = 100;
+  healthScore -= Math.max(0, defectRate * 2);
+  healthScore -= Math.max(0, (percentBudgetUsed - 100) * 0.5);
+  if (percentTimeElapsed > percentComplete + 10) healthScore -= 15;
+  if (overdueTasks > 0) healthScore -= overdueTasks * 5;
+  healthScore = Math.max(0, Math.min(100, healthScore));
+  
+  const status = healthScore >= 70 ? 'healthy' : healthScore >= 40 ? 'at-risk' : 'critical';
+  
+  return {
+    healthScore: Math.round(healthScore),
+    status,
+    attentionItems,
+    timeline: { daysElapsed, daysRemaining, percentTimeElapsed: Math.round(percentTimeElapsed) },
+    budget: { totalBudget, spentBudget, percentUsed: Math.round(percentBudgetUsed) },
+    output: { totalTarget, actualProduced, percentComplete: Math.round(percentComplete) },
+    quality: { passRate: Math.round(passRate), defectRate: Math.round(defectRate), totalRejected: actualRejected },
+    taskProgress: { totalTasks, completedTasks, taskCompletionRate: Math.round(taskCompletionRate), overdueTasks }
+  };
+}
+
 /** Utility: toInt */
 const toInt = (v) => Number.parseInt(v, 10);
 
@@ -58,11 +133,70 @@ router.get('/projects', authGuard, permissionGuard('PROJECT_VIEW'), async (req, 
       const start7d = new Date();
       start7d.setDate(start7d.getDate() - 7);
 
+      // OPTIMIZATION: Batch load all data upfront to avoid N+1 queries
+      const projectIds = items.map(p => p.id);
+      
+      // Pre-fetch all related data in parallel
+      const [allTasks, allBatches, allShiftAggs, allSkus] = await Promise.all([
+        includeHealth === 'true' ? prisma.task.findMany({
+          where: { projectId: { in: projectIds } },
+          select: { projectId: true, id: true, status: true, priority: true, dueDate: true }
+        }) : Promise.resolve([]),
+        includeHealth === 'true' ? prisma.batch.findMany({
+          where: { projectId: { in: projectIds } },
+          select: { projectId: true, id: true, currentQty: true, targetQty: true, rejectedQty: true, status: true }
+        }) : Promise.resolve([]),
+        includeHealth === 'true' ? prisma.$queryRaw`
+          SELECT "projectId", 
+                 SUM("totalProduced")::int as "totalProduced",
+                 SUM("qualityPassed")::int as "qualityPassed", 
+                 SUM("qualityRejected")::int as "qualityRejected"
+          FROM "ShiftEntry"
+          WHERE "projectId" = ANY(${projectIds})
+          GROUP BY "projectId"
+        ` : Promise.resolve([]),
+        includeHealth === 'true' ? prisma.projectSku.findMany({
+          where: { projectId: { in: projectIds } },
+          select: { projectId: true, id: true, orderQty: true }
+        }) : Promise.resolve([])
+      ]);
+
+      // Group by projectId for quick lookup
+      const tasksByProject = {};
+      const batchesByProject = {};
+      const shiftAggsByProject = {};
+      const skusByProject = {};
+      
+      allTasks.forEach(t => {
+        if (!tasksByProject[t.projectId]) tasksByProject[t.projectId] = [];
+        tasksByProject[t.projectId].push(t);
+      });
+      allBatches.forEach(b => {
+        if (!batchesByProject[b.projectId]) batchesByProject[b.projectId] = [];
+        batchesByProject[b.projectId].push(b);
+      });
+      allShiftAggs.forEach(s => {
+        shiftAggsByProject[s.projectId] = s;
+      });
+      allSkus.forEach(sk => {
+        if (!skusByProject[sk.projectId]) skusByProject[sk.projectId] = [];
+        skusByProject[sk.projectId].push(sk);
+      });
+
       const enriched = await Promise.all(items.map(async (project) => {
         let out = { ...project };
         if (includeHealth === 'true') {
           try {
-            const health = await calculateProjectHealth(project.id);
+            // Use pre-fetched data instead of querying again
+            const projectData = {
+              ...project,
+              Task: tasksByProject[project.id] || [],
+              Batch: batchesByProject[project.id] || [],
+              skus: skusByProject[project.id] || []
+            };
+            const shiftAgg = shiftAggsByProject[project.id];
+            
+            const health = calculateHealthFromData(projectData, shiftAgg);
             out.health = {
               score: health.healthScore,
               status: health.status,
@@ -70,7 +204,6 @@ router.get('/projects', authGuard, permissionGuard('PROJECT_VIEW'), async (req, 
               output: health.output,
               quality: health.quality,
               taskProgress: health.taskProgress,
-              // expose timeline & budget for richer front-end metric sets
               timeline: health.timeline,
               budget: health.budget
             };

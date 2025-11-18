@@ -45,7 +45,8 @@ export default function WorkforceManagementPage() {
   const [leaderboard, setLeaderboard] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'workers' | 'contractors' | 'providers' | 'leaderboard'>('workers');
+  const [tab, setTab] = useState<'company' | 'contractors' | 'leaderboard'>('company');
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [showWorkerModal, setShowWorkerModal] = useState(false);
   const [showContractorModal, setShowContractorModal] = useState(false);
   const [showProviderModal, setShowProviderModal] = useState(false);
@@ -237,7 +238,7 @@ export default function WorkforceManagementPage() {
         </div>
         <div className="bg-white rounded-lg shadow p-4">
           <div className="text-sm text-gray-600">Avg Efficiency</div>
-          <div className="text-2xl font-bold text-green-600">{summary.recentPerformance?.avgEfficiency || 0}%</div>
+          <div className="text-2xl font-bold text-green-600">{summary.recentPerformance?.avgEfficiency?.toFixed(1) || '0.0'}%</div>
         </div>
       </div>
 
@@ -247,27 +248,21 @@ export default function WorkforceManagementPage() {
           <div className="flex items-center justify-between">
             <div className="flex">
               <button
-                onClick={() => setTab('workers')}
-                className={`px-6 py-3 font-medium flex items-center gap-2 ${tab === 'workers' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
+                onClick={() => { setTab('company'); setSelectedProvider(null); }}
+                className={`px-6 py-3 font-medium flex items-center gap-2 ${tab === 'company' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}
               >
                 <Users2 size={18} />
-                Workers ({workers.length})
+                Company Workers ({workers.filter(w => w.workerType === 'company').length})
               </button>
               <button
-                onClick={() => setTab('contractors')}
+                onClick={() => { setTab('contractors'); setSelectedProvider(null); }}
                 className={`px-6 py-3 font-medium flex items-center gap-2 ${tab === 'contractors' ? 'border-b-2 border-orange-600 text-orange-600' : 'text-gray-600'}`}
               >
                 <Building2 size={18} />
                 Contractors ({providers.length})
               </button>
               <button
-                onClick={() => setTab('providers')}
-                className={`px-6 py-3 font-medium ${tab === 'providers' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-600'}`}
-              >
-                Providers ({providers.length})
-              </button>
-              <button
-                onClick={() => setTab('leaderboard')}
+                onClick={() => { setTab('leaderboard'); setSelectedProvider(null); }}
                 className={`px-6 py-3 font-medium ${tab === 'leaderboard' ? 'border-b-2 border-green-600 text-green-600' : 'text-gray-600'}`}
               >
                 🏆 Leaderboard
@@ -280,7 +275,7 @@ export default function WorkforceManagementPage() {
                   View Only
                 </div>
               )}
-              {canManageWorkforce && tab === 'workers' && (
+              {canManageWorkforce && tab === 'company' && (
                 <button
                   onClick={() => setShowWorkerModal(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -289,7 +284,7 @@ export default function WorkforceManagementPage() {
                   Add Worker
                 </button>
               )}
-              {canManageWorkforce && tab === 'contractors' && (
+              {canManageWorkforce && tab === 'contractors' && !selectedProvider && (
                 <button
                   onClick={() => setShowContractorModal(true)}
                   className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
@@ -298,13 +293,12 @@ export default function WorkforceManagementPage() {
                   Add Contractor
                 </button>
               )}
-              {canManageWorkforce && tab === 'providers' && (
+              {tab === 'contractors' && selectedProvider && (
                 <button
-                  onClick={() => setShowProviderModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  onClick={() => setSelectedProvider(null)}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
                 >
-                  <Plus size={16} />
-                  Add Provider
+                  ← Back to Contractors
                 </button>
               )}
             </div>
@@ -312,8 +306,8 @@ export default function WorkforceManagementPage() {
         </div>
 
         <div className="p-6">
-          {/* Workers Tab */}
-          {tab === 'workers' && (
+          {/* Company Workers Tab */}
+          {tab === 'company' && (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-gray-50">
@@ -327,7 +321,7 @@ export default function WorkforceManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {workers.map(worker => (
+                  {workers.filter(w => w.workerType === 'company').map(worker => (
                     <tr key={worker.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{worker.name}</div>
@@ -360,10 +354,13 @@ export default function WorkforceManagementPage() {
           )}
 
           {/* Contractors Tab */}
-          {tab === 'contractors' && (
+          {tab === 'contractors' && !selectedProvider && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {providers.map(contractor => (
-                <div key={contractor.id} className="border-2 border-orange-200 rounded-lg p-4 bg-orange-50/30">
+                <div 
+                  key={contractor.id} 
+                  onClick={() => setSelectedProvider(contractor.id)}
+                  className="border-2 border-orange-200 rounded-lg p-4 bg-orange-50/30 cursor-pointer hover:bg-orange-100/50 hover:border-orange-300 transition-all">
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <div className="flex items-center gap-2 mb-2">
@@ -412,45 +409,85 @@ export default function WorkforceManagementPage() {
             </div>
           )}
 
-          {/* Providers Tab */}
-          {tab === 'providers' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {providers.map(provider => (
-                <div key={provider.id} className="border rounded-lg p-4">
-                  <div className="flex justify-between items-start mb-3">
-                    <div>
-                      <h3 className="font-bold text-lg">{provider.name}</h3>
-                      <p className="text-sm text-gray-500">{provider.contactPerson}</p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {provider.activeWorkerCount} active / {provider.totalWorkerCount} total workers
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-green-600">
-                        {provider.stabilityScore?.toFixed(0) || 0}
+          {/* Contractor Workers Detail View */}
+          {tab === 'contractors' && selectedProvider && (
+            <div>
+              {(() => {
+                const provider = providers.find(p => p.id === selectedProvider);
+                const providerWorkers = workers.filter(w => w.ThirdPartyProvider?.id === selectedProvider);
+                if (!provider) return <div>Provider not found</div>;
+                
+                return (
+                  <div>
+                    <div className="mb-6 border-2 border-orange-200 rounded-lg p-6 bg-orange-50/30">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <Building2 className="text-orange-600" size={24} />
+                            <h2 className="text-2xl font-bold text-gray-900">{provider.name}</h2>
+                          </div>
+                          <p className="text-sm text-gray-600">Contact: {provider.contactPerson}</p>
+                          {provider.email && <p className="text-sm text-gray-500">{provider.email}</p>}
+                          {provider.phone && <p className="text-sm text-gray-500">{provider.phone}</p>}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-3xl font-bold text-orange-600">{provider.stabilityScore?.toFixed(0) || 0}</div>
+                          <div className="text-xs text-gray-500">Stability Score</div>
+                        </div>
                       </div>
-                      <div className="text-xs text-gray-500">Stability</div>
+                      <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-orange-200">
+                        <div>
+                          <div className="text-sm text-gray-600">Performance</div>
+                          <div className="text-xl font-bold text-gray-900">{provider.performanceScore?.toFixed(1) || 0}%</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-gray-600">Attendance</div>
+                          <div className="text-xl font-bold text-gray-900">{provider.attendanceRate?.toFixed(1) || 0}%</div>
+                        </div>
+                        <div>
+                          <div className="text-sm text-gray-600">Workers</div>
+                          <div className="text-xl font-bold text-gray-900">{providerWorkers.length}</div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <h3 className="text-lg font-bold text-gray-900 mb-4">Workers from {provider.name}</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Skills</th>
+                            <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate (₹/hr)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {providerWorkers.map(worker => (
+                            <tr key={worker.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3">
+                                <div className="font-medium text-gray-900">{worker.name}</div>
+                                {worker.email && <div className="text-xs text-gray-500">{worker.email}</div>}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{worker.employeeCode || '-'}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {worker.skills.slice(0, 3).join(', ')}
+                                {worker.skills.length > 3 && ` +${worker.skills.length - 3}`}
+                              </td>
+                              <td className="px-4 py-3 text-right text-gray-900 font-medium">
+                                {worker.hourlyRate ? `₹${worker.hourlyRate}` : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {providerWorkers.length === 0 && (
+                        <div className="text-center py-8 text-gray-500">No workers from this contractor yet</div>
+                      )}
                     </div>
                   </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Performance:</span>
-                      <span className="font-medium">{provider.performanceScore?.toFixed(1) || 0}%</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Attendance:</span>
-                      <span className="font-medium">{provider.attendanceRate?.toFixed(1) || 0}%</span>
-                    </div>
-                    {provider.email && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Email:</span>
-                        <span className="text-xs text-gray-500">{provider.email}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })()}
             </div>
           )}
 
@@ -546,8 +583,8 @@ export default function WorkforceManagementPage() {
                       onChange={(e) => setWorkerForm({ ...workerForm, workerType: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="company">Company</option>
-                      <option value="contractor">Contractor (3rd Party)</option>
+                      <option value="company">Company Worker</option>
+                      <option value="contractor">Contractor Worker (3rd Party)</option>
                     </select>
                   </div>
 

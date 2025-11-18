@@ -161,85 +161,199 @@ async function seedStations(targetTotal = 460) {
   };
 
   const now = new Date();
-  const created = [];
+  const stationsData = [];
   for (const type of MACHINE_TYPES) {
     const count = dist[type.key] || 0;
     for (let i = 1; i <= count; i++) {
       const room = pick(rooms);
-      created.push(
-        prisma.station.create({
-          data: {
-            name: `${type.label} ${i}`,
-            code: `${type.key}-${String(i).padStart(3, '0')}`,
-            workstationType: type.wsType,
-            capacity: randInt(60, 180),
-            status: 'operational',
-            description: `${type.label} in ${room.name}`,
-            roomId: room.id,
-            updatedAt: now,
-          },
-        })
-      );
+      stationsData.push({
+        name: `${type.label} ${i}`,
+        code: `${type.key}-${String(i).padStart(3, '0')}`,
+        workstationType: type.wsType,
+        capacity: randInt(60, 180),
+        status: 'operational',
+        description: `${type.label} in ${room.name}`,
+        roomId: room.id,
+        updatedAt: now,
+      });
     }
   }
-  return Promise.all(created);
+  
+  // Create stations in batches to avoid connection pool issues
+  const batchSize = 50;
+  const created = [];
+  for (let i = 0; i < stationsData.length; i += batchSize) {
+    const batch = stationsData.slice(i, i + batchSize);
+    const batchCreated = await Promise.all(batch.map(s => prisma.station.create({ data: s })));
+    created.push(...batchCreated);
+    console.log(`  Stations batch ${Math.floor(i/batchSize) + 1}: ${batchCreated.length} created`);
+  }
+  return created;
 }
 
 async function seedProvidersAndWorkers(workerTarget = 600) {
-  // Providers
+  // Indian names pool
+  const maleNames = ['Rajesh', 'Amit', 'Suresh', 'Vijay', 'Rahul', 'Anil', 'Manoj', 'Sandeep', 'Prakash', 'Deepak', 
+    'Ravi', 'Ajay', 'Sanjay', 'Ramesh', 'Vinod', 'Ashok', 'Dinesh', 'Mukesh', 'Naveen', 'Pankaj',
+    'Rohan', 'Nitin', 'Vishal', 'Sachin', 'Rakesh', 'Gopal', 'Mohan', 'Krishna', 'Sunil', 'Arun'];
+  const femaleNames = ['Priya', 'Pooja', 'Sunita', 'Rekha', 'Anita', 'Kavita', 'Neha', 'Meera', 'Sonia', 'Asha',
+    'Ritu', 'Geeta', 'Nisha', 'Anjali', 'Swati', 'Preeti', 'Divya', 'Sneha', 'Deepa', 'Lakshmi',
+    'Savita', 'Radha', 'Usha', 'Suman', 'Kiran', 'Poonam', 'Shobha', 'Sarita', 'Mamta', 'Jyoti'];
+  const surnames = ['Kumar', 'Singh', 'Sharma', 'Verma', 'Patel', 'Yadav', 'Reddy', 'Gupta', 'Joshi', 'Desai',
+    'Nair', 'Iyer', 'Mehta', 'Pillai', 'Rao', 'Das', 'Bose', 'Chopra', 'Malhotra', 'Kapoor'];
+
+  const getRandomName = () => {
+    const isMale = Math.random() > 0.3; // 70% male in manufacturing
+    const firstName = pick(isMale ? maleNames : femaleNames);
+    const lastName = pick(surnames);
+    return `${firstName} ${lastName}`;
+  };
+
+  // Contractors (3rd party providers)
   const providers = await Promise.all([
     prisma.thirdPartyProvider.create({
-      data: { id: 'prov-a', name: 'Om Staffing Co.', contactPerson: 'Om HR', phone: '+91-900001', updatedAt: new Date() },
+      data: { 
+        id: 'prov-a', 
+        name: 'Om Staffing Co.', 
+        contactPerson: 'Rajiv Malhotra', 
+        phone: '+91-900001', 
+        email: 'rajiv@omstaffing.com',
+        location: 'Pune, Maharashtra',
+        updatedAt: new Date() 
+      },
     }),
     prisma.thirdPartyProvider.create({
-      data: { id: 'prov-b', name: 'Karma Associates', contactPerson: 'Karma Lead', phone: '+91-900002', updatedAt: new Date() },
+      data: { 
+        id: 'prov-b', 
+        name: 'Karma Associates', 
+        contactPerson: 'Anand Verma', 
+        phone: '+91-900002',
+        email: 'anand@karmaassoc.com', 
+        location: 'Mumbai, Maharashtra',
+        updatedAt: new Date() 
+      },
     }),
     prisma.thirdPartyProvider.create({
-      data: { id: 'prov-c', name: 'Shakti Manpower', contactPerson: 'Shakti Ops', phone: '+91-900003', updatedAt: new Date() },
+      data: { 
+        id: 'prov-c', 
+        name: 'Shakti Manpower', 
+        contactPerson: 'Pradeep Sharma', 
+        phone: '+91-900003',
+        email: 'pradeep@shaktimanpower.com',
+        location: 'Bangalore, Karnataka', 
+        updatedAt: new Date() 
+      },
     }),
   ]);
 
   const workers = [];
   const companyCount = Math.floor(workerTarget * 0.58); // ~58% company
-  const contractorCount = workerTarget - companyCount;   // rest contractors
+  const contractorCount = workerTarget - companyCount;   // rest contractors (3rd party)
 
+  // Company workers - permanent employees (batched)
+  const batchSize = 50;
   for (let i = 1; i <= companyCount; i++) {
-    workers.push(
-      prisma.worker.create({
-        data: {
-          id: `CMP-${String(i).padStart(4, '0')}`,
-          name: `Company Worker ${i}`,
-          employeeCode: `EC${String(i).padStart(5, '0')}`,
-          workerType: 'company',
-          skills: ['assembly', 'packing', 'quality'].slice(0, randInt(1, 3)),
-          hireDate: new Date('2023-01-01'),
-          hourlyRate: 120,
-          overtimeRate: 180,
-          updatedAt: new Date(),
-        },
-      })
-    );
+    const name = getRandomName();
+    workers.push({
+      id: `W-CMP-${Date.now()}-${i}`,
+      name,
+      employeeCode: `EC${String(i).padStart(5, '0')}`,
+      workerType: 'company',
+      skills: ['assembly', 'packing', 'quality', 'inspection'].slice(0, randInt(1, 3)),
+      hireDate: new Date('2023-01-01'),
+      hourlyRate: 120,
+      overtimeRate: 180,
+      status: 'active',
+      updatedAt: new Date(),
+    });
   }
 
+  // Contractor workers - 3rd party (batched)
   for (let i = 1; i <= contractorCount; i++) {
-    workers.push(
-      prisma.worker.create({
-        data: {
-          id: `CTR-${String(i).padStart(4, '0')}`,
-          name: `Contract Worker ${i}`,
-          employeeCode: `CT${String(i).padStart(5, '0')}`,
-          workerType: 'contractor',
-          providerId: pick(providers).id,
-          skills: ['moulding', 'spray', 'pad_print'].slice(0, randInt(1, 3)),
-          hireDate: new Date('2024-01-01'),
-          hourlyRate: 100,
-          overtimeRate: 150,
-          updatedAt: new Date(),
-        },
-      })
-    );
+    const name = getRandomName();
+    const provider = pick(providers);
+    workers.push({
+      id: `W-CTR-${Date.now()}-${i}`,
+      name,
+      employeeCode: `CT${String(i).padStart(5, '0')}`,
+      workerType: 'contractor',
+      providerId: provider.id,
+      skills: ['moulding', 'spray', 'pad_print', 'trimming'].slice(0, randInt(1, 3)),
+      hireDate: new Date('2024-01-01'),
+      hourlyRate: 100,
+      overtimeRate: 150,
+      status: 'active',
+      updatedAt: new Date(),
+    });
   }
-  return Promise.all(workers);
+  
+  // Create workers in batches to avoid connection pool timeout
+  const createdWorkers = [];
+  for (let i = 0; i < workers.length; i += batchSize) {
+    const batch = workers.slice(i, i + batchSize);
+    const created = await Promise.all(batch.map(w => prisma.worker.create({ data: w })));
+    createdWorkers.push(...created);
+    console.log(`  Workers batch ${Math.floor(i/batchSize) + 1}: ${created.length} created`);
+  }
+  
+  return createdWorkers;
+}
+
+async function seedWorkerPerformance(workers, projects) {
+  // Create performance records for last 7 days to show efficiency
+  const perfRecords = [];
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  
+  // Get first few project IDs
+  const projectIds = projects.slice(0, 5).map(p => p.id);
+  
+  for (let day = 0; day < 7; day++) {
+    const perfDate = new Date(sevenDaysAgo);
+    perfDate.setDate(perfDate.getDate() + day);
+    
+    // Sample 50 random workers per day for performance tracking
+    const sampleWorkers = workers.sort(() => Math.random() - 0.5).slice(0, 50);
+    
+    for (const worker of sampleWorkers) {
+      const targetQty = 100 + randInt(0, 50);
+      const actualQty = Math.floor(targetQty * (0.85 + Math.random() * 0.2)); // 85-105% efficiency
+      const rejectedQty = Math.floor(actualQty * (Math.random() * 0.05)); // 0-5% rejection
+      const efficiency = (actualQty / targetQty) * 100;
+      const qualityRate = ((actualQty - rejectedQty) / actualQty) * 100;
+      
+      perfRecords.push(
+        prisma.workerPerformance.create({
+          data: {
+            id: `PERF-${Date.now()}-${day}-${Math.random().toString(36).substr(2, 8)}`,
+            workerId: worker.id,
+            projectId: pick(projectIds),
+            stationId: randInt(1, 50),
+            date: perfDate,
+            shiftId: `SH-${day}-${randInt(1, 3)}`,
+            shiftType: pick(['morning', 'afternoon', 'night']),
+            hoursWorked: 8,
+            tasksCompleted: randInt(5, 15),
+            targetQty,
+            actualQty,
+            rejectedQty,
+            efficiency,
+            qualityRate,
+          },
+        })
+      );
+    }
+  }
+  
+  // Create performance records in batches
+  const batchSize = 50;
+  let createdCount = 0;
+  for (let i = 0; i < perfRecords.length; i += batchSize) {
+    const batch = perfRecords.slice(i, i + batchSize);
+    await Promise.all(batch);
+    createdCount += batch.length;
+  }
+  console.log(`✅ Performance records created: ${createdCount}`);
 }
 
 async function ensureCostingSettings() {
@@ -566,6 +680,9 @@ async function main() {
     throw err;
   }
   console.log(`✅ Projects created: ${projects.length} (8 active, 5 pipeline)`);
+
+  // 7) Worker performance data
+  await seedWorkerPerformance(workers, projects);
 
   // Summary counts
   const [factoryCount, floorCount, sectionCount, roomCount, stationCount, workerCount, activeShiftCount, docCount] = await Promise.all([

@@ -189,9 +189,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="w-8" />
         </div>
         <nav className="p-3 space-y-1 flex-1 overflow-y-auto">
-          {/* Core Navigation - Only 3 items */}
+          {/* Core Navigation */}
           <NavItem to="/" icon={Home} label="Home" />
           <NavItem to="/projects" icon={ClipboardList} label="Projects" />
+          <NavItem to="/workforce" icon={Users} label="Workforce" />
           <NavItem to="/reminders" icon={Bell} label="Tasks & Reminders" />
 
           {/* Pinned Items Section */}

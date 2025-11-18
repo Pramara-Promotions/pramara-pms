@@ -88,7 +88,6 @@ export default function ProjectsList() {
 
   // [LMK-42] Load projects with health
   async function load() {
-    console.log('[ProjectsList] Starting load...');
     try {
       setLoading(true);
       setError(null);
@@ -98,25 +97,18 @@ export default function ProjectsList() {
         : `/api/projects?includeHealth=true&includeSnapshot=true`;
 
       const res = await http(endpoint, { headers: { Accept: "application/json" } });
-      console.log('[ProjectsList] API response status:', res.status);
       if (res.status === 401) {
         navigate({ to: "/login", replace: true });
         return;
       }
       const txt = await res.text();
-      console.log('[ProjectsList] Response text:', txt.substring(0, 200));
       if (!res.ok) throw new Error(`Load failed (${res.status})`);
       if (txt.trim().startsWith("<"))
         throw new Error("Got HTML instead of JSON (check VITE_API_URL / proxy)");
       const data = JSON.parse(txt);
-      console.log('[ProjectsList] Loaded projects:', data.length);
-      if (data.length > 0) {
-        console.log('[ProjectsList] First project:', JSON.stringify(data[0], null, 2));
-      }
       setItems(data);
     } catch (e: any) {
       const msg = e?.message || "Failed to load projects";
-      console.error('[ProjectsList] Load error:', e);
       setError(msg);
       showToastErr(msg);
     } finally {
@@ -125,43 +117,28 @@ export default function ProjectsList() {
   }
 
   useEffect(() => {
-    console.log('[ProjectsList] Component mounted, calling load()');
-    console.log('[ProjectsList] Initial state - items:', items.length, 'loading:', loading);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // [LMK-43] Filter projects
-  const filteredProjects = items.filter(project => {
-    if (!project) {
-      console.log('[ProjectsList] Filtering: project is null/undefined');
-      return false;
-    }
+  // [LMK-43] Filter projects (memoized for performance)
+  const filteredProjects = React.useMemo(() => {
+    return items.filter(project => {
+      if (!project) return false;
 
-    const matchesSearch = (project.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
-      (project.code?.toLowerCase() || '').includes(searchQuery.toLowerCase());
+      const matchesSearch = (project.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
+        (project.code?.toLowerCase() || '').includes(searchQuery.toLowerCase());
 
-    // Apply view filter - 'all' shows everything, 'assigned'/'my-tasks' only for workers
-    let matchesView = true;
-    // Note: For now, view filter is simplified - admins/managers see all projects
-    // Workers would see only their assigned projects (to be implemented with proper user-project assignment)
+      let matchesView = true;
 
-    // Status filter - if no health data, show project by default unless specifically filtering for health status
-    if (statusFilter === 'all') {
-      const result = matchesSearch && matchesView;
-      if (!result) {
-        console.log('[ProjectsList] Project filtered out:', project.name, 'matchesSearch:', matchesSearch, 'matchesView:', matchesView, 'viewFilter:', viewFilter);
-      }
-      return result;
-    }
-    if (statusFilter === 'healthy') return matchesSearch && matchesView && project.health?.status === 'healthy';
-    if (statusFilter === 'at-risk') return matchesSearch && matchesView && project.health?.status === 'at-risk';
-    if (statusFilter === 'critical') return matchesSearch && matchesView && project.health?.status === 'critical';
+      if (statusFilter === 'all') return matchesSearch && matchesView;
+      if (statusFilter === 'healthy') return matchesSearch && matchesView && project.health?.status === 'healthy';
+      if (statusFilter === 'at-risk') return matchesSearch && matchesView && project.health?.status === 'at-risk';
+      if (statusFilter === 'critical') return matchesSearch && matchesView && project.health?.status === 'critical';
 
-    return matchesSearch && matchesView;
-  });
-
-  console.log('[ProjectsList] After filtering - filteredProjects:', filteredProjects.length, 'from', items.length, 'items');  // Separate pinned and unpinned projects
+      return matchesSearch && matchesView;
+    });
+  }, [items, searchQuery, statusFilter]);  // Separate pinned and unpinned projects
   const pinnedProjects = filteredProjects.filter(p => pinnedProjectIds.includes(p.id));
   const unpinnedProjects = filteredProjects.filter(p => !pinnedProjectIds.includes(p.id));
 

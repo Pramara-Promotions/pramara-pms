@@ -107,19 +107,11 @@ export default function PlanningTab() {
   
   const planningCards = [
     {
-      title: 'Auto Planning',
-      description: 'System-generated daily plans',
-      icon: Calendar,
-      link: `/planning/auto?projectId=${projectId}`,
-      color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400',
-      badge: 'NEW'
-    },
-    {
-      title: 'Daily Planning (Legacy)',
-      description: 'Manual daily production planning',
+      title: 'Daily Planning',
+      description: 'System-generated daily production plans',
       icon: Calendar,
       link: `/planning/daily?projectId=${projectId}`,
-      color: 'bg-gray-50 text-gray-600 dark:bg-gray-900/20 dark:text-gray-400'
+      color: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400'
     },
     {
       title: 'Material Planning',

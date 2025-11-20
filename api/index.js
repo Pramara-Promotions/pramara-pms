@@ -149,6 +149,13 @@ app.use((req, res, next) => {
       const actorId = req.auth?.user?.id || null;
       if (!actorId) return; // Skip audit if no authenticated user
 
+      // Verify user exists to prevent foreign key constraint error
+      const userExists = await prisma.user.findUnique({ 
+        where: { id: actorId },
+        select: { id: true }
+      });
+      if (!userExists) return; // Skip if user doesn't exist
+
       await prisma.auditLog.create({
         data: {
           actorId,

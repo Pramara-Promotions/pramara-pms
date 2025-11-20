@@ -543,7 +543,7 @@ router.get('/dashboard', authGuard, async (req, res) => {
       prisma.worker.count(),
       prisma.worker.count({ where: { status: 'active' } }),
       prisma.worker.count({ where: { workerType: 'company', status: 'active' } }),
-      prisma.worker.count({ where: { workerType: '3rd-party', status: 'active' } }),
+      prisma.worker.count({ where: { workerType: 'contractor', status: 'active' } }),
       prisma.thirdPartyProvider.count(),
       prisma.thirdPartyProvider.count({ where: { active: true } }),
     ]);

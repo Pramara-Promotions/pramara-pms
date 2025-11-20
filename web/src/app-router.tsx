@@ -59,8 +59,7 @@ import ProcessConfigurationPage from "./pages/ProcessConfigurationPage";
 import WorkflowBuilderPage from "./pages/WorkflowBuilderPage";
 import MaterialDashboardPage from "./pages/MaterialDashboardPage";
 import WorkforceManagementPage from "./pages/WorkforceManagementPage";
-import DailyPlanningPage from "./pages/DailyPlanningPage";
-import AutoPlanningPage from "./pages/AutoPlanningPage";
+import DailyPlanningPage from "./pages/AutoPlanningPage";
 import { AdaptivePlanningDashboard } from "./pages/AdaptivePlanningDashboard";
 import ProjectCostingPage from "./pages/ProjectCostingPage";
 import ApprovalTrackerPage from "./pages/ApprovalTrackerPage";
@@ -378,12 +377,6 @@ const dailyPlanningRoute = createRoute({
   component: DailyPlanningPage,
 });
 
-const autoPlanningRoute = createRoute({
-  getParentRoute: () => layoutRoute,
-  path: "planning/auto",
-  component: AutoPlanningPage,
-});
-
 const adaptivePlanningRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "planning/adaptive",
@@ -541,7 +534,6 @@ const routeTree = rootRoute.addChildren([
     workforceManagementRoute,
   workforceSkillsRoute,
     dailyPlanningRoute,
-    autoPlanningRoute,
   adaptivePlanningRoute,
     projectCostingRoute,
     approvalTrackerRoute,

@@ -52,23 +52,31 @@ interface Project {
 
 export default function AutoPlanningPage() {
   const projectContext = useProjectContextSafe();
+  // Check URL params for projectId
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlProjectId = urlParams.get('projectId');
+  
   const [plans, setPlans] = useState<DailyPlanGeneration[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
+    urlProjectId ? parseInt(urlProjectId) : null
+  );
   const [expandedPlanId, setExpandedPlanId] = useState<number | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [planToReject, setPlanToReject] = useState<number | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
 
-  // Auto-set project from context if available
+  // Auto-set project from context or URL params if available
   useEffect(() => {
     if (projectContext) {
       setSelectedProjectId(projectContext.id);
+    } else if (urlProjectId) {
+      setSelectedProjectId(parseInt(urlProjectId));
     }
-  }, [projectContext]);
+  }, [projectContext, urlProjectId]);
 
   useEffect(() => {
     fetchData();
@@ -295,7 +303,7 @@ export default function AutoPlanningPage() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Auto Daily Planning</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Daily Planning</h1>
         <p className="text-gray-600 mt-1">
           System-generated daily plans with backward scheduling from cutoff date
         </p>
@@ -311,8 +319,8 @@ export default function AutoPlanningPage() {
         </h2>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          {/* Hide project selector when inside project context */}
-          {!projectContext && (
+          {/* Hide project selector when inside project context or URL has projectId */}
+          {!projectContext && !urlProjectId && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Project *</label>
               <select
@@ -327,6 +335,17 @@ export default function AutoPlanningPage() {
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* Show project info when in project context or from URL */}
+          {(projectContext || (urlProjectId && selectedProject)) && (
+            <div className="bg-blue-50 p-3 rounded-md border border-blue-200">
+              <div className="text-xs text-blue-600 font-medium mb-1">Selected Project</div>
+              <div className="text-sm font-semibold text-blue-900">
+                {projectContext ? `${projectContext.code} - ${projectContext.name}` : 
+                 selectedProject ? `${selectedProject.code} - ${selectedProject.name}` : 'Loading...'}
+              </div>
             </div>
           )}
 

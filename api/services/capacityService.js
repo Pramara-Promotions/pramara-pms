@@ -201,17 +201,17 @@ async function getStationCapacity(stationId, processName, material = null) {
     });
   }
 
-  if (!processConfig) {
-    throw new Error(`No active process config found for station ${stationId}`);
-  }
-
   // Count available machines
-  const availableMachines = station.machines.filter((m) => m.status === 'available').length;
+  const availableMachines = station.machines ? station.machines.filter((m) => m.status === 'available').length : 1;
+
+  // Use processConfig if available, otherwise use defaults from station
+  const cycleTimeSec = processConfig?.cycleTimeSec || (station.baseCycleTime ? station.baseCycleTime * 60 : null) || 60;
+  const cavities = processConfig?.cavities || 1;
 
   // Calculate capacity
   const capacity = calculateDailyCapacity({
-    cycleTimeSec: (processConfig.cycleTimeSec || (station.baseCycleTime ? station.baseCycleTime * 60 : null) || 60), // default 60s when missing
-    cavities: processConfig.cavities || 1,
+    cycleTimeSec,
+    cavities,
     machines: availableMachines || 1,
     shiftHours: 8,
     shiftsPerDay: 2,

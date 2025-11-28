@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Upload, FileImage, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { listProjects } from '../../lib/services/projects';
 import { listPackaging, createPackaging, updatePackaging, reviewPackaging, approvePackaging, deletePackaging } from '../../lib/services/preproduction';
+import { useProjectContext } from '../../hooks';
+import { PageHeader } from '../../components';
 
 interface PackagingDesign {
   id: string;
@@ -55,9 +57,18 @@ interface Project {
 }
 
 const PackagingPage = () => {
+  const projectContext = useProjectContext();
+  
   const [designs, setDesigns] = useState<PackagingDesign[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+
+  // Auto-select project from context
+  useEffect(() => {
+    if (projectContext.projectId && !selectedProjectId) {
+      setSelectedProjectId(String(projectContext.projectId));
+    }
+  }, [projectContext.projectId]);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');

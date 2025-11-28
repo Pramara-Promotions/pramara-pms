@@ -93,6 +93,12 @@ model User {
   // Reminder Relations
   assignedReminders Reminder[] @relation("AssignedReminders")
   createdReminders  Reminder[] @relation("CreatedReminders")
+
+  // Process Template Relations
+  templatesCreated ProcessTemplate[] @relation("TemplateCreator")
+  
+  // Plan Modification Relations
+  planModifications PlanModificationHistory[]
 }
 
 model Role {
@@ -391,6 +397,54 @@ model Project {
 
   // Phase 4 Relations - Costing
   costings             ProjectCosting[]
+  
+  // Pre-Production Workflow Status
+  workflowStatus       ProjectWorkflowStatus?
+}
+
+model ProjectWorkflowStatus {
+  id                    String   @id @default(cuid())
+  projectId             Int      @unique
+  
+  // Phase completion tracking
+  processFlowComplete   Boolean  @default(false)
+  processFlowCompletedAt DateTime?
+  processFlowOperationCount Int   @default(0)
+  
+  bomComplete           Boolean  @default(false)
+  bomCompletedAt        DateTime?
+  bomComponentCount     Int      @default(0)
+  
+  moldsAssigned         Boolean  @default(false)
+  moldsAssignedAt       DateTime?
+  moldCount             Int      @default(0)
+  
+  trialsComplete        Boolean  @default(false)
+  trialsCompletedAt     DateTime?
+  approvedTrialCount    Int      @default(0)
+  
+  costingComplete       Boolean  @default(false)
+  costingCompletedAt    DateTime?
+  finalCostPerUnit      Float?
+  marginPercent         Float?
+  
+  poReceived            Boolean  @default(false)
+  poReceivedAt          DateTime?
+  poNumber              String?
+  poQuantity            Int?
+  poCutoffDate          DateTime?
+  
+  // Computed status
+  canPlan               Boolean  @default(false) // All required gates passed
+  
+  // Metadata
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  Project               Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@index([canPlan])
+  @@index([projectId])
 }
 
 model ProjectPref {
@@ -606,11 +660,14 @@ model Station {
 
   // Asset Management Relations
   WorkstationAssets WorkstationAsset[] @relation("StationAssets")
+  
+  // Multi-Process Planning Relations
+  processPlanDetails ProcessPlanDetail[]
+  dailyPlanStationsAuto DailyPlanStationAuto[]
 
   // Phase 3 Relations - Machine & Resource Management
   machines              StationMachine[]
   resourceAllocations   ResourceAllocation[]
-  dailyPlanStationsAuto DailyPlanStationAuto[]
 
   @@index([code])
   @@index([projectId])
@@ -1520,14 +1577,82 @@ model PlanAdaptation {
   
   DailyPlan            DailyPlan? @relation(fields: [dailyPlanId], references: [id], onDelete: Cascade)
   DailyPlanGeneration  DailyPlanGeneration? @relation(fields: [planGenerationId], references: [id], onDelete: Cascade)
+  
+  @@index([planGenerationId])
+  @@index([status])
+  @@index([createdAt])
   Project              Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([dailyPlanId])
-  @@index([planGenerationId])
   @@index([projectId])
   @@index([trigger])
   @@index([type])
+}
+
+// NEW MODEL: Track resource availability changes
+model ResourceAvailabilityEvent {
+  id              String   @id @default(cuid())
+  resourceType    String   // 'machine', 'station', 'worker', 'material'
+  resourceId      String   // ID of the affected resource
+  resourceName    String   // Human-readable name
+  eventType       String   // 'increased_capacity', 'decreased_capacity', 'new_resource', 'breakdown', 'maintenance'
+  previousValue   Json?    // Previous state (capacity, availability, etc.)
+  newValue        Json     // New state
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  reason          String?
+  detectedBy      String?  // 'system', 'user', 'sensor'
+  createdAt       DateTime @default(now())
+  
+  // Generated opportunities
+  opportunities   LoadBalancingOpportunity[]
+  
+  @@index([resourceType])
+  @@index([eventType])
+  @@index([effectiveFrom])
+  @@index([createdAt])
+}
+
+// NEW MODEL: Suggested load balancing actions
+model LoadBalancingOpportunity {
+  id                    String   @id @default(cuid())
+  availabilityEventId   String?  // Link to triggering event
+  planId                String   // Affected plan
+  opportunityType       String   // 'accelerate_production', 'reduce_bottleneck', 'optimize_utilization', 'gradual_ramp_up'
+  title                 String
+  description           String
+  
+  // Impact Analysis
+  currentBottleneck     String?
+  proposedChanges       Json     // Array of suggested modifications
+  estimatedTimeSaved    Float?   // Days
+  estimatedCostSaved    Float?   // Currency
+  riskLevel             String   @default("low") // low, medium, high
+  
+  // Status
+  status                String   @default("pending") // pending, accepted, rejected, implemented
+  confidence            Float    @default(0.8)
+  priority              Int      @default(5) // 1-10
+  
+  // Decision tracking
+  decidedBy             String?
+  decidedAt             DateTime?
+  decisionNote          String?
+  implementedAt         DateTime?
+  actualImpact          Json?    // Real results after implementation
+  
+  createdAt             DateTime @default(now())
+  expiresAt             DateTime? // Opportunity may become invalid
+  
+  ResourceAvailabilityEvent ResourceAvailabilityEvent? @relation(fields: [availabilityEventId], references: [id])
+  DailyPlanGeneration       DailyPlanGeneration        @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  @@index([planId])
+  @@index([availabilityEventId])
+  @@index([opportunityType])
   @@index([status])
+  @@index([priority])
+  @@index([createdAt])
 }
 
 model PlannerPreference {
@@ -2590,6 +2715,7 @@ model ProcessFlow {
   project    Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   creator    User               @relation("ProcessFlowCreator", fields: [createdBy], references: [id])
   operations ProcessOperation[]
+  dailyPlans DailyPlanGeneration[]
 
   @@index([projectId])
   @@index([status])
@@ -2620,6 +2746,7 @@ model ProcessOperation {
   processFlow   ProcessFlow    @relation(fields: [processFlowId], references: [id], onDelete: Cascade)
   station       Station?       @relation(fields: [stationId], references: [id])
   subOperations SubOperation[]
+  planDetails   ProcessPlanDetail[]
 
   @@index([processFlowId])
   @@index([stationId])
@@ -2646,6 +2773,33 @@ model SubOperation {
 
   @@index([processOperationId])
   @@index([sequence])
+}
+
+// =====================================================
+// INTELLIGENT PROCESS TEMPLATES
+// =====================================================
+
+model ProcessTemplate {
+  id              String   @id @default(cuid())
+  name            String // "Injection Molding Standard Flow"
+  processType     String // "molding", "paper_processing", "wood_processing", etc.
+  subType         String? // "injection", "blow", "roto" (for molding)
+  description     String?  @db.Text
+  isSystemDefined Boolean  @default(false) // Pre-loaded templates vs learned
+  usageCount      Int      @default(0) // How many projects used this
+  successRate     Float    @default(0) // % of projects that completed successfully
+  
+  structure       Json // Detailed structure (stages, resources, parameters)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String?
+  
+  creator         User?    @relation("TemplateCreator", fields: [createdBy], references: [id])
+  
+  @@index([processType, subType])
+  @@index([usageCount])
+  @@index([successRate])
 }
 
 // =====================================================
@@ -3012,6 +3166,7 @@ model ChangeoverHistory {
 model DailyPlanGeneration {
   id              String   @id @default(cuid())
   projectId       Int
+  processFlowId   String?  // Link to ProcessFlow used
   generatedAt     DateTime @default(now())
   generatedBy     String?
   status          String   @default("draft") // draft, pending_approval, approved, active, completed
@@ -3022,13 +3177,113 @@ model DailyPlanGeneration {
   totalDays       Int
   notes           String?
   
-  Project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  stationPlans    DailyPlanStationAuto[]
-  adaptations     PlanAdaptation[]
+  // Multi-Process Planning Fields
+  bottleneckOperation String?  // Which operation is the constraint
+  effectiveCapacity   Int?     // Units/hour (bottleneck capacity)
+  planningStrategy    String   @default("bottleneck") // bottleneck, balanced, aggressive
+  
+  Project                    Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ProcessFlow                ProcessFlow?                 @relation(fields: [processFlowId], references: [id])
+  stationPlans               DailyPlanStationAuto[]
+  processDetails             ProcessPlanDetail[]          // NEW: Per-operation breakdown
+  adaptations                PlanAdaptation[]
+  modificationHistory        PlanModificationHistory[]    // NEW: Track changes
+  conflicts                  PlanConflict[]               // NEW: Conflict tracking
+  loadBalancingOpportunities LoadBalancingOpportunity[]   // NEW: Adaptive suggestions
 
   @@index([projectId])
+  @@index([processFlowId])
   @@index([status])
   @@index([startDate, endDate])
+}
+
+// NEW MODEL: Per-operation daily breakdown
+model ProcessPlanDetail {
+  id                  String   @id @default(cuid())
+  planId              String   // Link to DailyPlanGeneration
+  operationId         String   // Link to ProcessOperation
+  date                DateTime @db.Date
+  sequence            Int      // Operation order (1=first, 2=second...)
+  
+  // Capacity Info
+  inputCapacity       Int?     // From previous operation (null for first)
+  operationCapacity   Int      // This operation's max capacity
+  effectiveOutput     Int      // Actual output (MIN of input, capacity)
+  isBottleneck        Boolean  @default(false)
+  
+  // Resource Allocation
+  stationId           Int?
+  assignedMachines    Int      @default(1)
+  machineIds          Json?    // Array of specific machine IDs
+  assignedWorkers     Int?
+  
+  // Utilization
+  capacityUtilization Float    @default(0) // effectiveOutput / operationCapacity
+  hoursRequired       Float?   // Based on cycle time
+  
+  // Status
+  status              String   @default("planned") // planned, in_progress, completed
+  actualOutput        Int?     // Real output (filled during execution)
+  notes               String?
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  DailyPlanGeneration DailyPlanGeneration @relation(fields: [planId], references: [id], onDelete: Cascade)
+  ProcessOperation    ProcessOperation    @relation(fields: [operationId], references: [id])
+  Station             Station?            @relation(fields: [stationId], references: [id])
+  
+  @@unique([planId, operationId, date])
+  @@index([planId])
+  @@index([date])
+  @@index([operationId])
+  @@index([status])
+}
+
+// NEW MODEL: Track manual changes to plans
+model PlanModificationHistory {
+  id              String   @id @default(cuid())
+  planId          String
+  detailId        String?  // Specific operation affected (null = plan-level change)
+  changeType      String   // 'quantity', 'date', 'resource', 'sequence', 'split', 'merge'
+  fieldChanged    String?  // Which field was modified
+  oldValue        Json?    // Previous value
+  newValue        Json?    // New value
+  reason          String?  // User-provided reason
+  impactAnalysis  Json?    // Downstream effects (bottlenecks, delays, etc.)
+  userId          String?
+  createdAt       DateTime @default(now())
+  
+  DailyPlanGeneration DailyPlanGeneration @relation(fields: [planId], references: [id], onDelete: Cascade)
+  User                User?               @relation(fields: [userId], references: [id])
+  
+  @@index([planId])
+  @@index([detailId])
+  @@index([changeType])
+  @@index([createdAt])
+}
+
+// NEW MODEL: Detect and track conflicts during plan editing
+model PlanConflict {
+  id              String   @id @default(cuid())
+  planId          String
+  conflictType    String   // 'resource_overload', 'date_dependency', 'capacity_exceeded', 'sequence_violation'
+  severity        String   // 'critical', 'warning', 'info'
+  affectedDetails Json     // Array of detailIds involved
+  description     String
+  suggestion      String?  // Auto-generated resolution suggestion
+  resolved        Boolean  @default(false)
+  resolvedAt      DateTime?
+  resolvedBy      String?
+  resolutionNote  String?
+  createdAt       DateTime @default(now())
+  
+  DailyPlanGeneration DailyPlanGeneration @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  @@index([planId])
+  @@index([conflictType])
+  @@index([severity])
+  @@index([resolved])
 }
 
 model DailyPlanStationAuto {

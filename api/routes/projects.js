@@ -20,6 +20,9 @@ if (typeof authGuard !== 'function') {
 // Permission guard for RBAC
 const { permissionGuard } = require('../middleware/permissionGuard');
 
+// Workflow status service
+const workflowStatusService = require('../services/workflowStatusService');
+
 const prisma = new PrismaClient();
 const router = express.Router();
 
@@ -1205,5 +1208,61 @@ router.put(
     }
   }
 );
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORKFLOW STATUS ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /api/projects/:id/workflow-status
+ * Get workflow status for a project (auto-calculates completion)
+ */
+router.get('/:id/workflow-status', authGuard, async (req, res) => {
+  try {
+    const projectId = Number(req.params.id);
+    
+    if (isNaN(projectId)) {
+      return res.status(400).json({ error: 'Invalid project ID' });
+    }
+
+    // Update and return workflow status
+    const workflow = await workflowStatusService.updateWorkflowStatus(projectId);
+    const progress = workflowStatusService.getWorkflowProgress(workflow);
+
+    res.json({
+      workflow,
+      progress
+    });
+  } catch (error) {
+    console.error('GET /projects/:id/workflow-status failed:', error);
+    res.status(500).json({ error: 'Failed to fetch workflow status' });
+  }
+});
+
+/**
+ * POST /api/projects/:id/workflow-status/refresh
+ * Force refresh workflow status (recalculate all completion states)
+ */
+router.post('/:id/workflow-status/refresh', authGuard, async (req, res) => {
+  try {
+    const projectId = Number(req.params.id);
+    
+    if (isNaN(projectId)) {
+      return res.status(400).json({ error: 'Invalid project ID' });
+    }
+
+    const workflow = await workflowStatusService.updateWorkflowStatus(projectId);
+    const progress = workflowStatusService.getWorkflowProgress(workflow);
+
+    res.json({
+      workflow,
+      progress,
+      refreshed: true
+    });
+  } catch (error) {
+    console.error('POST /projects/:id/workflow-status/refresh failed:', error);
+    res.status(500).json({ error: 'Failed to refresh workflow status' });
+  }
+});
 
 module.exports = router;

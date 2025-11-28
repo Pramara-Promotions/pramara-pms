@@ -236,4 +236,173 @@ router.get('/plans', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-PROCESS PLANNING ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const multiProcessPlanner = require('../services/multiProcessPlanner');
+const processChainAnalyzer = require('../services/processChainAnalyzer');
+const resourceValidator = require('../services/resourceValidator');
+
+/**
+ * POST /api/auto-planning/analyze-process-flow/:flowId
+ * Analyze a process flow to identify bottlenecks
+ */
+router.post('/analyze-process-flow/:flowId', async (req, res) => {
+  try {
+    const { flowId } = req.params;
+    
+    const analysis = await processChainAnalyzer.analyzeProcessChain(flowId);
+    res.json(analysis);
+  } catch (error) {
+    console.error('POST /analyze-process-flow/:flowId failed:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to analyze process flow' 
+    });
+  }
+});
+
+/**
+ * POST /api/auto-planning/validate-resources
+ * Validate resources before planning
+ */
+router.post('/validate-resources', async (req, res) => {
+  try {
+    const { projectId, processFlowId } = req.body;
+    
+    if (!projectId || !processFlowId) {
+      return res.status(400).json({ 
+        error: 'Project ID and Process Flow ID are required' 
+      });
+    }
+    
+    const validation = await resourceValidator.validatePlanningResources(
+      Number(projectId),
+      processFlowId
+    );
+    
+    res.json(validation);
+  } catch (error) {
+    console.error('POST /validate-resources failed:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to validate resources' 
+    });
+  }
+});
+
+/**
+ * POST /api/auto-planning/generate-multi-process
+ * Generate a multi-process production plan
+ */
+router.post('/generate-multi-process', async (req, res) => {
+  try {
+    const {
+      projectId,
+      processFlowId,
+      quantity,
+      startDate,
+      hoursPerDay = 8,
+      workingDaysPerWeek = 6,
+      strategy = 'bottleneck'
+    } = req.body;
+    
+    // Validation
+    if (!projectId || !processFlowId || !quantity || !startDate) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: projectId, processFlowId, quantity, startDate' 
+      });
+    }
+    
+    if (quantity <= 0) {
+      return res.status(400).json({ error: 'Quantity must be positive' });
+    }
+    
+    const result = await multiProcessPlanner.generateMultiProcessPlan({
+      projectId: Number(projectId),
+      processFlowId,
+      quantity: Number(quantity),
+      startDate: new Date(startDate),
+      hoursPerDay: Number(hoursPerDay),
+      workingDaysPerWeek: Number(workingDaysPerWeek),
+      strategy
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('POST /generate-multi-process failed:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to generate plan' 
+    });
+  }
+});
+
+/**
+ * GET /api/auto-planning/plans/:planId/operations
+ * Get process details for a plan grouped by date
+ */
+router.get('/plans/:planId/operations', async (req, res) => {
+  try {
+    const { planId } = req.params;
+    
+    const details = await prisma.processPlanDetail.findMany({
+      where: { planId },
+      include: {
+        ProcessOperation: true,
+        Station: true
+      },
+      orderBy: [
+        { date: 'asc' },
+        { sequence: 'asc' }
+      ]
+    });
+    
+    // Group by date
+    const grouped = {};
+    for (const detail of details) {
+      const dateKey = detail.date.toISOString().split('T')[0];
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(detail);
+    }
+    
+    res.json({ details, grouped });
+  } catch (error) {
+    console.error('GET /plans/:planId/operations failed:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to fetch operation details' 
+    });
+  }
+});
+
+/**
+ * PUT /api/auto-planning/plans/:planId/operations/:detailId
+ * Update individual operation plan
+ */
+router.put('/plans/:planId/operations/:detailId', async (req, res) => {
+  try {
+    const { detailId } = req.params;
+    const updates = req.body;
+    
+    const updated = await prisma.processPlanDetail.update({
+      where: { id: detailId },
+      data: {
+        ...updates,
+        updatedAt: new Date()
+      },
+      include: {
+        ProcessOperation: true,
+        Station: true
+      }
+    });
+    
+    res.json(updated);
+  } catch (error) {
+    console.error('PUT /plans/:planId/operations/:detailId failed:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to update operation plan' 
+    });
+  }
+});
+
 module.exports = router;

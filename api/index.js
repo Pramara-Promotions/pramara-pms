@@ -59,6 +59,7 @@ const preProductionRouter = require('./routes/pre-production');
 const complianceRouter = require('./routes/compliance');
 const projectPoliciesRouter = require('./routes/project-policies');
 const processFlowsRouter = require('./routes/process-flows');
+const processTemplatesRouter = require('./routes/process-templates');
 const shiftEntriesRouter = require('./routes/shift-entries');
 const wipLedgerRouter = require('./routes/wip-ledger');
 const stationsRouter = require('./routes/stations');
@@ -199,6 +200,7 @@ app.use('/api/pre-production', preProductionRouter);
 app.use('/api/compliance', complianceRouter);
 app.use('/api/project-policies', projectPoliciesRouter);
 app.use('/api/process-flows', processFlowsRouter);
+app.use('/api/process-templates', processTemplatesRouter);
 app.use('/api/shift-entries', shiftEntriesRouter);
 app.use('/api/wip-ledger', wipLedgerRouter);
 app.use('/api/stations', stationsRouter);
@@ -241,6 +243,8 @@ app.use('/api/resources', resourcesRouter);
 app.use('/api/auto-planning', autoPlanningRouter);
 app.use('/api/bottlenecks', bottlenecksRouter);
 app.use('/api/bom', bomRouter);
+app.use('/api/plan-editor', require('./routes/plan-editor'));
+app.use('/api/load-balancing', require('./routes/load-balancing'));
 
 function publicUrlForKey(key) {
   const base = process.env.PUBLIC_FILES_BASE || '';

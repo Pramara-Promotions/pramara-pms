@@ -41,7 +41,11 @@ docker-compose up -d
 # Run migrations
 cd api
 npx prisma migrate deploy
-npx prisma db seed
+
+# Seed database (choose one)
+node scripts/comprehensive-production-seed.js  # Full production system (recommended)
+# OR
+npx prisma db seed                            # Basic seed data
 
 # Start development servers
 cd ..
@@ -88,6 +92,8 @@ pramara-pms/
 ├── prisma/                # Database schema & migrations
 ├── docs/                  # Documentation
 └── scripts/               # Setup & utility scripts
+    ├── comprehensive-production-seed.js  # Full production system seed
+    └── *.js               # Other utility scripts
 ```
 
 ## Available Scripts
@@ -102,6 +108,7 @@ pramara-pms/
 | `npm run api:dev` | Start API server only |
 | `npm run web:dev` | Start frontend only |
 | `npm run prisma:studio` | Open Prisma Studio (DB GUI) |
+| `node scripts/comprehensive-production-seed.js` | Seed full production system |
 
 ## Documentation
 

@@ -61,6 +61,10 @@ import MaterialDashboardPage from "./pages/MaterialDashboardPage";
 import WorkforceManagementPage from "./pages/WorkforceManagementPage";
 import DailyPlanningPage from "./pages/AutoPlanningPage";
 import { AdaptivePlanningDashboard } from "./pages/AdaptivePlanningDashboard";
+import MultiProcessPlanPage from "./pages/planning/MultiProcessPlanPage";
+import ProcessChainView from "./pages/planning/ProcessChainView";
+import PlanEditor from "./pages/planning/PlanEditor";
+import LoadBalancingDashboard from "./pages/planning/LoadBalancingDashboard";
 import ProjectCostingPage from "./pages/ProjectCostingPage";
 import ApprovalTrackerPage from "./pages/ApprovalTrackerPage";
 import MRPCalculatorPage from "./pages/MRPCalculatorPage";
@@ -383,6 +387,36 @@ const adaptivePlanningRoute = createRoute({
   component: AdaptivePlanningDashboard,
 });
 
+const multiProcessPlanRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/multi-process",
+  component: MultiProcessPlanPage,
+});
+
+const processChainViewRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/process-chain/:flowId",
+  component: ProcessChainView,
+});
+
+const planEditorRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/editor/:planId",
+  component: () => {
+    const { planId } = { planId: '' }; // Will be populated by router
+    return <PlanEditor planId={planId} />;
+  },
+});
+
+const loadBalancingRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/load-balancing/:planId",
+  component: () => {
+    const { planId } = { planId: '' }; // Will be populated by router
+    return <LoadBalancingDashboard planId={planId} />;
+  },
+});
+
 const projectCostingRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "planning/costing",
@@ -535,6 +569,10 @@ const routeTree = rootRoute.addChildren([
   workforceSkillsRoute,
     dailyPlanningRoute,
   adaptivePlanningRoute,
+  multiProcessPlanRoute,
+  processChainViewRoute,
+  planEditorRoute,
+  loadBalancingRoute,
     projectCostingRoute,
     approvalTrackerRoute,
     mrpCalculatorRoute,

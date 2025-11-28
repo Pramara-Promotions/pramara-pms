@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Plus, ArrowLeft, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { getMold, listTrials, createTrial, approveTrial } from '../../lib/services/preproduction';
+import { useProjectContext } from '../../hooks';
+import { PageHeader } from '../../components';
 
 interface Trial {
   id: string;
@@ -44,6 +46,7 @@ interface DefectType {
 }
 
 const TrialsPage = () => {
+  const projectContext = useProjectContext();
   const moldIdParam = new URLSearchParams(window.location.search).get('moldId');
   
   const [trials, setTrials] = useState<Trial[]>([]);

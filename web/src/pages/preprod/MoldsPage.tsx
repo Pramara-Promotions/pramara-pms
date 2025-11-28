@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, Eye, FileText } from 'lucide-react';
 import { listProjects } from '../../lib/services/projects';
 import { listMolds, createMold, updateMold, deleteMold } from '../../lib/services/preproduction';
+import { useProjectContext } from '../../hooks';
+import { PageHeader } from '../../components';
 
 interface Mold {
   id: string;
@@ -41,6 +43,9 @@ interface Project {
 }
 
 const MoldsPage = () => {
+  // Check if we're in a project context
+  const projectContext = useProjectContext();
+  
   const [molds, setMolds] = useState<Mold[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
@@ -49,6 +54,13 @@ const MoldsPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingMold, setEditingMold] = useState<Mold | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // If in project context, auto-select that project
+  useEffect(() => {
+    if (projectContext.projectId && !selectedProjectId) {
+      setSelectedProjectId(String(projectContext.projectId));
+    }
+  }, [projectContext.projectId]);
 
   const [formData, setFormData] = useState({
     projectId: '',
@@ -173,44 +185,53 @@ const MoldsPage = () => {
 
   return (
     <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Mold Management</h1>
-          <p className="text-gray-600 mt-1">Track molds, trials, and approvals</p>
-        </div>
-        <button
-          onClick={() => {
-            setEditingMold(null);
-            resetForm();
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus size={20} />
-          Add Mold
-        </button>
-      </div>
+      {/* Header with Project Context */}
+      <PageHeader
+        title="Mold Management"
+        subtitle="Track molds, trials, and approvals"
+        projectContext={projectContext.isInProjectContext ? {
+          id: projectContext.projectId!,
+          name: projectContext.projectName!,
+          code: projectContext.projectCode!
+        } : null}
+        backTo={projectContext.isInProjectContext ? `/projects/${projectContext.projectId}?tab=preprod` : '/projects'}
+        actions={
+          <button
+            onClick={() => {
+              setEditingMold(null);
+              resetForm();
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <Plus size={20} />
+            Add Mold
+          </button>
+        }
+      />
 
       {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Project
-          </label>
-          <select
-            value={selectedProjectId}
-            onChange={(e) => setSelectedProjectId(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">All Projects</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.code} - {project.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Only show project selector if NOT in project context */}
+        {!projectContext.isInProjectContext && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Project
+            </label>
+            <select
+              value={selectedProjectId}
+              onChange={(e) => setSelectedProjectId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Projects</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.code} - {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Search, Edit2, Trash2, FileText, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
 import { listProjects } from '../../lib/services/projects';
 import { listPPS, createPPS, updatePPS, approvePPS, rejectPPS, deletePPS } from '../../lib/services/preproduction';
+import { useProjectContext } from '../../hooks';
+import { PageHeader } from '../../components';
 
 interface PPSApproval {
   id: string;
@@ -67,9 +69,18 @@ interface Project {
 }
 
 const PPSPage = () => {
+  const projectContext = useProjectContext();
+  
   const [ppsApprovals, setPpsApprovals] = useState<PPSApproval[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+
+  // Auto-select project from context
+  useEffect(() => {
+    if (projectContext.projectId && !selectedProjectId) {
+      setSelectedProjectId(String(projectContext.projectId));
+    }
+  }, [projectContext.projectId]);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [stageFilter, setStageFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');

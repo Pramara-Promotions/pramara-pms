@@ -643,6 +643,95 @@ async function seedProjects(stations, users) {
   return projects;
 }
 
+/**
+ * Seed molds for projects and link them to molding machines
+ */
+async function seedMoldsForProjects(projects, stations, users) {
+  const moldingStations = stations.filter(s => s.code.startsWith('MOULD-'));
+  const creatorId = users[0].id;
+  let totalMolds = 0;
+  
+  for (const project of projects) {
+    // Create 3-5 molds per project (realistic variation)
+    const moldCount = randInt(3, 5);
+    
+    for (let m = 1; m <= moldCount; m++) {
+      const cavities = pick([1, 2, 4, 8, 16]); // Common cavity counts
+      const cycleTimeSec = randInt(30, 120); // 30-120 seconds
+      
+      const mold = await prisma.moldMaster.create({
+        data: {
+          projectId: project.id,
+          moldCode: `${project.code}-MOLD-${String(m).padStart(2, '0')}`,
+          moldName: `${project.name} Mold ${m}`,
+          supplierName: pick(['ABC Tooling', 'XYZ Dies', 'PQR Moulds', 'Internal Workshop']),
+          cavities,
+          cycleTimeSec,
+          material: pick(['Steel', 'Aluminum', 'P20 Steel', 'H13 Steel']),
+          dimensions: `${randInt(200, 600)}x${randInt(200, 600)}x${randInt(100, 300)} mm`,
+          weight: randInt(50, 500),
+          cost: randInt(50000, 500000),
+          location: pick(['Mold Store A', 'Mold Store B', 'Production Floor']),
+          status: 'active',
+          notes: `Mold for ${project.name}`,
+          createdBy: creatorId,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      });
+      
+      // Link mold to 1-2 molding machines at random stations
+      const assignedMachines = randInt(1, 2);
+      const selectedStations = [];
+      
+      for (let i = 0; i < assignedMachines; i++) {
+        const station = pick(moldingStations.filter(s => !selectedStations.includes(s.id)));
+        if (!station) continue;
+        
+        selectedStations.push(station.id);
+        
+        // Create or update machine at this station
+        await prisma.stationMachine.upsert({
+          where: {
+            stationId_machineNumber: {
+              stationId: station.id,
+              machineNumber: m
+            }
+          },
+          update: {
+            moldMasterId: mold.id,
+            cavities,
+            cycleTimeSec,
+            status: 'operational',
+            updatedAt: new Date()
+          },
+          create: {
+            stationId: station.id,
+            machineNumber: m,
+            machineName: `${station.name} Machine ${m}`,
+            machineType: 'molding',
+            moldMasterId: mold.id,
+            cavities,
+            cycleTimeSec,
+            status: 'operational',
+            serialNumber: `MACH-${station.id}-${m}`,
+            manufacturer: pick(['Haitian', 'Engel', 'Arburg', 'Toshiba']),
+            modelNumber: `M${randInt(100, 999)}`,
+            yearOfManufacture: randInt(2015, 2023),
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }
+        });
+      }
+      
+      totalMolds++;
+    }
+  }
+  
+  console.log(`✅ Molds created and linked: ${totalMolds} molds across ${projects.length} projects`);
+  return totalMolds;
+}
+
 async function main() {
   console.log('🧨 Reset & Seed (E2E) — starting...');
   console.time('total');
@@ -680,6 +769,9 @@ async function main() {
     throw err;
   }
   console.log(`✅ Projects created: ${projects.length} (8 active, 5 pipeline)`);
+
+  // 6.5) Molds for projects
+  await seedMoldsForProjects(projects, stations, users);
 
   // 7) Worker performance data
   await seedWorkerPerformance(workers, projects);

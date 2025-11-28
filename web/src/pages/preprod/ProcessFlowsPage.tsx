@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, GitBranch, Play, CheckCircle, AlertTriangle, Clock, Workflow } from 'lucide-react';
 import { listProjects } from '../../lib/services/projects';
 import { listProcessFlows, createProcessFlow, updateProcessFlow, activateProcessFlow, deleteProcessFlow } from '../../lib/services/preproduction';
-import { useProjectContextSafe } from '../projects/ProjectContext';
+import { useProjectContext } from '../../hooks';
+import { PageHeader } from '../../components';
 import ContextualTaskReminder from '../../components/ContextualTaskReminder';
 
 interface ProcessFlow {
@@ -45,7 +46,7 @@ interface SubOperation {
 }
 
 const ProcessFlowsPage = () => {
-  const projectContext = useProjectContextSafe();
+  const projectContext = useProjectContext();
   const [flows, setFlows] = useState<ProcessFlow[]>([]);
   const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
   const [stations, setStations] = useState<Array<{ id: number; name: string; code: string }>>([]);
@@ -60,11 +61,11 @@ const ProcessFlowsPage = () => {
 
   // Auto-set project filter from context if available
   useEffect(() => {
-    if (projectContext) {
-      setProjectFilter(String(projectContext.id));
-      setFormData(prev => ({ ...prev, projectId: String(projectContext.id) }));
+    if (projectContext.projectId) {
+      setProjectFilter(String(projectContext.projectId));
+      setFormData(prev => ({ ...prev, projectId: String(projectContext.projectId) }));
     }
-  }, [projectContext]);
+  }, [projectContext.projectId]);
 
   const [formData, setFormData] = useState({
     projectId: '',

@@ -196,6 +196,7 @@ app.use('/api', emailRouter);
 app.use('/api/email-digest', emailDigestRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api', meRouter);
+app.use('/api/projects', projectsRouter);
 app.use('/api/pre-production', preProductionRouter);
 app.use('/api/compliance', complianceRouter);
 app.use('/api/project-policies', projectPoliciesRouter);

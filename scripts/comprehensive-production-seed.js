@@ -88,8 +88,12 @@ async function purgeData() {
   await prisma.shiftEntry.deleteMany({});
   console.log('  - Deleting QC submissions...');
   await prisma.qCSubmission.deleteMany({});
+  console.log('  - Deleting product components...');
+  await prisma.productComponent.deleteMany({});
   console.log('  - Deleting BOM items...');
   await prisma.bOMItem.deleteMany({});
+  console.log('  - Deleting project costing...');
+  await prisma.projectCosting.deleteMany({});
   console.log('  - Deleting process operations...');
   await prisma.processOperation.deleteMany({});
   console.log('  - Deleting process flows...');
@@ -638,6 +642,36 @@ async function createProductionProjects(stations, materials, users) {
       });
     }
 
+    // Create Project Costing
+    const materialCost = 15 + Math.random() * 35; // $15-50
+    const laborCost = 8 + Math.random() * 12; // $8-20
+    const overheadCost = 5 + Math.random() * 10; // $5-15
+    const totalCost = materialCost + laborCost + overheadCost;
+    const marginPercent = 25 + Math.random() * 15; // 25-40% margin
+    const sellingPrice = totalCost * (1 + marginPercent / 100);
+
+    await prisma.projectCosting.create({
+      data: {
+        projectId: project.id,
+        version: 1,
+        status: 'approved',
+        exFactoryCost: totalCost,
+        sellingPrice: sellingPrice,
+        createdBy: users.admin.id,
+        approvedBy: users.admin.id,
+        approvedAt: new Date()
+      }
+    });
+
+    // Create Purchase Order
+    await prisma.purchaseOrder.create({
+      data: {
+        projectId: project.id,
+        poNumber: `PO-${t.code}-${new Date().getFullYear()}`,
+        fileKey: `po/${t.code}/${Date.now()}.pdf`
+      }
+    });
+
     // Create Process Flow
     const processFlow = await prisma.processFlow.create({
       data: {
@@ -679,46 +713,113 @@ async function createProductionProjects(stations, materials, users) {
         }
       });
 
-      // Create BOM items (linked to first SKU, not project)
+      // Create BOM items (linked to first SKU, not project) AND ProductComponent (for workflow check)
       if (f.type === 'MOLD') {
         const resin = materials.find(m => m.type === 'resin');
         if (resin && projectSkus.length > 0) {
+          const qty = 0.05 + Math.random() * 0.1;
           await prisma.bOMItem.create({
             data: {
               skuId: projectSkus[0].id,
               materialId: resin.id,
-              quantityPerUnit: 0.05 + Math.random() * 0.1,
+              quantityPerUnit: qty,
               unit: 'kg',
               notes: `Operation: ${f.step}`,
               isActive: true
+            }
+          });
+          // Also create ProductComponent + ComponentMaterial for workflow status check
+          const component = await prisma.productComponent.create({
+            data: {
+              projectId: project.id,
+              skuId: projectSkus[0].id,
+              name: `Resin Component`,
+              type: 'material',
+              material: resin.name,
+              color: 'N/A',
+              qtyPerUnit: 1,
+              active: true
+            }
+          });
+          await prisma.componentMaterial.create({
+            data: {
+              componentId: component.id,
+              materialId: resin.id,
+              qtyPerComponent: qty,
+              unit: 'kg',
+              stage: 'MOLD'
             }
           });
         }
       } else if (f.type === 'SPRAY') {
         const paint = materials.find(m => m.type === 'paint');
         if (paint && projectSkus.length > 0) {
+          const qty = 0.01 + Math.random() * 0.02;
           await prisma.bOMItem.create({
             data: {
               skuId: projectSkus[0].id,
               materialId: paint.id,
-              quantityPerUnit: 0.01 + Math.random() * 0.02,
+              quantityPerUnit: qty,
               unit: 'liter',
               notes: `Operation: ${f.step}`,
               isActive: true
+            }
+          });
+          const component = await prisma.productComponent.create({
+            data: {
+              projectId: project.id,
+              skuId: projectSkus[0].id,
+              name: `Paint Component`,
+              type: 'material',
+              material: paint.name,
+              color: 'N/A',
+              qtyPerUnit: 1,
+              active: true
+            }
+          });
+          await prisma.componentMaterial.create({
+            data: {
+              componentId: component.id,
+              materialId: paint.id,
+              qtyPerComponent: qty,
+              unit: 'liter',
+              stage: 'SPRAY'
             }
           });
         }
       } else if (f.type === 'SCREW') {
         const screw = materials.find(m => m.id === 'SCREW-M3');
         if (screw && projectSkus.length > 0) {
+          const qty = 2 + randomInt(1, 4);
           await prisma.bOMItem.create({
             data: {
               skuId: projectSkus[0].id,
               materialId: screw.id,
-              quantityPerUnit: 2 + randomInt(1, 4),
+              quantityPerUnit: qty,
               unit: 'pcs',
               notes: `Operation: ${f.step}`,
               isActive: true
+            }
+          });
+          const component = await prisma.productComponent.create({
+            data: {
+              projectId: project.id,
+              skuId: projectSkus[0].id,
+              name: `Screw Component`,
+              type: 'fastener',
+              material: screw.name,
+              color: 'N/A',
+              qtyPerUnit: 2,
+              active: true
+            }
+          });
+          await prisma.componentMaterial.create({
+            data: {
+              componentId: component.id,
+              materialId: screw.id,
+              qtyPerComponent: qty,
+              unit: 'pcs',
+              stage: 'SCREW'
             }
           });
         }
@@ -733,6 +834,27 @@ async function createProductionProjects(stations, materials, users) {
               unit: 'pcs',
               notes: `Operation: ${f.step}`,
               isActive: true
+            }
+          });
+          const component = await prisma.productComponent.create({
+            data: {
+              projectId: project.id,
+              skuId: projectSkus[0].id,
+              name: `Packaging Component`,
+              type: 'packaging',
+              material: box.name,
+              color: 'N/A',
+              qtyPerUnit: 1,
+              active: true
+            }
+          });
+          await prisma.componentMaterial.create({
+            data: {
+              componentId: component.id,
+              materialId: box.id,
+              qtyPerComponent: 1,
+              unit: 'pcs',
+              stage: 'PACK'
             }
           });
         }

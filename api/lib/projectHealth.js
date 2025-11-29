@@ -61,6 +61,24 @@ async function calculateProjectHealth(projectId) {
       shiftAgg = null;
     }
 
+    // Aggregate ProductionEntry for last 7 days (primary source for output/quality)
+    let prodAgg = null;
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      prodAgg = await prisma.productionEntry.aggregate({
+        where: { projectId, startTime: { gte: sevenDaysAgo } },
+        _sum: {
+          actualQty: true,
+          rejectedQty: true,
+          targetQty: true,
+        },
+      });
+    } catch (e) {
+      console.warn('[projectHealth] productionEntry aggregate failed:', e?.message);
+      prodAgg = null;
+    }
+
     // 1. TIMELINE METRICS
     const timeline = calculateTimelineMetrics(project);
 
@@ -68,10 +86,10 @@ async function calculateProjectHealth(projectId) {
     const budget = calculateBudgetMetrics(project);
 
     // 3. OUTPUT METRICS
-  const output = calculateOutputMetrics(project, shiftAgg);
+  const output = calculateOutputMetrics(project, shiftAgg, prodAgg);
 
     // 4. QUALITY METRICS
-  const quality = calculateQualityMetrics(project, shiftAgg);
+  const quality = calculateQualityMetrics(project, shiftAgg, prodAgg);
 
     // 5. TASK PROGRESS
     const taskProgress = calculateTaskProgress(project);
@@ -169,7 +187,7 @@ function calculateBudgetMetrics(project) {
 /**
  * Calculate output metrics
  */
-function calculateOutputMetrics(project, shiftAgg) {
+function calculateOutputMetrics(project, shiftAgg, prodAgg) {
   // From SKUs (using orderQty as target)
   const skuTarget = project.skus?.reduce((sum, sku) => sum + (sku.orderQty || 0), 0) || 0;
 
@@ -177,16 +195,23 @@ function calculateOutputMetrics(project, shiftAgg) {
   const batchTarget = project.Batch?.reduce((sum, batch) => sum + (batch.targetQty || 0), 0) || 0;
   const batchProduced = project.Batch?.reduce((sum, batch) => sum + (batch.currentQty || 0), 0) || 0;
 
-  // Use SKU if available, otherwise batch or project quantity
-  const targetQuantity = skuTarget > 0 ? skuTarget : (project.quantity || batchTarget);
-  // Prefer batch produced; if zero, fallback to ShiftEntry aggregate
+  // Use SKU if available, otherwise batch or project quantity; fallback to ProductionEntry target sum
+  let targetQuantity = skuTarget > 0 ? skuTarget : (project.quantity || batchTarget);
+  // Prefer ProductionEntry actualQty (7d). If zero, use batch; else fallback to ShiftEntry
+  const produced7d = prodAgg?._sum?.actualQty || 0;
   const shiftProduced = shiftAgg?._sum?.totalProduced || 0;
-  const producedQuantity = batchProduced > 0 ? batchProduced : shiftProduced;
+  const producedQuantity = produced7d > 0 ? produced7d : (batchProduced > 0 ? batchProduced : shiftProduced);
+
+  // If target not specified, prefer ProductionEntry target sum
+  const target7d = prodAgg?._sum?.targetQty || 0;
+  if (!targetQuantity || targetQuantity === 0) {
+    targetQuantity = target7d;
+  }
   const percentComplete = targetQuantity > 0 ? (producedQuantity / targetQuantity) * 100 : 0;
 
   return {
-    target: targetQuantity,
-    produced: producedQuantity,
+    target: Math.max(0, targetQuantity),
+    produced: Math.max(0, producedQuantity),
     remaining: Math.max(0, targetQuantity - producedQuantity),
     percentComplete: Math.round(percentComplete * 10) / 10,
     status: percentComplete >= 100 ? 'complete' : percentComplete >= 75 ? 'on-track' : percentComplete >= 50 ? 'at-risk' : 'behind'
@@ -196,7 +221,7 @@ function calculateOutputMetrics(project, shiftAgg) {
 /**
  * Calculate quality metrics
  */
-function calculateQualityMetrics(project, shiftAgg) {
+function calculateQualityMetrics(project, shiftAgg, prodAgg) {
   const batches = project.Batch || [];
   const batchProduced = batches.reduce((sum, b) => sum + (b.currentQty || 0), 0);
   const batchRejected = batches.reduce((sum, b) => sum + (b.rejectedQty || 0), 0);
@@ -204,10 +229,12 @@ function calculateQualityMetrics(project, shiftAgg) {
   const shiftProduced = shiftAgg?._sum?.totalProduced || 0;
   const shiftPassed = shiftAgg?._sum?.qualityPassed || 0;
   const shiftRejected = shiftAgg?._sum?.qualityRejected || 0;
+  const prodProduced = prodAgg?._sum?.actualQty || 0;
+  const prodRejected = prodAgg?._sum?.rejectedQty || 0;
 
-  const totalProduced = batchProduced > 0 ? batchProduced : shiftProduced;
-  const totalRejected = batchProduced > 0 ? batchRejected : shiftRejected;
-  const totalGood = batchProduced > 0 ? (batchProduced - batchRejected) : shiftPassed;
+  const totalProduced = prodProduced > 0 ? prodProduced : (batchProduced > 0 ? batchProduced : shiftProduced);
+  const totalRejected = prodProduced > 0 ? prodRejected : (batchProduced > 0 ? batchRejected : shiftRejected);
+  const totalGood = totalProduced - totalRejected;
 
   const passRate = totalProduced > 0 ? (totalGood / totalProduced) * 100 : 100;
   const defectRate = totalProduced > 0 ? (totalRejected / totalProduced) * 100 : 0;

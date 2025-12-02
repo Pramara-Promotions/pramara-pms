@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from '@tanstack/react-router';
-import { 
-  Calendar, 
-  Package, 
-  PlayCircle, 
+import {
+  Calendar,
+  Package,
+  PlayCircle,
   AlertCircle,
   CheckCircle2,
   Loader2,
@@ -44,7 +44,7 @@ interface ProcessFlow {
 export default function MultiProcessPlanPage() {
   const { projectId } = useProjectContext();
   const queryClient = useQueryClient();
-  
+
   const [selectedFlowId, setSelectedFlowId] = useState<string>('');
   const [quantity, setQuantity] = useState<number>(1000);
   const [startDate, setStartDate] = useState<string>(
@@ -120,14 +120,14 @@ export default function MultiProcessPlanPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <PageHeader title="Multi-Process Planning" />
-      
+
       <div className="p-6 max-w-4xl mx-auto space-y-6">
         {/* Form Card */}
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
             Generate Production Plan
           </h2>
-          
+
           <div className="space-y-4">
             {/* Process Flow Selection */}
             <div>
@@ -255,57 +255,134 @@ export default function MultiProcessPlanPage() {
 
         {/* Result Card */}
         {generatePlan.isSuccess && generatePlan.data && (
-          <div className="bg-white border border-gray-200 rounded-lg p-6">
-            {generatePlan.data.success ? (
-              <>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <CheckCircle2 className="w-6 h-6 text-green-600" />
+          <div className="space-y-4">
+            <div className="bg-white border border-gray-200 rounded-lg p-6">
+              {generatePlan.data.success ? (
+                <>
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <CheckCircle2 className="w-6 h-6 text-green-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        Plan Generated Successfully
+                      </h3>
+                      <p className="text-sm text-gray-600">
+                        Estimated completion: {generatePlan.data.estimatedDays.toFixed(1)} days
+                      </p>
+                    </div>
                   </div>
+
+                  {generatePlan.data.bottlenecks.length > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
+                      <h4 className="font-medium text-yellow-900 mb-2">
+                        Bottlenecks Detected
+                      </h4>
+                      <ul className="space-y-1">
+                        {generatePlan.data.bottlenecks.map((bottleneck, idx) => (
+                          <li key={idx} className="text-sm text-yellow-800">
+                            • {bottleneck.operationName} ({bottleneck.severity})
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <p className="text-sm text-gray-600 mt-4">
+                    Plan ID: <span className="font-mono text-gray-900">{generatePlan.data.planId}</span>
+                  </p>
+                </>
+              ) : (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      Plan Generated Successfully
-                    </h3>
-                    <p className="text-sm text-gray-600">
-                      Estimated completion: {generatePlan.data.estimatedDays.toFixed(1)} days
+                    <h3 className="font-medium text-red-900">Plan Generation Failed</h3>
+                    <p className="text-sm text-red-700 mt-1">
+                      {generatePlan.data.message}
                     </p>
+                    {generatePlan.data.validationIssues && generatePlan.data.validationIssues.length > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {generatePlan.data.validationIssues.map((issue, idx) => (
+                          <li key={idx} className="text-sm text-red-700">• {issue}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </div>
-                
-                {generatePlan.data.bottlenecks.length > 0 && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
-                    <h4 className="font-medium text-yellow-900 mb-2">
-                      Bottlenecks Detected
-                    </h4>
-                    <ul className="space-y-1">
-                      {generatePlan.data.bottlenecks.map((bottleneck, idx) => (
-                        <li key={idx} className="text-sm text-yellow-800">
-                          • {bottleneck.operationName} ({bottleneck.severity})
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+              )}
+            </div>
 
-                <p className="text-sm text-gray-600 mt-4">
-                  Plan ID: <span className="font-mono text-gray-900">{generatePlan.data.planId}</span>
-                </p>
-              </>
-            ) : (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-                <div>
-                  <h3 className="font-medium text-red-900">Plan Generation Failed</h3>
-                  <p className="text-sm text-red-700 mt-1">
-                    {generatePlan.data.message}
-                  </p>
-                  {generatePlan.data.validationIssues && generatePlan.data.validationIssues.length > 0 && (
-                    <ul className="mt-2 space-y-1">
-                      {generatePlan.data.validationIssues.map((issue, idx) => (
-                        <li key={idx} className="text-sm text-red-700">• {issue}</li>
-                      ))}
-                    </ul>
-                  )}
+            {/* Visual Timeline */}
+            {generatePlan.data.success && (
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Operation Timeline</h3>
+
+                {/* Timeline visualization */}
+                <div className="space-y-3">
+                  {generatePlan.data.bottlenecks.map((bottleneck, idx) => {
+                    const isBottleneck = bottleneck.severity === 'high';
+                    const daysRequired = (generatePlan.data.estimatedDays / generatePlan.data.bottlenecks.length) * (idx + 1);
+                    const progressWidth = (daysRequired / generatePlan.data.estimatedDays) * 100;
+
+                    return (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className={`font-medium ${isBottleneck ? 'text-red-600' : 'text-gray-900'}`}>
+                              {bottleneck.operationName}
+                            </span>
+                            {isBottleneck && (
+                              <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full font-medium">
+                                Bottleneck
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-gray-500">{daysRequired.toFixed(1)} days</span>
+                        </div>
+
+                        {/* Progress bar representing timeline */}
+                        <div className="relative h-8 bg-gray-100 rounded-lg overflow-hidden">
+                          <div
+                            className={`absolute left-0 top-0 h-full transition-all duration-300 ${isBottleneck
+                                ? 'bg-gradient-to-r from-red-500 to-red-600'
+                                : 'bg-gradient-to-r from-blue-500 to-blue-600'
+                              }`}
+                            style={{ width: `${progressWidth}%` }}
+                          >
+                            <div className="h-full flex items-center justify-end pr-2">
+                              <span className="text-xs text-white font-medium">
+                                {progressWidth.toFixed(0)}%
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Gantt-style summary */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <div className="text-gray-500 mb-1">Total Operations</div>
+                      <div className="text-xl font-bold text-gray-900">
+                        {generatePlan.data.bottlenecks.length}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500 mb-1">Critical Path</div>
+                      <div className="text-xl font-bold text-red-600">
+                        {generatePlan.data.bottlenecks.filter(b => b.severity === 'high').length}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500 mb-1">Parallel Ops</div>
+                      <div className="text-xl font-bold text-blue-600">
+                        {generatePlan.data.bottlenecks.filter(b => b.severity !== 'high').length}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

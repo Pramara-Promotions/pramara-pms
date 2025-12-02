@@ -5,6 +5,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const capacityService = require('./capacityService');
 const bomService = require('./bomService');
+const resourceValidator = require('./resourceValidator');
 
 /**
  * Generate complete daily plan for a project
@@ -16,9 +17,30 @@ const bomService = require('./bomService');
 async function generateDailyPlan(params) {
   const {
     projectId,
+    processFlowId,
     generatedBy,
     notes,
   } = params;
+
+  // ⚠️ MANDATORY: Validate resources FIRST before generating plan
+  if (processFlowId) {
+    const validation = await resourceValidator.validatePlanningResources(
+      projectId,
+      processFlowId
+    );
+
+    if (!validation.valid) {
+      const errorMessages = validation.errors.map(e => e.message).join('; ');
+      throw new Error(
+        `Cannot generate plan - resource validation failed: ${errorMessages}`
+      );
+    }
+
+    // Log warnings but allow plan to proceed
+    if (validation.warnings.length > 0) {
+      console.warn('⚠️ Planning warnings:', validation.warnings);
+    }
+  }
 
   // Get project details with SKUs and cutoff date
   const project = await prisma.project.findUnique({

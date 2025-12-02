@@ -8,6 +8,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router } from "./app-router";
 import AuthProvider from "./features/common/AuthProvider";
 import { ToastProvider } from "./ui/toast/ToastProvider";
+import { setupNavigationTracking } from "./services/navigationService";
+
+// Initialize navigation tracking on app startup
+setupNavigationTracking();
 
 // Create a react-query client
 const queryClient = new QueryClient({

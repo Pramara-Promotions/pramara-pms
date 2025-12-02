@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, GitBranch, Play, CheckCircle, AlertTriangle, Clock, Workflow } from 'lucide-react';
+import { Plus, Edit2, Trash2, GitBranch, Play, CheckCircle, AlertTriangle, Clock, Workflow, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { listProjects } from '../../lib/services/projects';
 import { listProcessFlows, createProcessFlow, updateProcessFlow, activateProcessFlow, deleteProcessFlow } from '../../lib/services/preproduction';
 import { useProjectContext } from '../../hooks';
 import { PageHeader } from '../../components';
 import ContextualTaskReminder from '../../components/ContextualTaskReminder';
+import TemplateSuggestionModal from '../../components/TemplateSuggestionModal';
 
 interface ProcessFlow {
   id: string;
@@ -53,11 +54,19 @@ const ProcessFlowsPage = () => {
   const [selectedFlow, setSelectedFlow] = useState<ProcessFlow | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [editingFlow, setEditingFlow] = useState<ProcessFlow | null>(null);
   const [editingOperation, setEditingOperation] = useState<ProcessOperation | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [projectFilter, setProjectFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [pendingOperationName, setPendingOperationName] = useState('');
+  const [validationLoading, setValidationLoading] = useState(false);
+  const [validationResult, setValidationResult] = useState<null | {
+    ok: boolean;
+    errors: Array<{ code: string; message: string; operationId?: string; operationName?: string }>;
+    warnings: Array<{ code: string; message: string; operationId?: string; operationName?: string }>;
+  }>(null);
 
   // Auto-set project filter from context if available
   useEffect(() => {
@@ -123,6 +132,32 @@ const ProcessFlowsPage = () => {
       console.error('Error fetching flows:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleValidateResources = async () => {
+    if (!selectedFlow) return;
+    setValidationLoading(true);
+    setValidationResult(null);
+    try {
+      const resp = await fetch('/api/auto-planning/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: selectedFlow.projectId, processFlowId: selectedFlow.id })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data?.error || 'Validation failed');
+      }
+      setValidationResult({
+        ok: !!data?.ok,
+        errors: Array.isArray(data?.errors) ? data.errors : [],
+        warnings: Array.isArray(data?.warnings) ? data.warnings : []
+      });
+    } catch (e: any) {
+      alert(e?.message || 'Validation failed');
+    } finally {
+      setValidationLoading(false);
     }
   };
 
@@ -196,7 +231,24 @@ const ProcessFlowsPage = () => {
 
   const handleOpenOperationModal = () => {
     resetOperationForm();
-    setIsOperationModalOpen(true);
+    // Show template suggestion modal first if operation has a name
+    if (operationFormData.operationName) {
+      setPendingOperationName(operationFormData.operationName);
+      setIsTemplateModalOpen(true);
+    } else {
+      setIsOperationModalOpen(true);
+    }
+  };
+
+  const handleOperationNameChange = (name: string) => {
+    setOperationFormData({ ...operationFormData, operationName: name });
+
+    // If there's a meaningful name (3+ chars), show template suggestion
+    if (name.length >= 3) {
+      setPendingOperationName(name);
+      setIsTemplateModalOpen(true);
+      setIsOperationModalOpen(false); // Close operation modal temporarily
+    }
   };
 
   const handleOperationSubmit = async (e: React.FormEvent) => {
@@ -237,6 +289,46 @@ const ProcessFlowsPage = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleAcceptTemplate = async (templateId: string) => {
+    if (!selectedFlow) return;
+
+    try {
+      const response = await fetch('/api/process-templates/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          processFlowId: selectedFlow.id
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to apply template');
+
+      // Close modals and refresh
+      setIsTemplateModalOpen(false);
+      setIsOperationModalOpen(false);
+      setPendingOperationName('');
+      resetOperationForm();
+      await fetchFlows();
+
+      // Refresh selected flow
+      const updatedFlows = await listProcessFlows({ projectId: projectFilter, status: statusFilter });
+      const updatedFlow = updatedFlows.find(f => f.id === selectedFlow.id);
+      if (updatedFlow) setSelectedFlow(updatedFlow);
+
+      alert('Template applied successfully! Operations have been created.');
+    } catch (error) {
+      console.error('Error applying template:', error);
+      throw error; // Re-throw to be handled by modal
+    }
+  };
+
+  const handleSkipTemplate = () => {
+    // Close template modal and go back to manual operation creation
+    setIsTemplateModalOpen(false);
+    setIsOperationModalOpen(true);
   };
 
   const getStatusBadge = (status: string) => {
@@ -379,15 +471,32 @@ const ProcessFlowsPage = () => {
                     <GitBranch size={20} />
                     Operations Flow ({selectedFlow.operations.length})
                   </h3>
-                  {selectedFlow.operations.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    {selectedFlow.operations.length > 0 && (
+                      <button
+                        onClick={handleOpenOperationModal}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                      >
+                        <Plus size={16} />
+                        Add Operation
+                      </button>
+                    )}
                     <button
-                      onClick={handleOpenOperationModal}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                      onClick={handleValidateResources}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 disabled:opacity-50"
+                      disabled={validationLoading}
+                      title="Validate assigned stations/machines and capacity"
                     >
-                      <Plus size={16} />
-                      Add Operation
+                      {validationLoading ? (
+                        <Clock size={16} />
+                      ) : validationResult?.errors?.length ? (
+                        <ShieldAlert size={16} />
+                      ) : (
+                        <ShieldCheck size={16} />
+                      )}
+                      {validationLoading ? 'Validating...' : 'Validate Resources'}
                     </button>
-                  )}
+                  </div>
                 </div>
 
                 {selectedFlow.operations.length === 0 ? (
@@ -452,6 +561,41 @@ const ProcessFlowsPage = () => {
                               </div>
                             </div>
 
+                            {validationResult && (
+                              <div className="mt-2">
+                                {validationResult.errors.filter(e => e.operationId === op.id || e.operationName === op.operationName).length > 0 ? (
+                                  <div className="flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+                                    <ShieldAlert size={16} />
+                                    <span className="text-sm font-medium">Errors:</span>
+                                    <ul className="ml-2 list-disc">
+                                      {validationResult.errors
+                                        .filter(e => e.operationId === op.id || e.operationName === op.operationName)
+                                        .map((e, i) => (
+                                          <li key={`err-${op.id}-${i}`} className="text-sm">{e.message}</li>
+                                        ))}
+                                    </ul>
+                                  </div>
+                                ) : validationResult.warnings.filter(w => w.operationId === op.id || w.operationName === op.operationName).length > 0 ? (
+                                  <div className="flex items-center gap-2 text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                                    <AlertTriangle size={16} />
+                                    <span className="text-sm font-medium">Warnings:</span>
+                                    <ul className="ml-2 list-disc">
+                                      {validationResult.warnings
+                                        .filter(w => w.operationId === op.id || w.operationName === op.operationName)
+                                        .map((w, i) => (
+                                          <li key={`warn-${op.id}-${i}`} className="text-sm">{w.message}</li>
+                                        ))}
+                                    </ul>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
+                                    <ShieldCheck size={16} />
+                                    <span className="text-sm">No issues detected</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
                             {op.subOperations.length > 0 && (
                               <div className="ml-4 pl-4 border-l-2 border-gray-200 space-y-2">
                                 {op.subOperations.map((sub) => (
@@ -498,6 +642,38 @@ const ProcessFlowsPage = () => {
                     <p className="text-2xl font-bold text-red-900">{selectedFlow.operations.filter(o => o.isCriticalPath).length}</p>
                   </div>
                 </div>
+                {validationResult && (
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="bg-red-50 border border-red-200 rounded p-3">
+                      <p className="text-sm font-semibold text-red-700 flex items-center gap-2">
+                        <ShieldAlert size={16} /> Errors ({validationResult.errors.length})
+                      </p>
+                      {validationResult.errors.length === 0 ? (
+                        <p className="text-sm text-gray-600 mt-1">None</p>
+                      ) : (
+                        <ul className="mt-2 list-disc ml-4 text-sm text-red-800">
+                          {validationResult.errors.map((e, i) => (
+                            <li key={`e-${i}`}>{e.message}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                      <p className="text-sm font-semibold text-amber-700 flex items-center gap-2">
+                        <AlertTriangle size={16} /> Warnings ({validationResult.warnings.length})
+                      </p>
+                      {validationResult.warnings.length === 0 ? (
+                        <p className="text-sm text-gray-600 mt-1">None</p>
+                      ) : (
+                        <ul className="mt-2 list-disc ml-4 text-sm text-amber-800">
+                          {validationResult.warnings.map((w, i) => (
+                            <li key={`w-${i}`}>{w.message}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -568,10 +744,13 @@ const ProcessFlowsPage = () => {
                       required
                       type="text"
                       value={operationFormData.operationName}
-                      onChange={(e) => setOperationFormData({ ...operationFormData, operationName: e.target.value })}
+                      onChange={(e) => handleOperationNameChange(e.target.value)}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                      placeholder="e.g., Cutting, Assembly, QC"
+                      placeholder="e.g., Injection Molding, Spray Painting"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      💡 We'll suggest templates if available for this operation
+                    </p>
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-2">Operation Code *</label>
@@ -683,6 +862,21 @@ const ProcessFlowsPage = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Template Suggestion Modal */}
+      {isTemplateModalOpen && selectedFlow && (
+        <TemplateSuggestionModal
+          isOpen={isTemplateModalOpen}
+          operationName={pendingOperationName}
+          processFlowId={selectedFlow.id}
+          onAccept={handleAcceptTemplate}
+          onSkip={handleSkipTemplate}
+          onClose={() => {
+            setIsTemplateModalOpen(false);
+            setPendingOperationName('');
+          }}
+        />
       )}
     </div>
   );

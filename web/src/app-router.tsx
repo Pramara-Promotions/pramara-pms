@@ -22,6 +22,7 @@ import FilesTab from "./pages/projects/tabs/FilesTab";
 import MessagesTab from "./pages/projects/tabs/MessagesTab";
 import ExecutionTab from "./pages/projects/tabs/ExecutionTab";
 import PreProdTab from "./pages/projects/tabs/PreProdTab";
+import BomTab from "./pages/projects/tabs/BomTab";
 import ComplianceTab from "./pages/projects/tabs/ComplianceTab";
 import PlanningTab from "./pages/projects/tabs/PlanningTab";
 import Tasks from "./pages/Tasks";
@@ -78,6 +79,9 @@ import CostingPnlPage from "./pages/CostingPnlPage";
 import FactoryHierarchyPage from "./pages/FactoryHierarchyPage";
 import StationAssignmentPage from "./pages/execution/StationAssignmentPage";
 import { WorkforceSkillMatrixPage } from "./pages/WorkforceSkillMatrixPage";
+import WhatIfScenarioPage from "./pages/planning/WhatIfScenarioPage";
+import RoiCalculatorPage from "./pages/planning/RoiCalculatorPage";
+import MultiCurrencyConverterPage from "./pages/planning/MultiCurrencyConverterPage";
 
 /****************************************************
  * [LMK-02] ROOT ROUTE (no context)
@@ -171,6 +175,12 @@ const preprodTabRoute = createRoute({
   getParentRoute: () => projectDetailRoute,
   path: "preprod",
   component: PreProdTab,
+});
+
+const bomTabRoute = createRoute({
+  getParentRoute: () => projectDetailRoute,
+  path: "bom",
+  component: BomTab,
 });
 
 const complianceTabRoute = createRoute({
@@ -459,6 +469,24 @@ const costingPnlRoute = createRoute({
   component: CostingPnlPage,
 });
 
+const whatIfScenarioRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/what-if",
+  component: WhatIfScenarioPage,
+});
+
+const roiCalculatorRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/roi-calculator",
+  component: RoiCalculatorPage,
+});
+
+const multiCurrencyConverterRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "planning/multi-currency",
+  component: MultiCurrencyConverterPage,
+});
+
 const factoryHierarchyRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "admin/factory-hierarchy",
@@ -557,7 +585,7 @@ const routeTree = rootRoute.addChildren([
     shiftEntriesRoute,
     wipLedgerRoute,
     stationsRoute,
-  stationAssignmentRoute,
+    stationAssignmentRoute,
     workflowRoute,
     qcManagementRoute,
     productionEntryRoute,
@@ -566,13 +594,13 @@ const routeTree = rootRoute.addChildren([
     workflowBuilderRoute,
     materialDashboardRoute,
     workforceManagementRoute,
-  workforceSkillsRoute,
+    workforceSkillsRoute,
     dailyPlanningRoute,
-  adaptivePlanningRoute,
-  multiProcessPlanRoute,
-  processChainViewRoute,
-  planEditorRoute,
-  loadBalancingRoute,
+    adaptivePlanningRoute,
+    multiProcessPlanRoute,
+    processChainViewRoute,
+    planEditorRoute,
+    loadBalancingRoute,
     projectCostingRoute,
     approvalTrackerRoute,
     mrpCalculatorRoute,
@@ -580,6 +608,9 @@ const routeTree = rootRoute.addChildren([
     marginRulesRoute,
     costTemplatesRoute,
     costingPnlRoute,
+    whatIfScenarioRoute,
+    roiCalculatorRoute,
+    multiCurrencyConverterRoute,
     factoryHierarchyRoute,
     stageViewRoute,
     accountRoute,
@@ -599,6 +630,7 @@ projectDetailRoute.addChildren([
   boardTabRoute,
   executionTabRoute,
   preprodTabRoute,
+  bomTabRoute,
   complianceTabRoute,
   planningTabRoute,
   filesTabRoute,

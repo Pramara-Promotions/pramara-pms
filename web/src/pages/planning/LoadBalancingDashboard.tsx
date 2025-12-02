@@ -1,9 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  TrendingUp, 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
+import {
+  TrendingUp,
+  CheckCircle2,
+  XCircle,
+  Clock,
   AlertTriangle,
   Zap,
   RefreshCw
@@ -60,9 +60,21 @@ export default function LoadBalancingDashboard({ planId }: LoadBalancingDashboar
   const { data, isLoading, refetch } = useQuery<OpportunitiesData>({
     queryKey: ['load-balancing-opportunities', planId],
     queryFn: async () => {
-      const res = await fetch(`/api/load-balancing/plans/${planId}/opportunities`);
+      // Use the general opportunities endpoint with status filter
+      const res = await fetch(`/api/load-balancing/opportunities?status=pending&limit=50`);
       if (!res.ok) throw new Error('Failed to fetch opportunities');
-      return res.json();
+      const result = await res.json();
+
+      // Transform to match expected format
+      return {
+        opportunities: result.opportunities || [],
+        count: result.count || 0,
+        summary: {
+          highPriority: result.opportunities?.filter((o: any) => o.priority >= 8).length || 0,
+          mediumPriority: result.opportunities?.filter((o: any) => o.priority >= 5 && o.priority < 8).length || 0,
+          lowPriority: result.opportunities?.filter((o: any) => o.priority < 5).length || 0,
+        },
+      };
     },
     enabled: !!planId,
     refetchInterval: 60000 // Refresh every minute
@@ -71,7 +83,7 @@ export default function LoadBalancingDashboard({ planId }: LoadBalancingDashboar
   // Accept opportunity mutation
   const acceptOpportunity = useMutation({
     mutationFn: async ({ opportunityId, decisionNote }: { opportunityId: string; decisionNote: string }) => {
-      const res = await fetch(`/api/load-balancing/opportunities/${opportunityId}/accept`, {
+      const res = await fetch(`/api/load-balancing/opportunities/${opportunityId}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decisionNote })
@@ -85,6 +97,7 @@ export default function LoadBalancingDashboard({ planId }: LoadBalancingDashboar
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['load-balancing-opportunities', planId] });
       queryClient.invalidateQueries({ queryKey: ['plan-operations', planId] });
+      queryClient.invalidateQueries({ queryKey: ['auto-planning-plans'] });
     }
   });
 
@@ -251,13 +264,12 @@ export default function LoadBalancingDashboard({ planId }: LoadBalancingDashboar
                 <div className="grid grid-cols-3 gap-4 mb-4 p-4 bg-gray-50 rounded-lg">
                   <div>
                     <p className="text-xs text-gray-600 mb-1">Estimated Time Saved</p>
-                    <p className={`text-lg font-bold ${
-                      opportunity.estimatedTimeSaved && opportunity.estimatedTimeSaved > 0
+                    <p className={`text-lg font-bold ${opportunity.estimatedTimeSaved && opportunity.estimatedTimeSaved > 0
                         ? 'text-green-700'
                         : opportunity.estimatedTimeSaved && opportunity.estimatedTimeSaved < 0
-                        ? 'text-red-700'
-                        : 'text-gray-700'
-                    }`}>
+                          ? 'text-red-700'
+                          : 'text-gray-700'
+                      }`}>
                       {opportunity.estimatedTimeSaved !== null
                         ? `${opportunity.estimatedTimeSaved > 0 ? '+' : ''}${opportunity.estimatedTimeSaved.toFixed(1)} days`
                         : 'N/A'}

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { apiGet, apiPost } from '../lib/api';
 import { useProjectContextSafe } from './projects/ProjectContext';
+import ProcessChainView from '../components/planning/ProcessChainView';
+import PlanEditor from '../components/planning/PlanEditor';
 
 interface DailyPlanGeneration {
   id: number;
@@ -55,7 +57,7 @@ export default function AutoPlanningPage() {
   // Check URL params for projectId
   const urlParams = new URLSearchParams(window.location.search);
   const urlProjectId = urlParams.get('projectId');
-  
+
   const [plans, setPlans] = useState<DailyPlanGeneration[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +70,11 @@ export default function AutoPlanningPage() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [planToReject, setPlanToReject] = useState<number | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [processAnalysis, setProcessAnalysis] = useState<any>(null);
+  const [showProcessAnalysis, setShowProcessAnalysis] = useState(false);
+  const [analyzingFlow, setAnalyzingFlow] = useState(false);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [showPlanEditor, setShowPlanEditor] = useState(false);
 
   // Auto-set project from context or URL params if available
   useEffect(() => {
@@ -168,6 +175,34 @@ export default function AutoPlanningPage() {
     }
   };
 
+  const handleAnalyzeProcessFlow = async () => {
+    if (!selectedProjectId) {
+      alert('Please select a project');
+      return;
+    }
+
+    setAnalyzingFlow(true);
+    try {
+      const processFlows = await apiGet(`/api/process-flows?projectId=${selectedProjectId}`);
+      const activeFlow = processFlows?.flows?.find((f: any) => f.status === 'active');
+
+      if (!activeFlow) {
+        alert('No active process flow found for this project');
+        setAnalyzingFlow(false);
+        return;
+      }
+
+      const analysis = await apiPost(`/api/auto-planning/analyze-process-flow/${activeFlow.id}`, {});
+      setProcessAnalysis(analysis);
+      setShowProcessAnalysis(true);
+    } catch (error: any) {
+      console.error('Error analyzing process flow:', error);
+      alert(`Failed to analyze process flow: ${error.message || 'Unknown error'}`);
+    } finally {
+      setAnalyzingFlow(false);
+    }
+  };
+
   const handleGeneratePlan = async () => {
     if (!selectedProjectId) {
       alert('Please select a project');
@@ -176,8 +211,38 @@ export default function AutoPlanningPage() {
 
     setGenerating(true);
     try {
+      // Get process flow ID for validation
+      const processFlows = await apiGet(`/api/process-flows?projectId=${selectedProjectId}`);
+      const activeFlow = processFlows?.flows?.find((f: any) => f.status === 'active');
+
+      // Validate resources before generating plan
+      if (activeFlow) {
+        const validation = await apiPost('/api/auto-planning/validate', {
+          projectId: selectedProjectId,
+          processFlowId: activeFlow.id
+        });
+
+        if (!validation.valid) {
+          const errorList = validation.errors.map((e: any) => `• ${e.message}`).join('\n');
+          alert(`❌ Cannot generate plan - resource validation failed:\n\n${errorList}\n\nPlease fix these issues before planning.`);
+          setGenerating(false);
+          return;
+        }
+
+        // Show warnings but allow to proceed
+        if (validation.warnings && validation.warnings.length > 0) {
+          const warningList = validation.warnings.map((w: any) => `• ${w.message}`).join('\n');
+          const proceed = confirm(`⚠️ Resource warnings detected:\n\n${warningList}\n\nDo you want to proceed anyway?`);
+          if (!proceed) {
+            setGenerating(false);
+            return;
+          }
+        }
+      }
+
       const response = await apiPost('/api/auto-planning/generate', {
         projectId: selectedProjectId,
+        processFlowId: activeFlow?.id || null,
       });
 
       if (response.success) {
@@ -205,7 +270,7 @@ export default function AutoPlanningPage() {
 
     try {
       const response = await apiPost(`/api/auto-planning/approve/${planId}`, {});
-      
+
       if (response.success) {
         alert('✅ Plan approved successfully! Resource allocations created.');
         await fetchPlans();
@@ -247,6 +312,21 @@ export default function AutoPlanningPage() {
   const openRejectModal = (planId: number) => {
     setPlanToReject(planId);
     setShowRejectModal(true);
+  };
+
+  const handleEditPlan = (planId: number) => {
+    setEditingPlanId(planId.toString());
+    setShowPlanEditor(true);
+  };
+
+  const handleClosePlanEditor = () => {
+    setShowPlanEditor(false);
+    setEditingPlanId(null);
+  };
+
+  const handlePlanSaved = async () => {
+    await fetchPlans();
+    alert('✅ Plan updated successfully!');
   };
 
   const getStatusBadge = (status: string) => {
@@ -317,7 +397,7 @@ export default function AutoPlanningPage() {
           </svg>
           Generate New Plan
         </h2>
-        
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
           {/* Hide project selector when inside project context or URL has projectId */}
           {!projectContext && !urlProjectId && (
@@ -343,8 +423,8 @@ export default function AutoPlanningPage() {
             <div className="bg-blue-50 p-3 rounded-md border border-blue-200">
               <div className="text-xs text-blue-600 font-medium mb-1">Selected Project</div>
               <div className="text-sm font-semibold text-blue-900">
-                {projectContext ? `${projectContext.code} - ${projectContext.name}` : 
-                 selectedProject ? `${selectedProject.code} - ${selectedProject.name}` : 'Loading...'}
+                {projectContext ? `${projectContext.code} - ${projectContext.name}` :
+                  selectedProject ? `${selectedProject.code} - ${selectedProject.name}` : 'Loading...'}
               </div>
             </div>
           )}
@@ -358,15 +438,24 @@ export default function AutoPlanningPage() {
             </div>
           )}
 
-          <div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleAnalyzeProcessFlow}
+              disabled={!selectedProjectId || analyzingFlow}
+              className={`flex-1 px-4 py-2 rounded-md font-medium transition-colors ${!selectedProjectId || analyzingFlow
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-purple-600 text-white hover:bg-purple-700'
+                }`}
+            >
+              {analyzingFlow ? 'Analyzing...' : '📊 Analyze Flow'}
+            </button>
             <button
               onClick={handleGeneratePlan}
               disabled={!selectedProjectId || generating}
-              className={`w-full px-6 py-2 rounded-md font-medium transition-colors ${
-                !selectedProjectId || generating
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
+              className={`flex-1 px-4 py-2 rounded-md font-medium transition-colors ${!selectedProjectId || generating
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
             >
               {generating ? (
                 <span className="flex items-center justify-center gap-2">
@@ -387,6 +476,29 @@ export default function AutoPlanningPage() {
           💡 The system will automatically calculate daily assignments based on BOM, capacity, and cutoff date
         </div>
       </div>
+
+      {/* Process Chain Analysis */}
+      {showProcessAnalysis && processAnalysis && (
+        <div className="bg-white rounded-lg shadow mb-6">
+          <div className="p-6 border-b flex items-center justify-between">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+              Process Chain Analysis
+            </h2>
+            <button
+              onClick={() => setShowProcessAnalysis(false)}
+              className="px-3 py-1 text-sm text-gray-600 hover:text-gray-900"
+            >
+              ✕ Close
+            </button>
+          </div>
+          <div className="p-6">
+            <ProcessChainView analysis={processAnalysis} showDetails={true} />
+          </div>
+        </div>
+      )}
 
       {/* Generated Plans List */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -467,6 +579,14 @@ export default function AutoPlanningPage() {
                       </div>
 
                       <div className="flex gap-2 ml-4">
+                        {(plan.status === 'pending_approval' || plan.status === 'approved') && (
+                          <button
+                            onClick={() => handleEditPlan(plan.id)}
+                            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors"
+                          >
+                            ✏️ Edit Plan
+                          </button>
+                        )}
                         {plan.status === 'pending_approval' && (
                           <>
                             <button
@@ -538,6 +658,21 @@ export default function AutoPlanningPage() {
         )}
       </div>
 
+      {/* Plan Editor Modal */}
+      {showPlanEditor && editingPlanId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg w-full max-w-6xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <PlanEditor
+                planId={editingPlanId}
+                onClose={handleClosePlanEditor}
+                onSave={handlePlanSaved}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Reject Modal */}
       {showRejectModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -571,11 +706,10 @@ export default function AutoPlanningPage() {
                 <button
                   onClick={handleRejectPlan}
                   disabled={!rejectionReason.trim()}
-                  className={`flex-1 px-4 py-2 rounded-md transition-colors ${
-                    !rejectionReason.trim()
-                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                      : 'bg-red-600 text-white hover:bg-red-700'
-                  }`}
+                  className={`flex-1 px-4 py-2 rounded-md transition-colors ${!rejectionReason.trim()
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-red-600 text-white hover:bg-red-700'
+                    }`}
                 >
                   Confirm Rejection
                 </button>

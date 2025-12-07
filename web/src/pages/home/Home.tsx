@@ -410,7 +410,7 @@ export default function Home() {
             </div>
             <div>
               <p className='text-2xl font-semibold text-gray-900 dark:text-white'>
-                {actionItems.filter(i => i.priority === 'low').length}
+                {dashboardData && typeof dashboardData.onTrackCount === 'number' ? dashboardData.onTrackCount : actionItems.filter(i => i.priority === 'low').length}
               </p>
               <p className='text-xs text-gray-500 dark:text-gray-400'>
                 On Track
@@ -426,7 +426,7 @@ export default function Home() {
             </div>
             <div>
               <p className='text-2xl font-semibold text-gray-900 dark:text-white'>
-                {criticalItems.length}
+                {dashboardData && typeof dashboardData.needAttentionCount === 'number' ? dashboardData.needAttentionCount : criticalItems.length}
               </p>
               <p className='text-xs text-gray-500 dark:text-gray-400'>
                 Need Attention

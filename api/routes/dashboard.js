@@ -3,7 +3,36 @@ const router = express.Router()
 const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
 const { addDays, isPast, isBefore, subDays, startOfDay, endOfDay } = require('date-fns')
+const { calculateProjectHealth } = require('../lib/projectHealth')
 const authGuard = require('../middleware/authGuard')
+
+// Simple in-memory cache for project health (TTL: 5 minutes)
+const healthCache = new Map()
+const HEALTH_CACHE_TTL = 5 * 60 * 1000
+
+function getCachedHealth(projectId) {
+  const cached = healthCache.get(projectId)
+  if (cached && Date.now() - cached.timestamp < HEALTH_CACHE_TTL) {
+    return cached.data
+  }
+  return null
+}
+
+async function getCachedOrCalculateHealth(projectId) {
+  const cached = getCachedHealth(projectId)
+  if (cached) return cached
+  
+  const health = await calculateProjectHealth(projectId).catch(e => {
+    console.warn(`[dashboard] health calc failed for project ${projectId}:`, e?.message)
+    return null
+  })
+  
+  if (health) {
+    healthCache.set(projectId, { data: health, timestamp: Date.now() })
+  }
+  
+  return health
+}
 
 // Middleware to require authentication
 const requireAuth = (req, res, next) => {
@@ -287,34 +316,50 @@ router.get('/overview', authGuard, async (req, res) => {
     const daysNum = parseInt(days);
     const startDate = subDays(new Date(), daysNum);
 
-    // Production Analytics (using ShiftEntry data)
-    const [productionStats, productionTrend] = await Promise.all([
+    // Production Analytics: primary=ProductionEntry (seeded data), fallback=ShiftEntry (legacy)
+    const [productionStats, productionTrend, shiftStats] = await Promise.all([
+      prisma.productionEntry.aggregate({
+        where: { startTime: { gte: startDate } },
+        _sum: { actualQty: true, rejectedQty: true, targetQty: true },
+        _count: true,
+      }).catch(() => ({
+        _sum: { actualQty: 0, rejectedQty: 0, targetQty: 0 },
+        _count: 0,
+      })),
+      prisma.productionEntry.groupBy({
+        by: ['startTime'],
+        where: { startTime: { gte: startDate } },
+        _sum: { actualQty: true, rejectedQty: true },
+        orderBy: { startTime: 'asc' },
+      }).catch(() => []),
       prisma.shiftEntry.aggregate({
         where: { shiftDate: { gte: startDate } },
         _sum: { totalProduced: true, qualityPassed: true, qualityRejected: true },
         _count: true,
-      }),
-      prisma.shiftEntry.groupBy({
-        by: ['shiftDate'],
-        where: { shiftDate: { gte: startDate } },
-        _sum: { totalProduced: true, qualityPassed: true },
-        orderBy: { shiftDate: 'asc' },
-      }),
+      }).catch(() => ({
+        _sum: { totalProduced: 0, qualityPassed: 0, qualityRejected: 0 },
+        _count: 0,
+      })),
     ]);
 
+    // Prefer ProductionEntry if available; fallback to ShiftEntry
+    const hasProductionData = (productionStats._sum?.actualQty || 0) > 0;
+    const totalProduced = hasProductionData 
+      ? (productionStats._sum?.actualQty || 0)
+      : (shiftStats._sum?.totalProduced || 0);
+    const totalApproved = hasProductionData
+      ? Math.max(0, (productionStats._sum?.actualQty || 0) - (productionStats._sum?.rejectedQty || 0))
+      : (shiftStats._sum?.qualityPassed || 0);
+    const totalRejected = hasProductionData
+      ? (productionStats._sum?.rejectedQty || 0)
+      : (shiftStats._sum?.qualityRejected || 0);
+    const entryCount = hasProductionData ? productionStats._count : shiftStats._count;
+
     // Quality Analytics (QCSubmission)
-    // Use submittedAt (existing column) instead of non-existent submissionDate
-    // Some schemas may not have sampleSize/passedQty/failedQty; fall back to counts by overallPass
+    // QCSubmission only has overallPass boolean, compute pass/fail via groupBy
     let qcStats = { _count: 0, _sum: { sampleSize: 0, passedQty: 0, failedQty: 0 } };
     let qcByResult = [];
     try {
-      qcStats = await prisma.qCSubmission.aggregate({
-        where: { submittedAt: { gte: startDate } },
-        _sum: { sampleSize: true, passedQty: true, failedQty: true },
-        _count: true,
-      });
-    } catch (e) {
-      // If summarized fields don't exist, compute pass/fail via groupBy on overallPass
       const grouped = await prisma.qCSubmission.groupBy({
         by: ['overallPass'],
         where: { submittedAt: { gte: startDate } },
@@ -324,16 +369,10 @@ router.get('/overview', authGuard, async (req, res) => {
       const fail = grouped.find(g => g.overallPass === false)?._count || 0;
       qcStats = { _count: pass + fail, _sum: { sampleSize: pass + fail, passedQty: pass, failedQty: fail } };
       qcByResult = grouped.map(g => ({ result: g.overallPass ? 'pass' : 'fail', _count: g._count }));
-    }
-    if (qcByResult.length === 0) {
-      // If aggregate succeeded, also return breakdown by overallPass
-      try {
-        qcByResult = await prisma.qCSubmission.groupBy({
-          by: ['overallPass'],
-          where: { submittedAt: { gte: startDate } },
-          _count: true,
-        });
-      } catch {}
+    } catch (e) {
+      console.warn('[dashboard] QC analytics failed:', e?.message);
+      qcStats = { _count: 0, _sum: { sampleSize: 0, passedQty: 0, failedQty: 0 } };
+      qcByResult = [];
     }
 
     const totalChecked = (qcStats._sum.sampleSize || 0);
@@ -341,7 +380,7 @@ router.get('/overview', authGuard, async (req, res) => {
     const passRate = totalChecked > 0 ? (totalPassed / totalChecked) * 100 : 0;
 
     // Workforce Analytics
-    const [shiftStats, topPerformers] = await Promise.all([
+    const [shiftStatsGrouped, topPerformers] = await Promise.all([
       prisma.shiftEntry.groupBy({
         by: ['shiftType'],
         where: { shiftDate: { gte: startDate } },
@@ -383,15 +422,36 @@ router.get('/overview', authGuard, async (req, res) => {
     });
 
     // Project Analytics
-    const [projectStats, projectsByStatus] = await Promise.all([
-      prisma.project.aggregate({
-        _count: true,
-      }),
-      prisma.project.groupBy({
-        by: ['status'],
-        _count: true,
-      }),
-    ]);
+    const projectStats = await prisma.project.aggregate({
+      _count: true,
+    });
+
+    // Note: Removed projectsByStatus groupBy as Project model doesn't have a 'status' field
+    // Health-based status breakdown is provided below instead
+
+    // Project health overview (cached): compute status counts for dashboard
+    let onTrackCount = 0;
+    let needAttentionCount = 0;
+    let projectsByHealth = [];
+    try {
+      const projectList = await prisma.project.findMany({ select: { id: true } });
+      console.log(`[dashboard] Computing health for ${projectList.length} projects`);
+      const healthResults = await Promise.all(
+        projectList.map(p => getCachedOrCalculateHealth(p.id))
+      );
+      const healthStatusCounts = healthResults.reduce((acc, h) => {
+        if (!h) return acc;
+        const s = h.status || 'healthy';
+        acc[s] = (acc[s] || 0) + 1;
+        return acc;
+      }, {});
+      projectsByHealth = Object.keys(healthStatusCounts).map(k => ({ status: k, count: healthStatusCounts[k] }));
+      onTrackCount = healthStatusCounts.healthy || 0;
+      needAttentionCount = (healthStatusCounts['at-risk'] || 0) + (healthStatusCounts.critical || 0);
+      console.log(`[dashboard] Health aggregation complete: onTrack=${onTrackCount}, needAttention=${needAttentionCount}`, healthStatusCounts);
+    } catch (e) {
+      console.warn('[dashboard] project health aggregation failed:', e?.message);
+    }
 
     // Active workers today
     const today = startOfDay(new Date());
@@ -409,15 +469,17 @@ router.get('/overview', authGuard, async (req, res) => {
         endDate: new Date().toISOString(),
       },
       production: {
-        totalOutput: productionStats._sum.totalProduced || 0,
-        approved: productionStats._sum.qualityPassed || 0,
-        rejected: productionStats._sum.qualityRejected || 0,
-        entries: productionStats._count,
-        trend: productionTrend.map(t => ({
-          date: t.shiftDate,
-          output: t._sum.totalProduced || 0,
-          approved: t._sum.qualityPassed || 0,
-        })),
+        totalOutput: totalProduced,
+        approved: totalApproved,
+        rejected: totalRejected,
+        entries: entryCount,
+        trend: (productionTrend && productionTrend.length > 0)
+          ? productionTrend.map(t => ({
+            date: t.startTime,
+            output: t._sum?.actualQty || 0,
+            approved: Math.max(0, (t._sum?.actualQty || 0) - (t._sum?.rejectedQty || 0)),
+          }))
+          : [],
       },
       quality: {
         totalSubmissions: qcStats._count,
@@ -432,7 +494,7 @@ router.get('/overview', authGuard, async (req, res) => {
       },
       workforce: {
         activeToday: activeWorkersToday._sum.workersPresent || 0,
-        byShift: shiftStats.map(s => ({
+        byShift: shiftStatsGrouped.map(s => ({
           shift: s.shiftType,
           workers: s._sum.workersPresent || 0,
           output: s._sum.totalProduced || 0,
@@ -442,11 +504,10 @@ router.get('/overview', authGuard, async (req, res) => {
       },
       projects: {
         total: projectStats._count,
-        byStatus: projectsByStatus.map(p => ({
-          status: p.status,
-          count: p._count,
-        })),
+        byHealth: projectsByHealth,
       },
+      onTrackCount,
+      needAttentionCount,
     });
 
   } catch (error) {

@@ -696,11 +696,11 @@ export default function Home() {
               </div>
 
               <div className='flex items-center justify-center h-64'>
-                {dashboardData.projects.byStatus && dashboardData.projects.byStatus.length > 0 ? (
+                {dashboardData.projects.byHealth && dashboardData.projects.byHealth.length > 0 ? (
                   <ResponsiveContainer width='100%' height='100%'>
                     <PieChart>
                       <Pie
-                        data={dashboardData.projects.byStatus}
+                        data={dashboardData.projects.byHealth}
                         cx='50%'
                         cy='50%'
                         labelLine={false}
@@ -709,13 +709,11 @@ export default function Home() {
                         fill='#8884d8'
                         dataKey='count'
                       >
-                        {dashboardData.projects.byStatus.map((entry, index) => {
+                        {dashboardData.projects.byHealth.map((entry, index) => {
                           const colors = {
-                            active: '#10B981',
-                            'on hold': '#F59E0B',
-                            completed: '#3B82F6',
-                            pending: '#6B7280',
-                            cancelled: '#EF4444'
+                            'healthy': '#10B981',
+                            'at-risk': '#F59E0B',
+                            'critical': '#EF4444'
                           };
                           const color = colors[entry.status.toLowerCase()] || '#8B5CF6';
                           return <Cell key={`cell-${index}`} fill={color} />;
@@ -733,7 +731,7 @@ export default function Home() {
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
-                  <p className='text-sm text-gray-500 dark:text-gray-400'>No project data available</p>
+                  <p className='text-sm text-gray-500 dark:text-gray-400'>No project health data available</p>
                 )}
               </div>
             </div>

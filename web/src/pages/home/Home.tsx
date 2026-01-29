@@ -2,6 +2,35 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { http } from '../../lib/http';
+
+// Custom Tooltip Components
+const QualityTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div style={{ backgroundColor: '#1a1a1a', padding: '8px', borderRadius: '4px', border: '1px solid #888' }}>
+        <p style={{ color: '#fff', margin: 0, fontSize: '14px' }}>
+          <strong>{data.result}:</strong> {data.count} submissions
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
+
+const ProjectsTooltip = ({ active, payload }) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div style={{ backgroundColor: '#1a1a1a', padding: '8px', borderRadius: '4px', border: '1px solid #888' }}>
+        <p style={{ color: '#fff', margin: 0, fontSize: '14px' }}>
+          <strong>{data.status}:</strong> {data.value} projects
+        </p>
+      </div>
+    );
+  }
+  return null;
+};
 import { 
   AlertCircle, 
   Clock, 
@@ -116,6 +145,15 @@ export default function Home() {
   const [dashboardData, setDashboardData] = useState<DashboardOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [showCustomize, setShowCustomize] = useState(false);
+  const [visibleCards, setVisibleCards] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('dashboardVisibleCards');
+      return saved ? new Set(JSON.parse(saved)) : new Set(['production', 'quality', 'workforce', 'projects']);
+    } catch {
+      return new Set(['production', 'quality', 'workforce', 'projects']);
+    }
+  });
 
   useEffect(() => {
     (async () => {
@@ -171,6 +209,28 @@ export default function Home() {
     return 'Good evening';
   };
 
+  const toggleCard = (cardId: string) => {
+    const newVisible = new Set(visibleCards);
+    if (newVisible.has(cardId)) {
+      newVisible.delete(cardId);
+    } else {
+      newVisible.add(cardId);
+    }
+    setVisibleCards(newVisible);
+  };
+
+  const saveView = () => {
+    localStorage.setItem('dashboardVisibleCards', JSON.stringify(Array.from(visibleCards)));
+    setShowCustomize(false);
+  };
+
+  const restoreDefault = () => {
+    const defaultCards = new Set(['production', 'quality', 'workforce', 'projects']);
+    setVisibleCards(defaultCards);
+    localStorage.setItem('dashboardVisibleCards', JSON.stringify(Array.from(defaultCards)));
+    setShowCustomize(false);
+  };
+
   const getPriorityDisplay = (priority: string) => {
     switch (priority) {
       case 'critical':
@@ -200,7 +260,52 @@ export default function Home() {
               {getGreeting()}!
             </h1>
           </div>
+          <button
+            onClick={() => setShowCustomize(!showCustomize)}
+            className='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium'
+          >
+            {showCustomize ? 'Close' : 'Customize View'}
+          </button>
         </div>
+
+        {showCustomize && (
+          <div className='bg-white dark:bg-neutral-800 rounded-xl border-2 border-blue-200 dark:border-blue-900/50 p-6'>
+            <h2 className='font-semibold text-lg text-gray-900 dark:text-white mb-4'>Customize Dashboard View</h2>
+            <div className='grid grid-cols-1 md:grid-cols-2 gap-4 mb-6'>
+              {[
+                { id: 'production', label: 'Production', icon: BarChart3 },
+                { id: 'quality', label: 'Quality', icon: CheckCircle2 },
+                { id: 'workforce', label: 'Workforce', icon: Users },
+                { id: 'projects', label: 'Projects', icon: FileText }
+              ].map(card => (
+                <label key={card.id} className='flex items-center gap-3 p-3 border-2 border-gray-200 dark:border-neutral-700 rounded-lg cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors'>
+                  <input
+                    type='checkbox'
+                    checked={visibleCards.has(card.id)}
+                    onChange={() => toggleCard(card.id)}
+                    className='w-5 h-5 rounded accent-blue-600'
+                  />
+                  <card.icon className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                  <span className='text-gray-700 dark:text-gray-300 font-medium'>{card.label}</span>
+                </label>
+              ))}
+            </div>
+            <div className='flex gap-3 justify-end'>
+              <button
+                onClick={restoreDefault}
+                className='px-4 py-2 border-2 border-gray-300 dark:border-neutral-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors font-medium'
+              >
+                Restore to Default
+              </button>
+              <button
+                onClick={saveView}
+                className='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium'
+              >
+                Save as My Default View
+              </button>
+            </div>
+          </div>
+        )}
 
       {criticalItems.length > 0 && (
         <div className='rounded-xl border-2 border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/10 p-4'>
@@ -452,6 +557,7 @@ export default function Home() {
           {/* Production & Quality Row */}
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             {/* Production Section */}
+            {visibleCards.has('production') && (
             <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
               <div className='flex items-center justify-between mb-6'>
                 <div className='flex items-center gap-2'>
@@ -532,8 +638,10 @@ export default function Home() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Quality Section */}
+            {visibleCards.has('quality') && (
             <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
               <div className='flex items-center justify-between mb-6'>
                 <div className='flex items-center gap-2'>
@@ -590,14 +698,7 @@ export default function Home() {
                           return <Cell key={`cell-${index}`} fill={color} />;
                         })}
                       </Pie>
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-                          border: 'none', 
-                          borderRadius: '8px',
-                          color: '#fff'
-                        }}
-                      />
+                      <Tooltip content={<QualityTooltip />} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
@@ -606,11 +707,13 @@ export default function Home() {
                 )}
               </div>
             </div>
+            )}
           </div>
 
           {/* Workforce & Projects Row */}
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
             {/* Workforce Section */}
+            {visibleCards.has('workforce') && (
             <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
               <div className='flex items-center justify-between mb-6'>
                 <div className='flex items-center gap-2'>
@@ -677,8 +780,10 @@ export default function Home() {
                 </>
               )}
             </div>
+            )}
 
             {/* Projects Section */}
+            {visibleCards.has('projects') && (
             <div className='rounded-xl border bg-white dark:bg-neutral-900 dark:border-neutral-800 p-6'>
               <div className='flex items-center justify-between mb-6'>
                 <div className='flex items-center gap-2'>
@@ -719,14 +824,7 @@ export default function Home() {
                           return <Cell key={`cell-${index}`} fill={color} />;
                         })}
                       </Pie>
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-                          border: 'none', 
-                          borderRadius: '8px',
-                          color: '#fff'
-                        }}
-                      />
+                      <Tooltip content={<ProjectsTooltip />} />
                       <Legend />
                     </PieChart>
                   </ResponsiveContainer>
@@ -735,6 +833,7 @@ export default function Home() {
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
       )}

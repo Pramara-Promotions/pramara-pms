@@ -2,37 +2,9 @@ const express = require('express')
 const router = express.Router()
 const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
-const { addDays, isPast, isBefore, subDays, startOfDay, endOfDay } = require('date-fns')
-const { calculateProjectHealth } = require('../lib/projectHealth')
+const { addDays, isPast, subDays, startOfDay, endOfDay } = require('date-fns')
 const authGuard = require('../middleware/authGuard')
-
-// Simple in-memory cache for project health (TTL: 5 minutes)
-const healthCache = new Map()
-const HEALTH_CACHE_TTL = 5 * 60 * 1000
-
-function getCachedHealth(projectId) {
-  const cached = healthCache.get(projectId)
-  if (cached && Date.now() - cached.timestamp < HEALTH_CACHE_TTL) {
-    return cached.data
-  }
-  return null
-}
-
-async function getCachedOrCalculateHealth(projectId) {
-  const cached = getCachedHealth(projectId)
-  if (cached) return cached
-  
-  const health = await calculateProjectHealth(projectId).catch(e => {
-    console.warn(`[dashboard] health calc failed for project ${projectId}:`, e?.message)
-    return null
-  })
-  
-  if (health) {
-    healthCache.set(projectId, { data: health, timestamp: Date.now() })
-  }
-  
-  return health
-}
+const MetricsService = require('../services/MetricsService')
 
 // Middleware to require authentication
 const requireAuth = (req, res, next) => {
@@ -48,8 +20,7 @@ const requireAuth = (req, res, next) => {
  */
 router.get('/action-items', authGuard, async (req, res) => {
   try {
-    const userId = req.user.id
-    const userRoles = req.user.roles || []
+    const userId = req.user.id;
 
     // Fetch user with role details
     const user = await prisma.user.findUnique({
@@ -77,58 +48,54 @@ router.get('/action-items', authGuard, async (req, res) => {
 
     // 1. Fetch Approvals (for managers and admins)
     if (isProjectManager || isAdmin) {
-      const approvals = await prisma.approval.findMany({
-        where: {
-          status: 'PENDING',
-          OR: [
-            { dueDate: { lt: new Date() } }, // Overdue
-            { dueDate: { lt: addDays(new Date(), 3) } } // Due within 3 days
-          ]
-        },
-        include: {
-          project: true
-        },
-        orderBy: { dueDate: 'asc' },
-        take: 10
-      })
-
-      for (const approval of approvals) {
-        const isOverdue = approval.dueDate && isPast(approval.dueDate)
-        const bufferHours = approval.dueDate
-          ? Math.round((approval.dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60))
-          : null
-
-        actionItems.push({
-          id: `approval_${approval.id}`,
-          type: 'approval',
-          priority: isOverdue ? 'critical' : (bufferHours && bufferHours < 24 ? 'high' : 'medium'),
-          title: `${approval.type} Approval Pending`,
-          description: `${approval.entity || 'Item'} requires approval${approval.project ? ` for ${approval.project.name}` : ''}`,
-          project: approval.project ? {
-            id: approval.project.id,
-            name: approval.project.name,
-            code: approval.project.code
-          } : null,
-          dueDate: approval.dueDate,
-          bufferRemaining: bufferHours ? `${Math.abs(bufferHours)} hours` : null,
-          metadata: {
-            blockedTasks: 0, // Could calculate from dependencies
-            affectedUsers: 1
+      try {
+        const approvals = await prisma.approvalRequest.findMany({
+          where: {
+            status: 'pending',
           },
-          link: `/approvals/${approval.id}`
+          include: {
+            project: true
+          },
+          orderBy: { expectedDate: 'asc' },
+          take: 10
         })
+
+        for (const approval of approvals) {
+          const isOverdue = approval.cutoffDate && isPast(approval.cutoffDate)
+          const bufferHours = approval.cutoffDate
+            ? Math.round((approval.cutoffDate.getTime() - new Date().getTime()) / (1000 * 60 * 60))
+            : null
+
+          actionItems.push({
+            id: `approval_${approval.id}`,
+            type: 'approval',
+            priority: isOverdue ? 'critical' : (bufferHours && bufferHours < 24 ? 'high' : 'medium'),
+            title: `${approval.approvalType} Approval Pending`,
+            description: `${approval.description || 'Item'} requires approval${approval.project ? ` for ${approval.project.name}` : ''}`,
+            project: approval.project ? {
+              id: approval.project.id,
+              name: approval.project.name,
+              code: approval.project.code
+            } : null,
+            dueDate: approval.cutoffDate,
+            bufferRemaining: bufferHours ? `${Math.abs(bufferHours)} hours` : null,
+            metadata: {
+              blockedTasks: 0,
+              affectedUsers: 1
+            },
+            link: `/approvals/${approval.id}`
+          })
+        }
+      } catch (approvalError) {
+        console.warn('[dashboard] Approvals fetch failed:', approvalError.message)
       }
     }
 
     // 2. Fetch User's Tasks
     const myTasks = await prisma.task.findMany({
       where: {
-        assigneeId: userId,
-        status: { in: ['TODO', 'IN_PROGRESS'] },
-        OR: [
-          { dueDate: { lt: new Date() } },
-          { dueDate: { lt: addDays(new Date(), 3) } }
-        ]
+        assignee: userId,
+        status: { in: ['green', 'amber'] }
       },
       include: {
         project: true
@@ -144,8 +111,8 @@ router.get('/action-items', authGuard, async (req, res) => {
         id: `task_${task.id}`,
         type: 'task',
         priority: isOverdue ? 'high' : 'medium',
-        title: task.title || task.name || 'Untitled Task',
-        description: task.description || 'Task needs to be completed',
+        title: task.name || 'Untitled Task',
+        description: task.name || 'Task needs to be completed',
         project: task.project ? {
           id: task.project.id,
           name: task.project.name,
@@ -161,7 +128,7 @@ router.get('/action-items', authGuard, async (req, res) => {
       const productionIssues = await prisma.productionEntry.findMany({
         where: {
           status: 'BLOCKED',
-          createdAt: { gte: addDays(new Date(), -7) } // Last 7 days
+          createdAt: { gte: addDays(new Date(), -7) }
         },
         include: {
           project: true
@@ -186,35 +153,31 @@ router.get('/action-items', authGuard, async (req, res) => {
       }
     }
 
-    // 4. QC Inspections (for QC inspectors)
+    // 4. QC Submissions (for QC inspectors)
     if (isQCInspector || isAdmin) {
-      const qcPending = await prisma.qcInspection.findMany({
+      const qcPending = await prisma.qCSubmission.findMany({
         where: {
-          status: 'PENDING',
-          dueDate: { lte: addDays(new Date(), 3) }
+          submittedAt: { gte: subDays(new Date(), 3) }
         },
         include: {
           project: true
         },
-        orderBy: { dueDate: 'asc' },
+        orderBy: { submittedAt: 'asc' },
         take: 10
       })
 
       for (const qc of qcPending) {
-        const isOverdue = qc.dueDate && isPast(qc.dueDate)
-
         actionItems.push({
           id: `qc_${qc.id}`,
           type: 'inspection',
-          priority: isOverdue ? 'critical' : 'high',
-          title: 'QC Inspection Pending',
-          description: `${qc.type || 'Quality'} inspection required${qc.project ? ` for ${qc.project.name}` : ''}`,
+          priority: qc.overallPass ? 'low' : 'high',
+          title: `QC Submission - ${qc.overallPass ? 'Passed' : 'Failed'}`,
+          description: `Quality inspection for batch ${qc.batchCode || 'N/A'}${qc.project ? ` from ${qc.project.name}` : ''}`,
           project: qc.project ? {
             id: qc.project.id,
             name: qc.project.name,
             code: qc.project.code
           } : null,
-          dueDate: qc.dueDate,
           link: `/qc/${qc.id}`
         })
       }
@@ -223,7 +186,7 @@ router.get('/action-items', authGuard, async (req, res) => {
     // 5. Material Shortages
     const materialShortages = await prisma.material.findMany({
       where: {
-        currentStock: { lte: prisma.material.fields.minStock }
+        stockQty: { lte: prisma.material.fields.minStock || 0 }
       },
       take: 5
     })
@@ -236,7 +199,7 @@ router.get('/action-items', authGuard, async (req, res) => {
         title: 'Material Shortage',
         description: `${material.name} stock below minimum level`,
         metadata: {
-          currentStock: material.currentStock,
+          currentStock: material.stockQty,
           minStock: material.minStock
         },
         link: `/planning/materials/${material.id}`
@@ -309,6 +272,7 @@ router.get('/action-items', authGuard, async (req, res) => {
 /**
  * GET /api/dashboard/overview
  * Comprehensive dashboard analytics for home page
+ * REFACTORED: Uses MetricsService for performance
  */
 router.get('/overview', authGuard, async (req, res) => {
   try {
@@ -316,46 +280,10 @@ router.get('/overview', authGuard, async (req, res) => {
     const daysNum = parseInt(days);
     const startDate = subDays(new Date(), daysNum);
 
-    // Production Analytics: primary=ProductionEntry (seeded data), fallback=ShiftEntry (legacy)
-    const [productionStats, productionTrend, shiftStats] = await Promise.all([
-      prisma.productionEntry.aggregate({
-        where: { startTime: { gte: startDate } },
-        _sum: { actualQty: true, rejectedQty: true, targetQty: true },
-        _count: true,
-      }).catch(() => ({
-        _sum: { actualQty: 0, rejectedQty: 0, targetQty: 0 },
-        _count: 0,
-      })),
-      prisma.productionEntry.groupBy({
-        by: ['startTime'],
-        where: { startTime: { gte: startDate } },
-        _sum: { actualQty: true, rejectedQty: true },
-        orderBy: { startTime: 'asc' },
-      }).catch(() => []),
-      prisma.shiftEntry.aggregate({
-        where: { shiftDate: { gte: startDate } },
-        _sum: { totalProduced: true, qualityPassed: true, qualityRejected: true },
-        _count: true,
-      }).catch(() => ({
-        _sum: { totalProduced: 0, qualityPassed: 0, qualityRejected: 0 },
-        _count: 0,
-      })),
-    ]);
+    // 1. Production Analytics (Via Service)
+    const productionData = await MetricsService.getProductionOverview(startDate);
 
-    // Prefer ProductionEntry if available; fallback to ShiftEntry
-    const hasProductionData = (productionStats._sum?.actualQty || 0) > 0;
-    const totalProduced = hasProductionData 
-      ? (productionStats._sum?.actualQty || 0)
-      : (shiftStats._sum?.totalProduced || 0);
-    const totalApproved = hasProductionData
-      ? Math.max(0, (productionStats._sum?.actualQty || 0) - (productionStats._sum?.rejectedQty || 0))
-      : (shiftStats._sum?.qualityPassed || 0);
-    const totalRejected = hasProductionData
-      ? (productionStats._sum?.rejectedQty || 0)
-      : (shiftStats._sum?.qualityRejected || 0);
-    const entryCount = hasProductionData ? productionStats._count : shiftStats._count;
-
-    // Quality Analytics (QCSubmission)
+    // 2. Quality Analytics (QCSubmission)
     // QCSubmission only has overallPass boolean, compute pass/fail via groupBy
     let qcStats = { _count: 0, _sum: { sampleSize: 0, passedQty: 0, failedQty: 0 } };
     let qcByResult = [];
@@ -379,7 +307,7 @@ router.get('/overview', authGuard, async (req, res) => {
     const totalPassed = (qcStats._sum.passedQty || 0);
     const passRate = totalChecked > 0 ? (totalPassed / totalChecked) * 100 : 0;
 
-    // Workforce Analytics
+    // 3. Workforce Analytics
     const [shiftStatsGrouped, topPerformers] = await Promise.all([
       prisma.shiftEntry.groupBy({
         by: ['shiftType'],
@@ -421,39 +349,13 @@ router.get('/overview', authGuard, async (req, res) => {
       };
     });
 
-    // Project Analytics
-    const projectStats = await prisma.project.aggregate({
-      _count: true,
-    });
+    // 4. Project Analytics & Health (Via Service - Bulk Optimized)
+    const projectStats = await prisma.project.aggregate({ _count: true });
 
-    // Note: Removed projectsByStatus groupBy as Project model doesn't have a 'status' field
-    // Health-based status breakdown is provided below instead
+    // Bulk fetch health for all projects
+    const healthSummary = await MetricsService.getBulkProjectHealth();
 
-    // Project health overview (cached): compute status counts for dashboard
-    let onTrackCount = 0;
-    let needAttentionCount = 0;
-    let projectsByHealth = [];
-    try {
-      const projectList = await prisma.project.findMany({ select: { id: true } });
-      console.log(`[dashboard] Computing health for ${projectList.length} projects`);
-      const healthResults = await Promise.all(
-        projectList.map(p => getCachedOrCalculateHealth(p.id))
-      );
-      const healthStatusCounts = healthResults.reduce((acc, h) => {
-        if (!h) return acc;
-        const s = h.status || 'healthy';
-        acc[s] = (acc[s] || 0) + 1;
-        return acc;
-      }, {});
-      projectsByHealth = Object.keys(healthStatusCounts).map(k => ({ status: k, count: healthStatusCounts[k] }));
-      onTrackCount = healthStatusCounts.healthy || 0;
-      needAttentionCount = (healthStatusCounts['at-risk'] || 0) + (healthStatusCounts.critical || 0);
-      console.log(`[dashboard] Health aggregation complete: onTrack=${onTrackCount}, needAttention=${needAttentionCount}`, healthStatusCounts);
-    } catch (e) {
-      console.warn('[dashboard] project health aggregation failed:', e?.message);
-    }
-
-    // Active workers today
+    // 5. Active workers today
     const today = startOfDay(new Date());
     const activeWorkersToday = await prisma.shiftEntry.aggregate({
       where: {
@@ -468,19 +370,7 @@ router.get('/overview', authGuard, async (req, res) => {
         startDate: startDate.toISOString(),
         endDate: new Date().toISOString(),
       },
-      production: {
-        totalOutput: totalProduced,
-        approved: totalApproved,
-        rejected: totalRejected,
-        entries: entryCount,
-        trend: (productionTrend && productionTrend.length > 0)
-          ? productionTrend.map(t => ({
-            date: t.startTime,
-            output: t._sum?.actualQty || 0,
-            approved: Math.max(0, (t._sum?.actualQty || 0) - (t._sum?.rejectedQty || 0)),
-          }))
-          : [],
-      },
+      production: productionData, // Used from Service
       quality: {
         totalSubmissions: qcStats._count,
         totalChecked,
@@ -504,10 +394,10 @@ router.get('/overview', authGuard, async (req, res) => {
       },
       projects: {
         total: projectStats._count,
-        byHealth: projectsByHealth,
+        byHealth: healthSummary.projectsByHealth,
       },
-      onTrackCount,
-      needAttentionCount,
+      onTrackCount: healthSummary.onTrackCount,
+      needAttentionCount: healthSummary.needAttentionCount,
     });
 
   } catch (error) {

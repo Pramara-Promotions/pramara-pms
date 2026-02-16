@@ -1,0 +1,33 @@
+≡ƒî▒ Seeding dashboard data...
+PrismaClientValidationError: 
+Invalid `prisma.productionEntry.create()` invocation in
+D:\Pramara PMS\prisma\seed_dashboard.js:22:34
+
+  19 
+  20 // 2. Create Production Entries (last 30 days)
+  21 // Day 1: 100 produced, 5 rejected
+ΓåÆ 22 await prisma.productionEntry.create({
+       data: {
+         id: "b3f867ac-57c4-4d7d-8dd3-18c02d5e32f3",
+         projectId: 173,
+         startTime: new Date("2026-02-14T17:54:09.303Z"),
+         endTime: new Date("2026-02-14T17:54:09.303Z"),
+         actualQty: 100,
+         rejectedQty: 5,
+         targetQty: 120,
+         status: "COMPLETED",
+         operatorId: null,
+     +   materialUsed: JsonNullValueInput | Json
+       }
+     })
+
+Argument `materialUsed` is missing.
+    at Ua (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:80:1375)
+    at Vg.handleRequestError (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:182:6960)
+    at Vg.handleAndLogRequestError (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:182:6624)
+    at Vg.request (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:182:6308)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async a (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:191:9642)
+    at async main (D:\Pramara PMS\prisma\seed_dashboard.js:22:5) {
+  clientVersion: '5.22.0'
+}

@@ -1,0 +1,86 @@
+≡ƒî▒ Seeding dashboard data...
+PrismaClientValidationError: 
+Invalid `prisma.project.create()` invocation in
+D:\Pramara PMS\prisma\seed_dashboard.js:9:42
+
+  6 console.log('≡ƒî▒ Seeding dashboard data...');
+  7 
+  8 // 1. Create a Project
+ΓåÆ 9 const project = await prisma.project.create({
+      data: {
+        code: "DASH-001",
+        name: "Dashboard Test Project",
+        sku: "TEST-SKU-001",
+        quantity: 10000,
+        startDate: new Date("2026-01-17T17:49:05.074Z"),
+        ~~~~~~~~~
+        cutoffDate: new Date("2026-03-18T17:49:05.077Z"),
+        status: "IN_PROGRESS",
+    ?   pantoneCode?: String | Null,
+    ?   createdAt?: DateTime,
+    ?   alerts?: AlertCreateNestedManyWithoutProjectInput,
+    ?   alertRules?: AlertRuleCreateNestedManyWithoutProjectInput,
+    ?   ApprovalRequest?: ApprovalRequestCreateNestedManyWithoutProjectInput,
+    ?   Batch?: BatchCreateNestedManyWithoutProjectInput,
+    ?   BoardColumn?: BoardColumnCreateNestedManyWithoutProjectInput,
+    ?   changes?: ChangeLogCreateNestedManyWithoutProjectInput,
+    ?   changeoversFrom?: ChangeoverHistoryCreateNestedManyWithoutFromProjectInput,
+    ?   changeoversTo?: ChangeoverHistoryCreateNestedManyWithoutToProjectInput,
+    ?   complianceItems?: ComplianceItemCreateNestedManyWithoutProjectInput,
+    ?   complianceReminders?: ComplianceReminderCreateNestedManyWithoutProjectInput,
+    ?   DailyPlan?: DailyPlanCreateNestedManyWithoutProjectInput,
+    ?   dailyPlanGenerations?: DailyPlanGenerationCreateNestedManyWithoutProjectInput,
+    ?   DailyPlanStation?: DailyPlanStationCreateNestedManyWithoutProjectInput,
+    ?   dailyPlanStationsAuto?: DailyPlanStationAutoCreateNestedManyWithoutProjectInput,
+    ?   inventoryNeeds?: InventoryNeedCreateNestedManyWithoutProjectInput,
+    ?   labTests?: LabTestCreateNestedManyWithoutProjectInput,
+    ?   Lots?: LotCreateNestedManyWithoutProjectInput,
+    ?   mrpLearning?: MRPLearningCreateNestedManyWithoutProjectInput,
+    ?   mrpRecommendations?: MRPRecommendationCreateNestedManyWithoutProjectInput,
+    ?   materialCompliance?: MaterialComplianceCreateNestedManyWithoutProjectInput,
+    ?   MaterialConsumption?: MaterialConsumptionCreateNestedManyWithoutProjectInput,
+    ?   materialRequirements?: MaterialRequirementCreateNestedManyWithoutProjectInput,
+    ?   molds?: MoldCreateNestedManyWithoutProjectInput,
+    ?   ppsApprovals?: PPSApprovalCreateNestedManyWithoutProjectInput,
+    ?   packagingDesigns?: PackagingDesignCreateNestedManyWithoutProjectInput,
+    ?   planAdaptations?: PlanAdaptationCreateNestedManyWithoutProjectInput,
+    ?   preProdSteps?: PreProdStepCreateNestedManyWithoutProjectInput,
+    ?   ProcessConfig?: ProcessConfigCreateNestedManyWithoutProjectInput,
+    ?   processFlows?: ProcessFlowCreateNestedManyWithoutProjectInput,
+    ?   components?: ProductComponentCreateNestedManyWithoutProjectInput,
+    ?   ProductionCalculation?: ProductionCalculationCreateNestedManyWithoutProjectInput,
+    ?   ProductionEntry?: ProductionEntryCreateNestedManyWithoutProjectInput,
+    ?   projectCompliance?: ProjectComplianceCreateNestedManyWithoutProjectInput,
+    ?   costings?: ProjectCostingCreateNestedManyWithoutProjectInput,
+    ?   documents?: ProjectDocumentCreateNestedManyWithoutProjectInput,
+    ?   policies?: ProjectPolicyCreateNestedManyWithoutProjectInput,
+    ?   pref?: ProjectPrefCreateNestedOneWithoutProjectInput,
+    ?   skus?: ProjectSkuCreateNestedManyWithoutProjectInput,
+    ?   workflowStatus?: ProjectWorkflowStatusCreateNestedOneWithoutProjectInput,
+    ?   purchaseOrders?: PurchaseOrderCreateNestedManyWithoutProjectInput,
+    ?   QCChecklistTemplate?: QCChecklistTemplateCreateNestedManyWithoutProjectInput,
+    ?   qcRecords?: QCRecordCreateNestedManyWithoutProjectInput,
+    ?   QCSubmission?: QCSubmissionCreateNestedManyWithoutProjectInput,
+    ?   resourceAllocations?: ResourceAllocationCreateNestedManyWithoutProjectInput,
+    ?   shiftEntries?: ShiftEntryCreateNestedManyWithoutProjectInput,
+    ?   ShiftHandover?: ShiftHandoverCreateNestedManyWithoutProjectInput,
+    ?   stations?: StationCreateNestedManyWithoutProjectInput,
+    ?   Task?: TaskCreateNestedManyWithoutProjectInput,
+    ?   trials?: TrialCreateNestedManyWithoutProjectInput,
+    ?   variances?: VarianceItemCreateNestedManyWithoutProjectInput,
+    ?   wipLedgers?: WIPLedgerCreateNestedManyWithoutProjectInput,
+    ?   WorkerPerformance?: WorkerPerformanceCreateNestedManyWithoutProjectInput,
+    ?   WorkflowStage?: WorkflowStageCreateNestedManyWithoutProjectInput
+      }
+    })
+
+Unknown argument `startDate`. Available options are marked with ?.
+    at Ua (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:80:1375)
+    at Vg.handleRequestError (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:182:6960)
+    at Vg.handleAndLogRequestError (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:182:6624)
+    at Vg.request (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:182:6308)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async a (D:\Pramara PMS\node_modules\@prisma\client\runtime\binary.js:191:9642)
+    at async main (D:\Pramara PMS\prisma\seed_dashboard.js:9:21) {
+  clientVersion: '5.22.0'
+}

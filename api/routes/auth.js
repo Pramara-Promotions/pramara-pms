@@ -8,7 +8,7 @@ let prisma = null;
 try {
   const { PrismaClient } = require('@prisma/client');
   prisma = new PrismaClient();
-} catch (_) {}
+} catch (_) { }
 
 const router = express.Router();
 
@@ -50,10 +50,10 @@ router.post('/login', async (req, res, next) => {
 
     const user = await prisma.user.findUnique({
       where: { email: String(email).toLowerCase() },
-      select: { 
-        id: true, 
-        email: true, 
-        passwordHash: true, 
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
         isActive: true,
         mustChangePassword: true,
         mfaSecret: true  // Check if MFA is enabled
@@ -79,7 +79,7 @@ router.post('/login', async (req, res, next) => {
 
       console.log(`[AUTH] MFA required for ${user.email}, temp token issued`);
 
-      return res.json({ 
+      return res.json({
         requireMfa: true,
         tempToken,
         email: user.email
@@ -104,10 +104,9 @@ router.post('/login', async (req, res, next) => {
           userId: user.id,
           fingerprint,
           name: `${browser} on ${os}`,
-          browser,
-          os,
-          deviceType,
-          ipAddress,
+          // browser, os, deviceType are not in schema
+          ip: ipAddress,
+          userAgent,
           trusted: false, // Default to untrusted
           lastUsedAt: new Date()
         }
@@ -118,7 +117,7 @@ router.post('/login', async (req, res, next) => {
       await prisma.device.update({
         where: { id: device.id },
         data: {
-          ipAddress, // Update IP in case it changed
+          ip: ipAddress, // Update IP in case it changed
           lastUsedAt: new Date()
         }
       });
@@ -141,7 +140,7 @@ router.post('/login', async (req, res, next) => {
     // Log successful login with device info
     console.log(`[AUTH] Login successful: ${user.email} from ${device.name} (${ipAddress})`);
 
-    return res.json({ 
+    return res.json({
       ok: true,
       mustChangePassword: user.mustChangePassword || false
     });
@@ -340,7 +339,7 @@ router.post('/mfa/setup', async (req, res) => {
 
     // Generate MFA secret (would use speakeasy or similar in production)
     const secret = require('crypto').randomBytes(20).toString('hex');
-    
+
     // Generate QR code (would use qrcode library in production)
     // For now, return a simple data URI
     const qrCode = `<div style="width:200px;height:200px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;border:1px solid #ccc;">QR Code for ${user.email}</div>`;
@@ -533,11 +532,11 @@ router.post('/mfa/verify-login', async (req, res) => {
     // Get user with MFA secret
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { 
-        id: true, 
-        email: true, 
+      select: {
+        id: true,
+        email: true,
         mfaSecret: true,
-        mustChangePassword: true 
+        mustChangePassword: true
       },
     });
 
@@ -587,7 +586,7 @@ router.post('/mfa/verify-login', async (req, res) => {
 
     console.log(`[AUTH] MFA verification successful for ${user.email}`);
 
-    res.json({ 
+    res.json({
       ok: true,
       mustChangePassword: user.mustChangePassword || false
     });
@@ -623,11 +622,11 @@ router.post('/mfa/resend-code', async (req, res) => {
     // Get user
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { 
-        id: true, 
-        email: true, 
+      select: {
+        id: true,
+        email: true,
         name: true,
-        mfaSecret: true 
+        mfaSecret: true
       },
     });
 
@@ -706,8 +705,8 @@ router.post('/trust-device', async (req, res) => {
 
     console.log(`[AUTH] Device ${device.id} trusted for ${duration} days`);
 
-    res.json({ 
-      ok: true, 
+    res.json({
+      ok: true,
       trustedUntil: trustedUntil.toISOString(),
       message: `Device trusted for ${duration} days`
     });
@@ -742,7 +741,7 @@ router.get('/sessions', async (req, res) => {
 
     const formattedSessions = sessions.map(session => {
       const { browser, os, device: deviceType } = parseUserAgent(session.userAgent || '');
-      
+
       return {
         id: session.id,
         deviceName: `${browser} on ${os}`,
@@ -810,9 +809,9 @@ router.delete('/sessions/:sessionId', async (req, res) => {
 
     console.log(`[AUTH] Session ${sessionId} revoked for user ${userId}`);
 
-    res.json({ 
-      ok: true, 
-      message: 'Session revoked successfully' 
+    res.json({
+      ok: true,
+      message: 'Session revoked successfully'
     });
   } catch (error) {
     console.error('DELETE /api/auth/sessions/:sessionId error:', error);

@@ -58,6 +58,7 @@ const meRouter = require('./routes/me');
 const preProductionRouter = require('./routes/pre-production');
 const complianceRouter = require('./routes/compliance');
 const projectPoliciesRouter = require('./routes/project-policies');
+const dashboardRouter = require('./routes/dashboard');
 const processFlowsRouter = require('./routes/process-flows');
 const processTemplatesRouter = require('./routes/process-templates');
 const shiftEntriesRouter = require('./routes/shift-entries');
@@ -80,7 +81,7 @@ const dailyPlanningRouter = require('./routes/daily-planning');
 const approvalRequestsRouter = require('./routes/approval-requests');
 const mrpRouter = require('./routes/mrp');
 const materialsRouter = require('./routes/materials');
-const dashboardRouter = require('./routes/dashboard');
+
 const userRouter = require('./routes/user');
 const capacityRouter = require('./routes/capacity');
 const workflowsRouter = require('./routes/workflows');
@@ -151,7 +152,7 @@ app.use((req, res, next) => {
       if (!actorId) return; // Skip audit if no authenticated user
 
       // Verify user exists to prevent foreign key constraint error
-      const userExists = await prisma.user.findUnique({ 
+      const userExists = await prisma.user.findUnique({
         where: { id: actorId },
         select: { id: true }
       });
@@ -354,10 +355,10 @@ app.get('/api/projects/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { includeHealth } = req.query;
-    
+
     const project = await prisma.project.findUnique({ where: { id } });
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    
+
     // Optionally calculate and attach health
     if (includeHealth === 'true') {
       try {
@@ -377,7 +378,7 @@ app.get('/api/projects/:id', async (req, res) => {
         console.error(`Failed to calculate health for project ${project.id}:`, error);
       }
     }
-    
+
     res.json(project);
   } catch (e) {
     console.error('projects:get', e);
@@ -1714,6 +1715,8 @@ app.post('/api/projects/:id/plan/simulate', async (req, res) => {
     res.status(500).json({ error: 'Plan simulate failed' });
   }
 });
+
+app.use('/api/dashboard', dashboardRouter);
 
 // ====================================================================
 // [LANDMARK 13] GLOBAL ERROR HANDLER & SERVER START

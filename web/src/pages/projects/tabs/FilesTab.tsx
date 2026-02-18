@@ -310,52 +310,33 @@ export default function FilesTab() {
       setUploadError(null);
 
       const file = selectedFile || fileRef.current?.files?.[0] || null;
-      let payload: any = {
-        kind: formData.kind,
-        title: formData.title,
-        referenceUrl: formData.referenceUrl ? formData.referenceUrl : null,
-        version: parseInt(formData.version) || 1,
-      };
-      let newDocId = null;
+      const formDataObj = new FormData();
+      
+      formDataObj.append("kind", formData.kind);
+      formDataObj.append("title", formData.title);
+      if (formData.referenceUrl) {
+        formDataObj.append("referenceUrl", formData.referenceUrl);
+      }
+      formDataObj.append("version", String(parseInt(formData.version) || 1));
+      
+      // Append file if present
       if (file) {
-        // User is uploading a file to storage
-        const pre = await fetch(`/api/projects/${projectId}/documents/presign`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ filename: file.name, contentType: file.type, sizeBytes: file.size }),
-        });
-        if (!pre.ok) {
-          const t = await pre.text();
-          throw new Error(t || "Failed to prepare upload");
-        }
-        const preJson = await pre.json();
-        const put = await fetch(preJson.putUrl, {
-          method: "PUT",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file,
-        });
-        if (!put.ok) throw new Error("Upload failed");
-
-        // Store only the object key; the UI will fetch a fresh signed GET URL when needed
-        payload.key = preJson.key;
-        payload.storageKey = preJson.key;
-        payload.contentType = file.type || null;
-        // do not persist ephemeral presigned URL; rely on key and view endpoint
+        formDataObj.append("file", file);
       }
 
+      // Upload through backend API (avoids SSL issues with direct S3 PUT)
       const res = await fetch(`/api/projects/${projectId}/documents`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: formDataObj,
         credentials: "include",
       });
+      
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || "Create failed");
       }
+      
       const created = await res.json();
-      newDocId = created.id;
 
       // Reset form and close
       setFormData({ kind: "document", title: "", referenceUrl: "", version: "1" });

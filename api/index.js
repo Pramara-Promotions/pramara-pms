@@ -1418,11 +1418,11 @@ app.get('/api/projects/:id/documents', async (req, res) => {
   }
 });
 
-app.post('/api/projects/:id/documents', async (req, res) => {
+app.post('/api/projects/:id/documents', upload.single('file'), async (req, res) => {
   try {
     const projectId = Number(req.params.id);
     const {
-      kind, title, url, key, storageKey, contentType,
+      kind, title, referenceUrl, url, key, storageKey, contentType,
       version, active, tags, notes, uploadedBy,
       approvedBy, approverRole, approvedAt, approvalProof,
       verifiedBy, verifierRole, verifiedAt, verificationProof,
@@ -1443,15 +1443,51 @@ app.post('/api/projects/:id/documents', async (req, res) => {
       });
     }
 
+    // Handle file upload to S3 if file exists
+    let finalKey = key || storageKey || null;
+    let finalContentType = contentType || null;
+    
+    if (req.file) {
+      try {
+        // Upload file through backend to avoid SSL issues
+        const { PutObjectCommand } = require('@aws-sdk/client-s3');
+        const { s3 } = require('./lib/storage');
+        const crypto = require('crypto');
+        
+        const BUCKET = process.env.S3_BUCKET || process.env.MINIO_BUCKET;
+        const now = new Date();
+        const yyyy = String(now.getUTCFullYear());
+        const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+        const safe = req.file.originalname.replace(/[^\w.\- ]+/g, "_").slice(0, 160);
+        const rand = crypto.randomUUID();
+        finalKey = `projects/${projectId}/${yyyy}/${mm}/${rand}-${safe}`;
+        finalContentType = req.file.mimetype || 'application/octet-stream';
+
+        const cmd = new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: finalKey,
+          Body: req.file.buffer,
+          ContentType: finalContentType,
+        });
+
+        await s3.send(cmd);
+        console.log(`[doc:upload] File uploaded to S3: ${finalKey}`);
+      } catch (uploadErr) {
+        console.error('[doc:upload] S3 upload failed:', uploadErr);
+        return res.status(500).json({ error: 'File upload to storage failed: ' + uploadErr.message });
+      }
+    }
+
     const item = await prisma.projectDocument.create({
       data: {
         projectId,
         kind: String(kind),
         title: String(title),
+        referenceUrl: referenceUrl || null,
         url: url || null,
-        key: key || null,
-        storageKey: storageKey || null,
-        contentType: contentType || null,
+        key: finalKey,
+        storageKey: finalKey,
+        contentType: finalContentType,
         version: nextVersion,
         active: Boolean(active) || false,
         tags: Array.isArray(tags) ? tags : null,
@@ -1477,7 +1513,7 @@ app.post('/api/projects/:id/documents', async (req, res) => {
     res.json(item);
   } catch (e) {
     console.error('doc:create', e);
-    res.status(500).json({ error: 'Failed to create document' });
+    res.status(500).json({ error: 'Failed to create document: ' + e.message });
   }
 });
 

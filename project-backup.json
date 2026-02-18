@@ -1,0 +1,41 @@
+{
+  "exportedAt": "2026-02-18T11:24:08.637Z",
+  "count": 7,
+  "projects": [
+    {
+      "id": 170,
+      "code": "DASH-001",
+      "name": "Dashboard Test Project"
+    },
+    {
+      "id": 171,
+      "code": "DASH-001",
+      "name": "Dashboard Test Project"
+    },
+    {
+      "id": 172,
+      "code": "DASH-001",
+      "name": "Dashboard Test Project"
+    },
+    {
+      "id": 173,
+      "code": "DASH-002",
+      "name": "Dashboard Test Project 2"
+    },
+    {
+      "id": 174,
+      "code": "DASH-003",
+      "name": "Dashboard Test Project 3"
+    },
+    {
+      "id": 175,
+      "code": "DASH-003",
+      "name": "Dashboard Test Project 3"
+    },
+    {
+      "id": 176,
+      "code": "DASH-004",
+      "name": "Dashboard Test Project 4"
+    }
+  ]
+}

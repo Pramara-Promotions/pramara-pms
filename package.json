@@ -39,7 +39,8 @@
     "test:report": "npx playwright show-report",
     "test:debug": "npx playwright test --debug",
     "db:reset-seed": "node scripts/reset-and-seed-e2e.js",
-    "cron:templates": "node scripts/template-learning-cron.js"
+    "cron:templates": "node scripts/template-learning-cron.js",
+    "one:pull": "node scripts/one-click-sync.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

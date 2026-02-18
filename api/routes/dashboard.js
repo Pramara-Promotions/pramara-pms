@@ -54,7 +54,7 @@ router.get('/action-items', authGuard, async (req, res) => {
             status: 'pending',
           },
           include: {
-            project: true
+            Project: true
           },
           orderBy: { expectedDate: 'asc' },
           take: 10
@@ -71,11 +71,11 @@ router.get('/action-items', authGuard, async (req, res) => {
             type: 'approval',
             priority: isOverdue ? 'critical' : (bufferHours && bufferHours < 24 ? 'high' : 'medium'),
             title: `${approval.approvalType} Approval Pending`,
-            description: `${approval.description || 'Item'} requires approval${approval.project ? ` for ${approval.project.name}` : ''}`,
-            project: approval.project ? {
-              id: approval.project.id,
-              name: approval.project.name,
-              code: approval.project.code
+            description: `${approval.description || 'Item'} requires approval${approval.Project ? ` for ${approval.Project.name}` : ''}`,
+            project: approval.Project ? {
+              id: approval.Project.id,
+              name: approval.Project.name,
+              code: approval.Project.code
             } : null,
             dueDate: approval.cutoffDate,
             bufferRemaining: bufferHours ? `${Math.abs(bufferHours)} hours` : null,
@@ -92,17 +92,23 @@ router.get('/action-items', authGuard, async (req, res) => {
     }
 
     // 2. Fetch User's Tasks
-    const myTasks = await prisma.task.findMany({
-      where: {
-        assignee: userId,
-        status: { in: ['green', 'amber'] }
-      },
-      include: {
-        project: true
-      },
-      orderBy: { dueDate: 'asc' },
-      take: 10
-    })
+    let myTasks = []
+    try {
+      myTasks = await prisma.task.findMany({
+        where: {
+          assignee: userId,
+          status: { in: ['green', 'amber'] }
+        },
+        include: {
+          Project: true
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 10
+      })
+    } catch (taskError) {
+      console.warn('[dashboard] Tasks fetch failed:', taskError.message)
+      myTasks = []
+    }
 
     for (const task of myTasks) {
       const isOverdue = task.dueDate && isPast(task.dueDate)
@@ -113,10 +119,10 @@ router.get('/action-items', authGuard, async (req, res) => {
         priority: isOverdue ? 'high' : 'medium',
         title: task.name || 'Untitled Task',
         description: task.name || 'Task needs to be completed',
-        project: task.project ? {
-          id: task.project.id,
-          name: task.project.name,
-          code: task.project.code
+        project: task.Project ? {
+          id: task.Project.id,
+          name: task.Project.name,
+          code: task.Project.code
         } : null,
         dueDate: task.dueDate,
         link: `/tasks/${task.id}`
@@ -125,71 +131,83 @@ router.get('/action-items', authGuard, async (req, res) => {
 
     // 3. Production Issues (for production workers)
     if (isProductionWorker || isAdmin) {
-      const productionIssues = await prisma.productionEntry.findMany({
-        where: {
-          status: 'BLOCKED',
-          createdAt: { gte: addDays(new Date(), -7) }
-        },
-        include: {
-          project: true
-        },
-        take: 5
-      })
-
-      for (const issue of productionIssues) {
-        actionItems.push({
-          id: `production_${issue.id}`,
-          type: 'blocked',
-          priority: 'high',
-          title: 'Production Blocked',
-          description: `Production entry blocked${issue.project ? ` for ${issue.project.name}` : ''}`,
-          project: issue.project ? {
-            id: issue.project.id,
-            name: issue.project.name,
-            code: issue.project.code
-          } : null,
-          link: `/execution/production/${issue.id}`
+      try {
+        const productionIssues = await prisma.productionEntry.findMany({
+          where: {
+            createdAt: { gte: addDays(new Date(), -7) }
+          },
+          include: {
+            Project: true
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 5
         })
+
+        for (const issue of productionIssues) {
+          actionItems.push({
+            id: `production_${issue.id}`,
+            type: 'blocked',
+            priority: 'high',
+            title: 'Recent Production Entry',
+            description: `Production entry${issue.Project ? ` for ${issue.Project.name}` : ''}`,
+            project: issue.Project ? {
+              id: issue.Project.id,
+              name: issue.Project.name,
+              code: issue.Project.code
+            } : null,
+            link: `/execution/production/${issue.id}`
+          })
+        }
+      } catch (productionError) {
+        console.warn('[dashboard] Production issues fetch failed:', productionError.message)
       }
     }
 
     // 4. QC Submissions (for QC inspectors)
     if (isQCInspector || isAdmin) {
-      const qcPending = await prisma.qCSubmission.findMany({
-        where: {
-          submittedAt: { gte: subDays(new Date(), 3) }
-        },
-        include: {
-          project: true
-        },
-        orderBy: { submittedAt: 'asc' },
-        take: 10
-      })
-
-      for (const qc of qcPending) {
-        actionItems.push({
-          id: `qc_${qc.id}`,
-          type: 'inspection',
-          priority: qc.overallPass ? 'low' : 'high',
-          title: `QC Submission - ${qc.overallPass ? 'Passed' : 'Failed'}`,
-          description: `Quality inspection for batch ${qc.batchCode || 'N/A'}${qc.project ? ` from ${qc.project.name}` : ''}`,
-          project: qc.project ? {
-            id: qc.project.id,
-            name: qc.project.name,
-            code: qc.project.code
-          } : null,
-          link: `/qc/${qc.id}`
+      try {
+        const qcPending = await prisma.qCSubmission.findMany({
+          where: {
+            submittedAt: { gte: subDays(new Date(), 3) }
+          },
+          include: {
+            Project: true
+          },
+          orderBy: { submittedAt: 'asc' },
+          take: 10
         })
+
+        for (const qc of qcPending) {
+          actionItems.push({
+            id: `qc_${qc.id}`,
+            type: 'inspection',
+            priority: qc.overallPass ? 'low' : 'high',
+            title: `QC Submission - ${qc.overallPass ? 'Passed' : 'Failed'}`,
+            description: `Quality inspection for batch ${qc.batchCode || 'N/A'}${qc.Project ? ` from ${qc.Project.name}` : ''}`,
+            project: qc.Project ? {
+              id: qc.Project.id,
+              name: qc.Project.name,
+              code: qc.Project.code
+            } : null,
+            link: `/qc/${qc.id}`
+          })
+        }
+      } catch (qcError) {
+        console.warn('[dashboard] QC submissions fetch failed:', qcError.message)
       }
     }
 
     // 5. Material Shortages
-    const materialShortages = await prisma.material.findMany({
-      where: {
-        stockQty: { lte: prisma.material.fields.minStock || 0 }
-      },
-      take: 5
-    })
+    // Prisma cannot reference another model field in the where clause (prisma.material.fields is invalid).
+    // Safely fetch materials and filter in JS to avoid runtime errors that return 500.
+    let materialShortages = []
+    try {
+      const materials = await prisma.material.findMany({ take: 100 })
+      materialShortages = materials.filter(m => (m.stockQty || 0) <= (m.minStock || 0)).slice(0, 5)
+    } catch (e) {
+      console.warn('[dashboard] Material shortages fetch failed:', e?.message)
+      materialShortages = []
+    }
 
     for (const material of materialShortages) {
       actionItems.push({
@@ -207,33 +225,38 @@ router.get('/action-items', authGuard, async (req, res) => {
     }
 
     // 6. Compliance Issues
-    const complianceDue = await prisma.projectCompliance.findMany({
-      where: {
-        status: { in: ['PENDING', 'IN_PROGRESS'] },
-        deadline: { lte: addDays(new Date(), 7) }
-      },
-      include: {
-        project: true
-      },
-      orderBy: { deadline: 'asc' },
-      take: 5
-    })
+    let complianceDue = []
+    try {
+      complianceDue = await prisma.projectCompliance.findMany({
+        where: {
+          status: { in: ['PENDING', 'IN_PROGRESS'] }
+        },
+        include: {
+          project: true
+        },
+        orderBy: { requiredBy: 'asc' },
+        take: 5
+      })
+    } catch (complianceError) {
+      console.warn('[dashboard] Compliance fetch failed:', complianceError.message)
+      complianceDue = []
+    }
 
     for (const compliance of complianceDue) {
-      const isOverdue = compliance.deadline && isPast(compliance.deadline)
+      const isOverdue = compliance.requiredBy && isPast(compliance.requiredBy)
 
       actionItems.push({
         id: `compliance_${compliance.id}`,
         type: 'compliance',
         priority: isOverdue ? 'critical' : 'medium',
         title: 'Compliance Deadline Approaching',
-        description: `${compliance.type || 'Compliance'} item due${compliance.project ? ` for ${compliance.project.name}` : ''}`,
+        description: `${compliance.complianceName || 'Compliance'} item due${compliance.project ? ` for ${compliance.project.name}` : ''}`,
         project: compliance.project ? {
           id: compliance.project.id,
           name: compliance.project.name,
           code: compliance.project.code
         } : null,
-        dueDate: compliance.deadline,
+        dueDate: compliance.requiredBy,
         link: `/compliance/projects/${compliance.projectId}`
       })
     }
